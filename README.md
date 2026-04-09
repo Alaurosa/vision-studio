@@ -1,4 +1,4 @@
-# Vision Studios
+# Vision Studio
 
 This repository contains a frontend-only skeleton for a future AI-powered room design app called Vision Studios.
 

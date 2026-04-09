@@ -70,3 +70,6 @@ Format files:
 ```bash
 npm run format
 ```
+
+Created By: William Liu, Ethan Cao, Sriya Katreddi, and Ashley Kim
+For CSE 115A Spring 2026 Capstone at UCSC

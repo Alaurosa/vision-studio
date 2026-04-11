@@ -1,7 +1,5 @@
 # Vision Studio
 
-This repository contains a frontend-only skeleton for a future AI-powered room design app called Vision Studios.
-
 ## What this project includes
 
 - **Next.js App Router** with TypeScript and Tailwind CSS

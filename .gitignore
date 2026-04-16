@@ -1,1 +1,46 @@
-node_modules
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+client/.env.local
+server/.env
+python/.env
+
+# Build outputs
+client/dist/
+server/dist/
+server/uploads/
+!server/uploads/.gitkeep
+.next/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Unity
+unity/Library/
+unity/Temp/
+unity/Logs/
+unity/Builds/
+
+
+# User specified ignores
+projectstuff/
+templatevstudio/

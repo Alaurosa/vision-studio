@@ -1,0 +1,89 @@
+graph TB
+    subgraph Client["Client — React + Vite :5173"]
+        direction TB
+        App["App.jsx<br/>BrowserRouter"]
+        App --> Landing["Landing Page"]
+        App --> Dashboard["Dashboard Page"]
+        App --> Editor["Editor Page"]
+
+        Editor --> Canvas["RoomCanvas<br/>(Konva 2D)"]
+        Editor --> Catalog["CatalogPanel<br/>IKEA / Ashley"]
+        Editor --> Chat["ChatPanel<br/>AI Assistant"]
+        Editor --> Upload["FloorPlanUpload /<br/>RoomPhotoUpload"]
+        Editor --> Viewer3D["RoomViewer3D<br/>(React Three Fiber)"]
+        Editor --> ZoneModal["ZoneConfirmModal<br/>Room Selection"]
+
+        Upload --> AnalysisWF["AnalysisWorkflow<br/>Animated Overlay"]
+
+        Canvas --> FurnitureItem["FurnitureItem<br/>Drag & Rotate"]
+        Canvas --> WallOutline["WallOutline"]
+        Canvas --> GridOverlay["GridOverlay"]
+        Canvas --> ZoneBar["ZoneSelectorBar"]
+
+        Store["Zustand Store<br/>layoutStore.js"]
+        API["api.js<br/>Axios + JWT"]
+        Auth["useAuth Hook<br/>Supabase Auth"]
+    end
+
+    subgraph Server["Server — Express :3001"]
+        direction TB
+        Index["index.js<br/>Express Entry"]
+        Index --> AuthRoute["/api/auth"]
+        Index --> RoomsRoute["/api/rooms"]
+        Index --> FurnRoute["/api/furniture"]
+        Index --> ChatRoute["/api/chat"]
+        Index --> LayoutRoute["/api/layout"]
+        Index --> ExportRoute["/api/export"]
+        Index --> RecogRoute["/api/recognition"]
+        Index --> ModelsRoute["/api/models"]
+
+        ChatRoute --> LLMRouter["llmRouter.js<br/>Codex 5.3 + Function Calling"]
+        ExportRoute --> ExportSvc["exportFormats.js<br/>JSON / SVG / DXF"]
+        ModelsRoute --> MeshySvc["Meshy API v2<br/>Image-to-3D GLB"]
+
+        AuthMW["auth.js Middleware<br/>JWT Verification"]
+        FallbackDB["fallbackStore.js<br/>In-Memory Store"]
+    end
+
+    subgraph Python["Python AI — FastAPI :5001"]
+        direction TB
+        FastAPI["app.py<br/>FastAPI Entry"]
+        FastAPI --> ParseFP["/parse-floorplan"]
+        FastAPI --> DetectObj["/detect-objects"]
+        FastAPI --> SegRoom["/segment-room"]
+        FastAPI --> EstScale["/estimate-scale"]
+
+        ParseFP --> OpenAIVision["Codex 5.3 Vision<br/>(Primary Analyzer)"]
+        ParseFP --> DINO_SAM["Grounding DINO +<br/>SAM 3 via Replicate"]
+        ParseFP --> OpenCV["OpenCV Fallback<br/>Distance Transform +<br/>Watershed"]
+
+        DetectObj --> DINO_SAM
+        SegRoom --> DINO_SAM
+    end
+
+    subgraph External["External Services"]
+        direction TB
+        Supabase["Supabase<br/>PostgreSQL + Auth +<br/>Storage"]
+        OpenAI["OpenAI API<br/>Codex 5.3"]
+        Replicate["Replicate API<br/>DINO + SAM"]
+        Meshy["Meshy AI<br/>3D Model Gen"]
+    end
+
+    Client -->|"REST API<br/>+ JWT"| Server
+    Server -->|"HTTP POST<br/>multipart"| Python
+    Server --> Supabase
+    Client -->|"Auth"| Supabase
+    Server --> OpenAI
+    Python --> OpenAI
+    Python --> Replicate
+    Server --> Meshy
+
+    classDef clientBox fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
+    classDef serverBox fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef pythonBox fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef extBox fill:#f3e8ff,stroke:#7c3aed,color:#3b0764
+
+    class Client clientBox
+    class Server serverBox
+    class Python pythonBox
+    class External extBox

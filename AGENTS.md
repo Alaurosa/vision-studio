@@ -49,6 +49,7 @@ cd server && node scripts/seedFurniture.js  # Seed IKEA + Ashley data
 
 ```
 vision-studio/
+├── README.md                     # Project overview + local setup guide
 ├── AGENTS.md                     # This file
 ├── CLAUDE.md                     # Master implementation guide
 ├── .gitignore

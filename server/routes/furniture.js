@@ -76,6 +76,8 @@ router.post('/placements', requireAuth, async (req, res) => {
     color,
     custom,
     zone_id,
+    image_url,
+    model_url,
   } = req.body;
 
   if (await useDb()) {
@@ -95,6 +97,7 @@ router.post('/placements', requireAuth, async (req, res) => {
       rotation: rotation || 0,
       color: color || '#d4a27a',
       custom: custom || false,
+      model_url: model_url || null,
     };
     if (zone_id) payload.zone_id = zone_id;
     let { data, error } = await supabaseAdmin.from('placements').insert(payload).select().single();
@@ -107,13 +110,13 @@ router.post('/placements', requireAuth, async (req, res) => {
     return res.json(data);
   }
   // Fallback
-  const placement = fallback.addPlacement({ room_id, catalog_id, name, category, provider, provider_id, width, depth, height, x_inches, y_inches, rotation, color, custom, zone_id });
+  const placement = fallback.addPlacement({ room_id, catalog_id, name, category, provider, provider_id, width, depth, height, x_inches, y_inches, rotation, color, custom, zone_id, image_url, model_url });
   res.json(placement);
 });
 
 // PUT /api/furniture/placements/:id
 router.put('/placements/:id', requireAuth, async (req, res) => {
-  const allowed = ['x_inches', 'y_inches', 'rotation', 'width', 'depth', 'height', 'color', 'name', 'zone_id'];
+  const allowed = ['x_inches', 'y_inches', 'rotation', 'width', 'depth', 'height', 'color', 'name', 'zone_id', 'model_url', 'image_url'];
   const updates = Object.fromEntries(Object.entries(req.body).filter(([k]) => allowed.includes(k)));
 
   if (await useDb()) {

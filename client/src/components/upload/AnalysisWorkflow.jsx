@@ -1,204 +1,150 @@
-import { useState, useEffect, useRef } from 'react';
-import api from '../../lib/api';
+import { useEffect, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
+import api from '@/lib/api';
 
 const STEPS = [
-  { id: 'upload', label: 'Uploading floor plan', icon: '📤', duration: 1500 },
-  { id: 'preprocess', label: 'Preprocessing image', icon: '🖼️', duration: 2000 },
-  { id: 'detect_walls', label: 'Detecting walls & boundaries', icon: '🧱', duration: 3000 },
-  { id: 'detect_rooms', label: 'Identifying room areas', icon: '🏠', duration: 2500 },
-  { id: 'measure', label: 'Estimating dimensions', icon: '📏', duration: 2000 },
-  { id: 'finalize', label: 'Finalizing layout', icon: '✅', duration: 1000 },
+  { key: 'upload',     label: 'Uploading image',        eyebrow: '01' },
+  { key: 'preprocess', label: 'Preprocessing pixels',   eyebrow: '02' },
+  { key: 'walls',      label: 'Detecting walls',        eyebrow: '03' },
+  { key: 'rooms',      label: 'Segmenting sub-rooms',   eyebrow: '04' },
+  { key: 'measure',    label: 'Estimating dimensions',  eyebrow: '05' },
+  { key: 'finalize',   label: 'Finalizing geometry',    eyebrow: '06' },
 ];
 
-export default function AnalysisWorkflow({ roomId, file, onComplete, onCancel }) {
-  const [currentStep, setCurrentStep] = useState(0);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState(null);
-  const [result, setResult] = useState(null);
-  const [done, setDone] = useState(false);
-  const uploadStarted = useRef(false);
-
-  // Run the actual upload in the background while showing animated steps
-  useEffect(() => {
-    if (uploadStarted.current) return;
-    uploadStarted.current = true;
-
-    const uploadFile = async () => {
-      const form = new FormData();
-      form.append('file', file);
-      try {
-        const { data } = await api.post(`/api/rooms/${roomId}/upload-floorplan`, form, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-          timeout: 120000,
-        });
-        setResult(data);
-      } catch (err) {
-        setError(err.response?.data?.error || err.message);
-      }
+function normalizeRoomsToZones(rooms, boundary) {
+  const originX = boundary?.x || 0;
+  const originY = boundary?.y || 0;
+  return rooms.map((room, index) => {
+    const polygon = (room.polygon || []).map(([x, y]) => [x - originX, y - originY]);
+    const bbox = room.bbox || [];
+    const nextBbox = bbox.length === 4
+      ? [bbox[0] - originX, bbox[1] - originY, bbox[2] - originX, bbox[3] - originY]
+      : bbox;
+    return {
+      id: room.id || `zone-${index}`,
+      name: room.label || `Room ${index + 1}`,
+      polygon,
+      bbox: nextBbox,
+      width: nextBbox.length === 4 ? nextBbox[2] - nextBbox[0] : room.width,
+      depth: nextBbox.length === 4 ? nextBbox[3] - nextBbox[1] : room.depth,
+      color: room.color || null,
+      confidence: room.confidence || null,
     };
-    uploadFile();
-  }, [roomId, file]);
+  });
+}
 
-  // Animate through steps with progress bar
+export default function AnalysisWorkflow({ file, roomName, onComplete, onError }) {
+  const [step, setStep] = useState(0);
+  const ranRef = useRef(false);
+
   useEffect(() => {
-    if (done || error) return;
+    if (ranRef.current) return;
+    ranRef.current = true;
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    const totalDuration = STEPS.reduce((sum, s) => sum + s.duration, 0);
-    let elapsed = 0;
-    for (let i = 0; i < currentStep; i++) elapsed += STEPS[i].duration;
+  const advance = async (to) => new Promise((r) => {
+    setStep(to);
+    setTimeout(r, 650);
+  });
 
-    const step = STEPS[currentStep];
-    if (!step) return;
+  const run = async () => {
+    try {
+      await advance(0);
+      // 1. Create room
+      const { data: room } = await api.post('/api/rooms', { name: roomName });
 
-    const startTime = Date.now();
-    const timer = setInterval(() => {
-      const dt = Date.now() - startTime;
-      const stepProgress = Math.min(dt / step.duration, 1);
-      const totalProgress = ((elapsed + dt) / totalDuration) * 100;
-      setProgress(Math.min(totalProgress, currentStep === STEPS.length - 1 ? 100 : 95));
+      await advance(1);
 
-      if (stepProgress >= 1) {
-        clearInterval(timer);
-        if (currentStep < STEPS.length - 1) {
-          setCurrentStep(prev => prev + 1);
-        } else {
-          // Last step done — wait for result or show done
-          setDone(true);
-        }
+      // 2. Upload floorplan → server runs parser
+      const fd = new FormData();
+      fd.append('file', file);
+
+      // Kick off the request but animate steps in parallel while it resolves
+      const req = api.post(`/api/rooms/${room.id}/upload-floorplan`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      await advance(2);
+      await advance(3);
+      await advance(4);
+
+      const { data } = await req;
+
+      await advance(5);
+
+      // 3. Persist detected geometry.  The server returns either:
+      //    - parse_result.rooms  = [{ label, polygon, bbox, width, depth }]
+      //    - parse_result.walls  = [{ start, end }]
+      //    - parse_result.points = [[x,y], ...]  (legacy fallback polygon)
+      const pr = data?.parse_result || {};
+      const updates = {};
+      const boundary = pr.boundary || null;
+
+      if (Array.isArray(pr.rooms) && pr.rooms.length) {
+        updates.zones = normalizeRoomsToZones(pr.rooms, boundary);
+      } else if (Array.isArray(pr.walls) && pr.walls.length) {
+        updates.walls = pr.walls;
+      } else if (Array.isArray(pr.points) && pr.points.length) {
+        updates.walls = pr.points;
       }
-    }, 50);
+      if (Array.isArray(pr.walls) && pr.walls.length) {
+        updates.walls = boundary
+          ? pr.walls.map(([x, y]) => [x - boundary.x, y - boundary.y])
+          : pr.walls;
+      }
+      if (pr.scale_px_per_inch) updates.scale_px_per_inch = pr.scale_px_per_inch;
+      if (boundary?.w) updates.width = Math.round(boundary.w);
+      if (boundary?.h) updates.depth = Math.round(boundary.h);
+      if (pr.room_width) updates.width = pr.room_width;
+      if (pr.room_depth) updates.depth = pr.room_depth;
 
-    return () => clearInterval(timer);
-  }, [currentStep, done, error]);
+      if (Object.keys(updates).length) {
+        await api.put(`/api/rooms/${room.id}`, updates).catch((err) => {
+          console.warn('Failed to persist parsed geometry:', err?.message);
+        });
+      }
 
-  // When both animation is done and we have a result, finish
-  useEffect(() => {
-    if (done && result) {
-      const timer = setTimeout(() => onComplete(result), 800);
-      return () => clearTimeout(timer);
+      await new Promise((r) => setTimeout(r, 500));
+      onComplete?.(room);
+    } catch (e) {
+      console.error(e);
+      onError?.(e?.response?.data?.error || e.message);
     }
-  }, [done, result]);
-
-  // If we get an error, allow showing it
-  useEffect(() => {
-    if (error) setProgress(0);
-  }, [error]);
+  };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900/70 rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden">
-        {/* Header */}
-        <div className="px-6 pt-6 pb-4">
-          <h2 className="text-xl font-bold text-white">Analyzing Floor Plan</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            {file?.name || 'floor-plan'}
-          </p>
-        </div>
-
-        {/* Progress bar */}
-        <div className="px-6">
-          <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all duration-300 ease-out"
-              style={{
-                width: `${error ? 0 : progress}%`,
-                background: done && result ? '#16a34a' : 'linear-gradient(90deg, #2563eb, #7c3aed)',
-              }}
-            />
-          </div>
-          <p className="text-right text-xs text-slate-500 mt-1">
-            {error ? 'Error' : done && result ? '100%' : `${Math.round(progress)}%`}
-          </p>
-        </div>
-
-        {/* Steps */}
-        <div className="px-6 py-4 space-y-3">
-          {STEPS.map((step, i) => {
-            const isActive = i === currentStep && !done && !error;
-            const isComplete = i < currentStep || (done && !error);
-            const isPending = i > currentStep && !done;
-
-            return (
-              <div
-                key={step.id}
-                className={`flex items-center gap-3 py-2 px-3 rounded-lg transition-all duration-300 ${
-                  isActive ? 'bg-brand-500/10 border border-brand-500/30' :
-                  isComplete ? 'bg-green-500/10 border border-green-500/20' :
-                  'bg-slate-900 border border-transparent'
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className="max-w-xl w-full mx-6 bg-paper-100 border border-ink-900/10 p-10"
+    >
+      <div className="eyebrow mb-6">Vision Pipeline</div>
+      <h2 className="display-md mb-10">Reading your floorplan…</h2>
+      <ol className="space-y-4">
+        {STEPS.map((s, i) => {
+          const active = i === step;
+          const done = i < step;
+          return (
+            <li key={s.key} className="flex items-start gap-4">
+              <span
+                className={`mt-1 w-2 h-2 rounded-full transition ${
+                  done ? 'bg-ink-900' : active ? 'bg-sienna-500 animate-pulse' : 'bg-ink-300'
                 }`}
-              >
-                <div className="text-lg w-7 text-center shrink-0">
-                  {isComplete ? '✅' : isActive ? (
-                    <span className="inline-block w-5 h-5 border-2 border-brand-500/50 border-t-brand-600 rounded-full animate-spin" />
-                  ) : step.icon}
+              />
+              <div className="flex-1">
+                <div className="eyebrow text-ink-500">{s.eyebrow}</div>
+                <div className={`text-base transition ${active ? 'text-ink-900' : done ? 'text-ink-600' : 'text-ink-400'}`}>
+                  {s.label}
                 </div>
-                <span className={`text-sm ${
-                  isActive ? 'text-brand-200 font-medium' :
-                  isComplete ? 'text-green-300' :
-                  'text-slate-500'
-                }`}>
-                  {step.label}
-                </span>
-                {isActive && (
-                  <span className="ml-auto text-xs text-brand-400">Processing...</span>
-                )}
               </div>
-            );
-          })}
-        </div>
-
-        {/* Error state */}
-        {error && (
-          <div className="px-6 pb-4">
-            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-sm text-red-400">
-              {error}
-            </div>
-          </div>
-        )}
-
-        {/* Done state — waiting for server */}
-        {done && !result && !error && (
-          <div className="px-6 pb-4">
-            <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 text-sm text-blue-400 flex items-center gap-2">
-              <span className="inline-block w-4 h-4 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
-              Waiting for server to finish processing...
-            </div>
-          </div>
-        )}
-
-        {/* Done state — success */}
-        {done && result && (
-          <div className="px-6 pb-4">
-            <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3 text-sm text-green-300">
-              Analysis complete! {result.parse_result?.rooms?.length
-                ? `Detected ${result.parse_result.rooms.length} room(s).`
-                : result.parse_result?.walls?.length
-                ? `Detected ${result.parse_result.walls.length} wall segments.`
-                : 'Floor plan saved as background.'}
-            </div>
-          </div>
-        )}
-
-        {/* Footer */}
-        <div className="px-6 pb-6 flex justify-end gap-2">
-          {error && (
-            <button
-              onClick={onCancel}
-              className="px-4 py-2 text-sm text-slate-300 bg-slate-800 rounded-lg hover:bg-slate-700 transition"
-            >
-              Close
-            </button>
-          )}
-          {!done && !error && (
-            <button
-              onClick={onCancel}
-              className="px-4 py-2 text-sm text-slate-500 hover:text-slate-300 transition"
-            >
-              Cancel
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
+              {done && <span className="text-ink-500 text-sm">✓</span>}
+            </li>
+          );
+        })}
+      </ol>
+    </motion.div>
   );
 }

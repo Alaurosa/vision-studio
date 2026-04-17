@@ -29,6 +29,21 @@ router.post('/generate', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'image_url is required' });
   }
 
+  if (catalog_id && await useDb()) {
+    try {
+      const { data } = await supabaseAdmin
+        .from('furniture_catalog')
+        .select('model_url')
+        .eq('id', catalog_id)
+        .single();
+      if (data?.model_url) {
+        return res.json({ status: 'ready', glb_url: data.model_url });
+      }
+    } catch {
+      // Fall through to generation.
+    }
+  }
+
   if (!process.env.MESHY_API_KEY) {
     return res.json({ status: 'unavailable', error: 'MESHY_API_KEY not configured' });
   }

@@ -3,30 +3,27 @@ import { supabase } from './supabaseClient';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001',
+  timeout: 120000,
 });
 
+// Attach Supabase JWT when available; fall back to 'demo' so server demo-mode works.
 api.interceptors.request.use(async (config) => {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) {
-      config.headers.Authorization = `Bearer ${session.access_token}`;
-      return config;
-    }
-  } catch {
-    // Auth not available
+  let token = 'demo';
+  if (supabase) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) token = data.session.access_token;
+    } catch { /* ignore, use demo */ }
   }
-  // Fallback: send demo token so server can use demo mode
-  if (!config.headers.Authorization) {
-    config.headers.Authorization = 'Bearer demo';
-  }
+  config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
 api.interceptors.response.use(
-  (res) => res,
+  (r) => r,
   (err) => {
-    if (err.response?.status === 401) {
-      try { supabase.auth.signOut(); } catch { /* demo mode */ }
+    if (err.response?.status === 401 && supabase) {
+      supabase.auth.signOut().catch(() => {});
     }
     return Promise.reject(err);
   }

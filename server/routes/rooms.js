@@ -31,6 +31,21 @@ async function useDb() {
   return fallback.checkDbAvailable(supabaseAdmin);
 }
 
+function normalizeZones(parseResult) {
+  const boundary = parseResult?.boundary || { x: 0, y: 0 };
+  return (parseResult?.rooms || []).map((room, index) => ({
+    id: room.id || `zone-${index}`,
+    name: room.label || `Room ${index + 1}`,
+    polygon: (room.polygon || []).map(([x, y]) => [x - boundary.x, y - boundary.y]),
+    bbox: Array.isArray(room.bbox) && room.bbox.length === 4
+      ? [room.bbox[0] - boundary.x, room.bbox[1] - boundary.y, room.bbox[2] - boundary.x, room.bbox[3] - boundary.y]
+      : room.bbox,
+    width: room.width || (room.bbox?.[2] != null ? room.bbox[2] - room.bbox[0] : null),
+    depth: room.depth || (room.bbox?.[3] != null ? room.bbox[3] - room.bbox[1] : null),
+    confidence: room.confidence || null,
+  }));
+}
+
 // POST /api/rooms — create a new room
 router.post('/', requireAuth, async (req, res) => {
   const { name, unit, width, depth } = req.body;
@@ -196,7 +211,9 @@ router.post('/:id/upload-floorplan', requireAuth, upload.single('file'), async (
 
     // If rooms/walls were detected, save them to the room record
     if (parseResult.walls && parseResult.walls.length > 0) {
-      roomUpdates.walls = parseResult.walls;
+      roomUpdates.walls = parseResult.boundary
+        ? parseResult.walls.map(([x, y]) => [x - parseResult.boundary.x, y - parseResult.boundary.y])
+        : parseResult.walls;
     }
 
     // Auto-calculate room dimensions from boundary
@@ -216,8 +233,13 @@ router.post('/:id/upload-floorplan', requireAuth, upload.single('file'), async (
 
     // Store detected room data (rooms, boundary) as detected_objects for reference
     if (parseResult.rooms || parseResult.boundary) {
+      const zones = normalizeZones(parseResult);
+      if (zones.length > 0) {
+        roomUpdates.zones = zones;
+      }
       roomUpdates.detected_objects = {
         rooms: parseResult.rooms || [],
+        zones,
         boundary: parseResult.boundary || null,
         wall_segments: parseResult.wall_segments || [],
         method: parseResult.method || 'unknown',

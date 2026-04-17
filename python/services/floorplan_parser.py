@@ -27,6 +27,21 @@ def _image_to_data_uri(image_bytes: bytes) -> tuple:
     return f"data:image/png;base64,{b64}", img_w, img_h
 
 
+def _prepare_floorplan_bytes(image_bytes: bytes, content_type: str) -> bytes:
+    if content_type != "application/pdf":
+        return image_bytes
+
+    from pdf2image import convert_from_bytes
+
+    pages = convert_from_bytes(image_bytes, dpi=160, first_page=1, last_page=1)
+    if not pages:
+        raise ValueError("PDF contained no renderable pages")
+
+    out = io.BytesIO()
+    pages[0].convert("RGB").save(out, format="PNG")
+    return out.getvalue()
+
+
 def _mask_url_to_polygon(mask_url: str, img_w: int, img_h: int) -> list:
     """Download a SAM mask image URL and extract polygon contour via OpenCV."""
     try:
@@ -137,7 +152,7 @@ Return ONLY a JSON object in this exact format, no other text:
         response = await loop.run_in_executor(
             None,
             lambda: client.chat.completions.create(
-                model="gpt-5.3-chat-latest",
+                model=os.getenv("OPENAI_MODEL", "gpt-4o"),
                 messages=[
                     {
                         "role": "user",
@@ -189,6 +204,8 @@ Return ONLY a JSON object in this exact format, no other text:
                 "label": r.get("label", f"Room {len(rooms) + 1}"),
                 "polygon": polygon,
                 "bbox": [x1, y1, x2, y2],
+                "width": float(w),
+                "depth": float(h),
                 "area_px": float(area),
                 "confidence": float(r.get("confidence", 0.8)),
             })
@@ -466,6 +483,11 @@ async def parse_floorplan(image_bytes: bytes, content_type: str) -> dict:
     2. Grounding DINO + SAM 3 via Replicate — good but irregular polygons
     3. OpenCV fallback — works offline but least accurate
     """
+    try:
+        image_bytes = _prepare_floorplan_bytes(image_bytes, content_type)
+    except Exception as e:
+        return {"error": f"PDF conversion failed: {e}", "rooms": [], "walls": [], "fallback": True}
+
     # Decode image for dimensions
     try:
         data_uri, img_w, img_h = _image_to_data_uri(image_bytes)

@@ -135,6 +135,8 @@ export function addPlacement(data) {
     rotation: data.rotation || 0,
     color: data.color || '#d4a27a',
     custom: data.custom || false,
+    image_url: data.image_url || null,
+    model_url: data.model_url || null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -153,7 +155,7 @@ export function deletePlacement(id) {
   return placements.delete(id);
 }
 
-function getPlacementsForRoom(roomId) {
+export function getPlacementsForRoom(roomId) {
   return [...placements.values()].filter(p => p.room_id === roomId);
 }
 

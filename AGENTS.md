@@ -15,15 +15,15 @@ Full-stack implementation — monorepo with React client, Express server, and Fa
 | Layer         | Technology                                    |
 | ------------- | --------------------------------------------- |
 | Client        | React 18.3 + Vite 5.3 + react-router-dom 6   |
-| 2D Canvas     | Konva 9.3 + react-konva 18.2                  |
+| 2D Canvas     | Konva 9.3 + react-konva 18.2 + Transformer    |
 | State         | Zustand 4.5                                   |
 | Styling       | Tailwind CSS 3.4 (warm neutral theme)         |
 | Server        | Express 4.19 (Node.js, ES modules)            |
 | AI/LLM        | OpenAI Codex 5.3 (function calling)               |
 | Python AI     | FastAPI + OpenAI Codex 5.3 Vision (primary room analysis) + Replicate (Grounding DINO + SAM 3) + OpenCV fallback (distance transform + watershed room segmentation) |
 | Database      | Supabase (PostgreSQL + Auth + Storage)         |
-| 3D Models     | Meshy AI v2 (image-to-3D GLB generation)     |
-| 3D Viewer     | React Three Fiber + @react-three/drei         |
+| 3D Models     | Meshy AI v2 (image-to-3D GLB generation) + catalog GLB URLs |
+| 3D Viewer     | React Three Fiber + @react-three/drei + GLTFLoader |
 
 ## Commands
 
@@ -79,30 +79,30 @@ vision-studio/
 │       │   ├── collision.js      # AABB detection, overlap check, room bounds
 │       │   └── exportLayout.js   # Build JSON export schema
 │       ├── components/
-│       │   ├── auth/
-│       │   │   ├── LoginPage.jsx     # Magic link email form
-│       │   │   └── AuthGuard.jsx     # Route guard — redirects to login
+│       │   ├── layout/
+│       │   │   ├── Navbar.jsx        # Top nav (Home/Upload/Studio), scroll-aware
+│       │   │   └── Footer.jsx        # Editorial footer (hidden in /studio)
 │       │   ├── canvas/
-│       │   │   ├── RoomCanvas.jsx    # Konva Stage (5 layers: bg, grid, walls, detections, furniture) + zoom/pan + fit-to-view + right-click context menu + clearance zones
-│       │   │   ├── FurnitureItem.jsx # Draggable/rotatable Konva Group with snap-to-grid
-│       │   │   ├── WallOutline.jsx   # Wall polygon/line rendering
-│       │   │   └── GridOverlay.jsx   # 6" snap grid lines
+│       │   │   ├── RoomCanvas.jsx    # Konva Stage with zoom/pan, room-zone overlays, and free-angle rotation controls
+│       │   │   ├── FurnitureItem.jsx # Draggable/rotatable Konva Group with Transformer-based free rotation
+│       │   │   ├── WallOutline.jsx   # Wall polygon/segment renderer
+│       │   │   └── GridOverlay.jsx   # 6" snap grid
 │       │   ├── upload/
-│       │   │   ├── FloorPlanUpload.jsx  # Floor plan upload → Python parsing
-│       │   │   ├── AnalysisWorkflow.jsx # Animated step-by-step analysis overlay
-│       │   │   └── RoomPhotoUpload.jsx  # Room photo → DINO detection
+│       │   │   └── AnalysisWorkflow.jsx # 6-step animated floor-plan pipeline overlay
+│       │   ├── studio/
+│       │   │   ├── StudioToolbar.jsx # Undo/Redo/Grid/Validate/Auto-Arrange/2D/3D/Export/Chat
+│       │   │   └── RoomSetupModal.jsx # Template + dimensions picker
 │       │   ├── catalog/
-│       │   │   └── CatalogPanel.jsx  # Search, filter, browse furniture catalog
+│       │   │   └── CatalogPanel.jsx  # Search + category chips + Recommended tab
 │       │   ├── viewer/
-│       │   │   ├── RoomViewer3D.jsx  # React Three Fiber 3D room viewer
-│       │   │   ├── FurnitureModels.jsx # Procedural 3D furniture by category
-│       │   │   └── SmartFurnitureModel.jsx # GLB model loader + Meshy fallback
+│       │   │   ├── RoomViewer3D.jsx  # React Three Fiber — floor/walls/GLB furniture + OrbitControls
+│       │   │   └── SmartFurnitureModel.jsx # Loads model_url GLBs or backfills via Meshy from product images
 │       │   └── chatbot/
-│       │       └── ChatPanel.jsx     # AI design agent chat with quick actions
+│       │       └── ChatPanel.jsx     # Agentic chat, 5 quick actions, auto-refresh on mutate
 │       └── pages/
-│           ├── Landing.jsx       # Hero + 6 feature cards
-│           ├── Dashboard.jsx     # Room list, create/open rooms, duplicate rooms, templates
-│           └── Editor.jsx        # 3-panel layout: catalog + canvas + chat + toolbar + swap + validation
+│           ├── Home.jsx              # Editorial landing (Batako-inspired: hero, process, quote band, services, CTA)
+│           ├── Upload.jsx            # Drop-zone → AnalysisWorkflow → /studio/:roomId
+│           └── Studio.jsx            # Room dashboard + 3-panel editor (catalog / canvas|3D / chat)
 │
 ├── server/                       # Node.js + Express backend
 │   ├── package.json
@@ -138,7 +138,7 @@ vision-studio/
 │   ├── .env.example              # Template for python env vars
 │   └── services/
 │       ├── __init__.py
-│       ├── floorplan_parser.py   # Grounding DINO + SAM 3 wall detection via Replicate
+│       ├── floorplan_parser.py   # OpenAI Vision room zoning + Replicate/OpenCV fallbacks + PDF support
 │       ├── object_recognition.py # Grounding DINO + SAM 3 via Replicate
 │       └── scale_estimator.py    # Manual calibration stub
 │
@@ -172,7 +172,7 @@ Store in `client/src/store/layoutStore.js`:
 | Field          | Type              | Purpose                                     |
 | -------------- | ----------------- | ------------------------------------------- |
 | `room`         | `object \| null`  | Current room (id, name, walls, dimensions)  |
-| `furniture`    | `array`           | Placed furniture items with positions        |
+| `furniture`    | `array`           | Placed furniture items with positions, free-angle rotation, and optional model/image URLs |
 | `selectedId`   | `string \| null`  | Currently selected furniture ID              |
 | `detections`   | `array`           | AI-detected objects (pending/confirmed)      |
 | `chatHistory`  | `array`           | Chat messages for current room               |
@@ -185,7 +185,7 @@ Store in `client/src/store/layoutStore.js`:
 | `zones`        | `array`           | Confirmed sub-rooms `{id,name,color,polygon,bbox,width,depth}` |
 | `activeZoneId` | `string \| null`  | Currently focused sub-room (null = whole plan) |
 
-Actions: `loadRoom`, `createRoom`, `saveRoomGeometry`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `selectFurniture`, `clearSelection`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`.
+Actions: `loadRoom`, `createRoom`, `saveRoomGeometry`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`.
 
 ## API Routes
 
@@ -196,7 +196,7 @@ Actions: `loadRoom`, `createRoom`, `saveRoomGeometry`, `updateRoom`, `addFurnitu
 | GET | `/api/rooms` | List user rooms |
 | GET | `/api/rooms/:id` | Get room + placements |
 | PUT | `/api/rooms/:id` | Update room |
-| POST | `/api/rooms/:id/upload-floorplan` | Upload floor plan → Python parse |
+| POST | `/api/rooms/:id/upload-floorplan` | Upload floor plan → GPT/OpenCV room segmentation + zone extraction |
 | POST | `/api/rooms/:id/calibrate` | Two-point scale calibration |
 | GET | `/api/furniture/catalog` | Search catalog (?category, ?provider, ?q) |
 | GET | `/api/furniture/categories` | List categories |
@@ -232,6 +232,12 @@ All tables use RLS — users can only access their own data.
 - Inter font family from Google Fonts
 - Cards: `bg-white rounded-xl shadow-sm border border-stone-200`
 - Tailwind utility classes only — no CSS modules
+
+## Notable Behaviors
+
+- Furniture can be rotated freely in the 2D editor via the Konva transformer handle, 15° toolbar nudges, or the in-canvas rotation slider.
+- The 3D viewer prefers real GLB assets from `model_url` and will request Meshy generation from `image_url` when a placement has no model yet.
+- Floorplan upload normalizes detected rooms into editable `zones` stored in room-local coordinates so GPT vision room segmentation can be rendered directly in the studio canvas.
 
 ## Chatbot Function Calling
 

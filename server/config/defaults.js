@@ -29,8 +29,8 @@ export const DEFAULTS = {
     warnNarrowPath: true,
   },
   llm: {
-    defaultModel: 'gpt-5.3-chat-latest',
-    fallbackModel: 'gpt-5.3-chat-latest',
+    defaultModel: process.env.OPENAI_MODEL || 'gpt-4o',
+    fallbackModel: process.env.OPENAI_MODEL || 'gpt-4o',
     maxTokens: 2048,
     temperature: 0.3,
   },

@@ -21,7 +21,7 @@ export async function chat({ messages, systemPrompt, tools = [] }) {
   }
 
   const res = await openai.chat.completions.create({
-    model: 'gpt-5.3-chat-latest',
+    model: process.env.OPENAI_MODEL || 'gpt-4o',
     temperature: 0.3,
     max_completion_tokens: 2048,
     messages: [{ role: 'system', content: systemPrompt }, ...messages],

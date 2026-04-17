@@ -1,239 +1,197 @@
 import { create } from 'zustand';
-import api from '../lib/api';
-import { toast } from '../components/ui/Toast';
+import api from '@/lib/api';
+import { getAABB, overlaps, withinRoom, validateAll } from '@/utils/collision';
+import { GRID_SNAP_INCHES } from '@/utils/constants';
+import { computeRotation } from '@/utils/scale';
 
-// Debounce API calls for furniture updates during drag
-const updateTimers = {};
-function debouncedApiPut(id, changes, delay = 300) {
-  if (updateTimers[id]) clearTimeout(updateTimers[id]);
-  updateTimers[id] = setTimeout(async () => {
-    try {
-      await api.put(`/api/furniture/placements/${id}`, changes);
-    } catch (err) {
-      console.error('Failed to save placement:', err);
-      toast.error('Could not save change — check your connection.');
-    }
-    delete updateTimers[id];
-  }, delay);
-}
+let saveTimers = {};
 
 export const useLayoutStore = create((set, get) => ({
-  // Room state
+  // ---------- state ----------
   room: null,
   furniture: [],
   selectedId: null,
   detections: [],
-
-  // Zones (sub-rooms within a plan). activeZoneId=null = whole-plan view.
   zones: [],
   activeZoneId: null,
   chatHistory: [],
   recommendedItems: [],
   loading: false,
-  errors: [],
-
-  // Undo/redo history
-  undoStack: [],
-  redoStack: [],
-
-  // View state
-  viewMode: '2d', // '2d' | '3d'
+  viewMode: '2d',
   gridEnabled: true,
   isChatOpen: true,
+  undoStack: [],
+  redoStack: [],
+  errors: [],
 
-  // Push current furniture state to undo stack
-  _pushUndo: () => {
-    const { furniture, undoStack } = get();
-    const snapshot = furniture.map(f => ({ ...f }));
-    set({ undoStack: [...undoStack.slice(-30), snapshot], redoStack: [] });
-  },
-
-  undo: () => {
-    const { undoStack, furniture } = get();
-    if (undoStack.length === 0) return;
-    const prev = undoStack[undoStack.length - 1];
-    set((state) => ({
-      undoStack: state.undoStack.slice(0, -1),
-      redoStack: [...state.redoStack, state.furniture.map(f => ({ ...f }))],
-      furniture: prev,
-      selectedId: null,
-    }));
-    // Sync with backend - update positions for each item
-    for (const item of prev) {
-      debouncedApiPut(item.id, { x_inches: item.x_inches, y_inches: item.y_inches, rotation: item.rotation });
-    }
-  },
-
-  redo: () => {
-    const { redoStack, furniture } = get();
-    if (redoStack.length === 0) return;
-    const next = redoStack[redoStack.length - 1];
-    set((state) => ({
-      redoStack: state.redoStack.slice(0, -1),
-      undoStack: [...state.undoStack, state.furniture.map(f => ({ ...f }))],
-      furniture: next,
-      selectedId: null,
-    }));
-    for (const item of next) {
-      debouncedApiPut(item.id, { x_inches: item.x_inches, y_inches: item.y_inches, rotation: item.rotation });
-    }
-  },
-
-  // Room actions
+  // ---------- room ----------
   setRoom: (room) => set({ room }),
 
   loadRoom: async (roomId) => {
     set({ loading: true });
     try {
       const { data } = await api.get(`/api/rooms/${roomId}`);
-      const zones = data.zones || data.detected_objects?.zones || [];
+      const fallbackZones = data.zones || data.detected_objects?.zones || data.detected_objects?.rooms || [];
       set({
         room: data,
         furniture: data.placements || [],
-        zones,
-        activeZoneId: null,
+        detections: data.detected_objects || [],
+        zones: fallbackZones,
         loading: false,
-        detections: [],
       });
-    } catch (err) {
-      set({ loading: false, errors: [err.message] });
-      throw err;
+    } catch (e) {
+      console.error('loadRoom', e);
+      set({ loading: false, errors: [...get().errors, 'Failed to load room'] });
     }
   },
 
-  createRoom: async (name) => {
-    const { data } = await api.post('/api/rooms', { name: name || 'My Room' });
+  createRoom: async (payload) => {
+    const { data } = await api.post('/api/rooms', payload);
     return data;
+  },
+
+  updateRoom: async (patch) => {
+    const { room } = get();
+    if (!room) return;
+    set({ room: { ...room, ...patch } });
+    await api.put(`/api/rooms/${room.id}`, patch);
   },
 
   saveRoomGeometry: async (walls, scale) => {
     const { room } = get();
     if (!room) return;
     const { data } = await api.put(`/api/rooms/${room.id}`, {
-      walls,
-      scale_px_per_inch: scale,
+      walls, scale_px_per_inch: scale,
     });
     set({ room: data });
   },
 
-  updateRoom: async (changes) => {
+  // ---------- furniture ----------
+  _snapshot: () => {
+    const { furniture, undoStack } = get();
+    const next = [...undoStack, JSON.parse(JSON.stringify(furniture))].slice(-30);
+    set({ undoStack: next, redoStack: [] });
+  },
+
+  addFurniture: async (item) => {
     const { room } = get();
     if (!room) return;
+    get()._snapshot();
     try {
-      const { data } = await api.put(`/api/rooms/${room.id}`, changes);
-      set({ room: data });
-    } catch (err) {
-      console.error('Failed to update room:', err);
-      toast.error('Could not save room changes.');
+      const { data } = await api.post('/api/furniture/placements', { ...item, room_id: room.id });
+      const placement = {
+        ...data,
+        image_url: item.image_url || data.image_url || null,
+        model_url: item.model_url || data.model_url || null,
+      };
+      set((s) => ({ furniture: [...s.furniture, placement] }));
+      return placement;
+    } catch (e) {
+      console.error('addFurniture', e);
     }
   },
 
-  // Furniture actions
-  addFurniture: async (item) => {
-    const { room, activeZoneId } = get();
-    if (!room) return;
-    const { data } = await api.post('/api/furniture/placements', {
-      ...item,
-      room_id: room.id,
-      zone_id: item.zone_id ?? activeZoneId ?? null,
-    });
-    set((state) => ({ furniture: [...state.furniture, data] }));
-    return data;
-  },
-
-  updateFurniture: async (id, changes) => {
-    get()._pushUndo();
-    set((state) => ({
-      furniture: state.furniture.map((f) => (f.id === id ? { ...f, ...changes } : f)),
+  updateFurniture: (id, changes) => {
+    set((s) => ({
+      furniture: s.furniture.map((f) => (f.id === id ? { ...f, ...changes } : f)),
     }));
-    debouncedApiPut(id, changes);
+    // Debounce API save
+    clearTimeout(saveTimers[id]);
+    saveTimers[id] = setTimeout(async () => {
+      try { await api.put(`/api/furniture/placements/${id}`, changes); }
+      catch (e) { console.error('update save', e); }
+    }, 400);
   },
 
   removeFurniture: async (id) => {
-    get()._pushUndo();
-    set((state) => ({ furniture: state.furniture.filter((f) => f.id !== id) }));
-    try {
-      await api.delete(`/api/furniture/placements/${id}`);
-    } catch (err) {
-      console.error('Failed to delete placement:', err);
-      toast.error('Could not delete furniture on the server.');
-    }
+    get()._snapshot();
+    set((s) => ({
+      furniture: s.furniture.filter((f) => f.id !== id),
+      selectedId: s.selectedId === id ? null : s.selectedId,
+    }));
+    try { await api.delete(`/api/furniture/placements/${id}`); }
+    catch (e) { console.error('remove', e); }
   },
 
   selectFurniture: (id) => set({ selectedId: id }),
   clearSelection: () => set({ selectedId: null }),
 
-  // Detection actions
+  rotateFurniture: (id, nextRotation = null) => {
+    const { furniture, updateFurniture } = get();
+    const item = furniture.find((f) => f.id === id);
+    if (!item) return;
+    const patch = computeRotation(item, nextRotation);
+    updateFurniture(id, patch);
+  },
+
+  // ---------- detections ----------
   setDetections: (detections) =>
-    set({
-      detections: detections.map((d) => ({ ...d, status: 'pending' })),
-    }),
-
-  confirmDetection: (i) =>
-    set((state) => ({
-      detections: state.detections.map((d, idx) => (idx === i ? { ...d, status: 'confirmed' } : d)),
+    set({ detections: (detections || []).map((d) => ({ ...d, status: d.status || 'pending' })) }),
+  confirmDetection: (idx) =>
+    set((s) => ({
+      detections: s.detections.map((d, i) => (i === idx ? { ...d, status: 'confirmed' } : d)),
+    })),
+  dismissDetection: (idx) =>
+    set((s) => ({
+      detections: s.detections.map((d, i) => (i === idx ? { ...d, status: 'dismissed' } : d)),
     })),
 
-  dismissDetection: (i) =>
-    set((state) => ({
-      detections: state.detections.map((d, idx) => (idx === i ? { ...d, status: 'dismissed' } : d)),
-    })),
-
-  // Chat actions
+  // ---------- chat ----------
   addChatMessage: (msg) =>
-    set((state) => ({
-      chatHistory: [...state.chatHistory, msg],
-    })),
-
+    set((s) => ({ chatHistory: [...s.chatHistory, { id: Date.now() + Math.random(), ...msg }] })),
   clearChat: () => set({ chatHistory: [] }),
 
-  // Recommendation actions
-  setRecommendedItems: (items) => set({ recommendedItems: items }),
+  setRecommendedItems: (items) => set({ recommendedItems: items || [] }),
   clearRecommendedItems: () => set({ recommendedItems: [] }),
 
-  // Zone actions
-  setActiveZone: (zoneId) => set({ activeZoneId: zoneId, selectedId: null }),
-
-  saveZones: async (zones) => {
-    const { room } = get();
-    if (!room) return;
-    set({ zones });
-    try {
-      const { data } = await api.put(`/api/rooms/${room.id}`, { zones });
-      const nextZones = data.zones || data.detected_objects?.zones || zones;
-      set({ room: data, zones: nextZones });
-    } catch (err) {
-      console.error('Failed to save zones:', err);
-      toast.error('Could not save rooms.');
-    }
-  },
-
-  addZone: (zone) => {
-    const zones = [...get().zones, zone];
-    get().saveZones(zones);
-  },
-
-  updateZone: (zoneId, patch) => {
-    const zones = get().zones.map((z) => (z.id === zoneId ? { ...z, ...patch } : z));
-    get().saveZones(zones);
-  },
-
-  removeZone: (zoneId) => {
-    const zones = get().zones.filter((z) => z.id !== zoneId);
-    const { activeZoneId } = get();
-    if (activeZoneId === zoneId) set({ activeZoneId: null });
-    get().saveZones(zones);
-  },
-
-  // Returns furniture visible in current view (whole plan or active zone)
-  getVisibleFurniture: () => {
-    const { furniture, activeZoneId } = get();
-    if (!activeZoneId) return furniture;
-    return furniture.filter((f) => f.zone_id === activeZoneId);
-  },
-
-  // View actions
+  // ---------- ui ----------
   setViewMode: (mode) => set({ viewMode: mode }),
-  toggleGrid: () => set((state) => ({ gridEnabled: !state.gridEnabled })),
-  toggleChat: () => set((state) => ({ isChatOpen: !state.isChatOpen })),
+  toggleGrid: () => set((s) => ({ gridEnabled: !s.gridEnabled })),
+  toggleChat: () => set((s) => ({ isChatOpen: !s.isChatOpen })),
+
+  undo: () => {
+    const { undoStack, furniture } = get();
+    if (undoStack.length === 0) return;
+    const prev = undoStack[undoStack.length - 1];
+    set((s) => ({
+      furniture: prev,
+      undoStack: s.undoStack.slice(0, -1),
+      redoStack: [...s.redoStack, furniture].slice(-30),
+    }));
+  },
+  redo: () => {
+    const { redoStack, furniture } = get();
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    set((s) => ({
+      furniture: next,
+      redoStack: s.redoStack.slice(0, -1),
+      undoStack: [...s.undoStack, furniture].slice(-30),
+    }));
+  },
+
+  // ---------- zones ----------
+  saveZones: (zones) => set({ zones }),
+  setActiveZone: (id) => set({ activeZoneId: id }),
+
+  // ---------- helpers ----------
+  findOpenSlot: (w, d) => {
+    const { room, furniture } = get();
+    if (!room?.width || !room?.depth) return { x: 0, y: 0 };
+    const step = GRID_SNAP_INCHES;
+    for (let y = step; y + d <= room.depth - step; y += step) {
+      for (let x = step; x + w <= room.width - step; x += step) {
+        const box = { left: x, top: y, right: x + w, bottom: y + d };
+        if (!withinRoom(box, room)) continue;
+        const clash = furniture.some((f) => overlaps(box, getAABB(f)));
+        if (!clash) return { x, y };
+      }
+    }
+    return { x: step, y: step };
+  },
+
+  validate: () => {
+    const { furniture, room } = get();
+    return validateAll(furniture, room);
+  },
 }));

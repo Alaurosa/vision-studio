@@ -1,208 +1,188 @@
-/**
- * GLBFurnitureModel — Loads real 3D GLB models from Meshy or catalog model_url.
- * Falls back to procedural models if no GLB is available.
- * Triggers Meshy generation if the item has an image_url but no model_url.
- */
-import React, { Suspense, useEffect, useState, useRef, useMemo } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useLoader } from '@react-three/fiber';
-import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import FurnitureModel from './FurnitureModels';
-import { ProductBillboard } from './ProductTexture';
-import api from '../../lib/api';
+import * as THREE from 'three';
+import api from '@/lib/api';
+import { useLayoutStore } from '@/store/layoutStore';
 
-// Cache of image_url -> { status, glb_url, taskId }
-const modelGenCache = new Map();
-// Global flag — once Meshy returns unavailable/failed, skip all future generation calls this session
-let meshyDisabled = false;
+const modelCache = new Map();
 
-/**
- * Attempt to load and render a GLB model, scaled to fit the item dimensions.
- */
-function GLBModel({ url, w, d, h, color }) {
+function ProceduralFallback({ w, d, h, color }) {
+  return (
+    <mesh castShadow receiveShadow>
+      <boxGeometry args={[w, h, d]} />
+      <meshStandardMaterial color={color} roughness={0.6} />
+    </mesh>
+  );
+}
+
+function GLBModel({ url, w, d, h }) {
   const gltf = useLoader(GLTFLoader, url);
-  
+
   const scene = useMemo(() => {
     const cloned = gltf.scene.clone(true);
-    
-    // Compute the bounding box of the model
     const box = new THREE.Box3().setFromObject(cloned);
     const size = new THREE.Vector3();
-    box.getSize(size);
     const center = new THREE.Vector3();
+    box.getSize(size);
     box.getCenter(center);
-    
-    // Scale to fit the target dimensions (w, h, d are in meters)
+
     const scaleX = size.x > 0 ? w / size.x : 1;
     const scaleY = size.y > 0 ? h / size.y : 1;
     const scaleZ = size.z > 0 ? d / size.z : 1;
-    const uniformScale = Math.min(scaleX, scaleY, scaleZ) * 0.9; // 90% to leave slight margin
-    
+    const uniformScale = Math.min(scaleX, scaleY, scaleZ) * 0.95;
     cloned.scale.setScalar(uniformScale);
-    
-    // Re-center after scaling
+
     const scaledBox = new THREE.Box3().setFromObject(cloned);
     const scaledCenter = new THREE.Vector3();
     scaledBox.getCenter(scaledCenter);
-    const scaledSize = new THREE.Vector3();
-    scaledBox.getSize(scaledSize);
-    
-    // Position so bottom is at y=0 and centered on x,z
-    cloned.position.set(
-      -scaledCenter.x,
-      -scaledBox.min.y,
-      -scaledCenter.z
-    );
-    
+    cloned.position.set(-scaledCenter.x, -scaledBox.min.y, -scaledCenter.z);
     return cloned;
   }, [gltf, w, d, h]);
 
   return <primitive object={scene} />;
 }
 
-/**
- * Error boundary for GLB loading failures
- */
-class GLBErrorBoundary extends React.PureComponent {
-  state = { hasError: false };
-  static getDerivedStateFromError() { return { hasError: true }; }
-  render() { return this.state.hasError ? this.props.fallback : this.props.children; }
+class ModelErrorBoundary extends React.PureComponent {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
 }
 
-/**
- * Wrapper that decides between GLB and procedural model.
- * Priority: model_url (pre-generated GLB) > Meshy generate from image_url > procedural
- */
 export default function SmartFurnitureModel({ item, w, d, h, color }) {
   const [glbUrl, setGlbUrl] = useState(item.model_url || null);
-  const [generating, setGenerating] = useState(false);
-  const attemptedRef = useRef(false);
+  const [loading, setLoading] = useState(false);
   const mountedRef = useRef(true);
+  const updateFurniture = useLayoutStore((state) => state.updateFurniture);
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
-  // If item has model_url already, use it directly
   useEffect(() => {
     if (item.model_url) {
       setGlbUrl(item.model_url);
       return;
     }
+    if (!item.image_url || !item.id) return;
 
-    // If item has image_url and Meshy is available, try to generate
-    if (item.image_url && !attemptedRef.current && !meshyDisabled) {
-      attemptedRef.current = true;
-
-      // Check cache first
-      const cached = modelGenCache.get(item.image_url);
-      if (cached?.status === 'ready') {
-        setGlbUrl(cached.glb_url);
-        return;
-      }
-      if (cached?.status === 'failed' || cached?.status === 'unavailable') {
-        return; // don't retry per-image failures
-      }
-      if (cached?.status === 'pending') {
-        setGenerating(true);
-        pollForModel(item.image_url, cached.taskId);
-        return;
-      }
-
-      // Trigger generation
-      triggerGeneration(item);
+    const cached = modelCache.get(item.image_url);
+    if (cached?.status === 'ready') {
+      setGlbUrl(cached.glb_url);
+      return;
     }
-  }, [item.model_url, item.image_url]);
+    if (cached?.status === 'pending') {
+      setLoading(true);
+      pollForModel(item.image_url, cached.task_id, item.id);
+      return;
+    }
+    if (cached?.status === 'failed' || cached?.status === 'unavailable') {
+      return;
+    }
 
-  const triggerGeneration = async (item) => {
+    triggerGeneration();
+  }, [item.id, item.image_url, item.model_url]);
+
+  const persistModel = (url) => {
+    setGlbUrl(url);
+    updateFurniture(item.id, { model_url: url });
+  };
+
+  const triggerGeneration = async () => {
     try {
-      setGenerating(true);
+      setLoading(true);
       const { data } = await api.post('/api/models/generate', {
         image_url: item.image_url,
         catalog_id: item.catalog_id,
         name: item.name,
       });
-      
+
       if (!mountedRef.current) return;
-      if (data.status === 'ready') {
-        modelGenCache.set(item.image_url, { status: 'ready', glb_url: data.glb_url });
-        setGlbUrl(data.glb_url);
-        setGenerating(false);
-      } else if (data.status === 'pending') {
-        modelGenCache.set(item.image_url, { status: 'pending', taskId: data.task_id });
-        pollForModel(item.image_url, data.task_id);
-      } else {
-        // unavailable/failed → disable globally so other items don't call the API
-        if (data.status === 'unavailable' || data.status === 'failed') {
-          meshyDisabled = true;
-        }
-        modelGenCache.set(item.image_url, { status: data.status || 'failed' });
-        setGenerating(false);
+
+      if (data.status === 'ready' && data.glb_url) {
+        modelCache.set(item.image_url, { status: 'ready', glb_url: data.glb_url });
+        persistModel(data.glb_url);
+        setLoading(false);
+        return;
       }
+
+      if (data.status === 'pending' && data.task_id) {
+        modelCache.set(item.image_url, { status: 'pending', task_id: data.task_id });
+        pollForModel(item.image_url, data.task_id, item.id);
+        return;
+      }
+
+      modelCache.set(item.image_url, { status: data.status || 'unavailable' });
+      setLoading(false);
     } catch {
-      // Network/auth error → disable globally
-      meshyDisabled = true;
-      if (mountedRef.current) setGenerating(false);
+      modelCache.set(item.image_url, { status: 'failed' });
+      if (mountedRef.current) setLoading(false);
     }
   };
 
   const pollForModel = async (imageUrl, taskId) => {
-    const maxAttempts = 60; // 5 minutes
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise(r => setTimeout(r, 5000));
-      if (!mountedRef.current) return;
+    for (let attempt = 0; attempt < 36; attempt += 1) {
       try {
         const { data } = await api.get(`/api/models/status/${taskId}`);
         if (!mountedRef.current) return;
-        if (data.status === 'ready') {
-          modelGenCache.set(imageUrl, { status: 'ready', glb_url: data.glb_url });
-          setGlbUrl(data.glb_url);
-          setGenerating(false);
+
+        if (data.status === 'ready' && data.glb_url) {
+          modelCache.set(imageUrl, { status: 'ready', glb_url: data.glb_url });
+          persistModel(data.glb_url);
+          setLoading(false);
           return;
         }
-        if (data.status === 'failed') {
-          modelGenCache.set(imageUrl, { status: 'failed' });
-          setGenerating(false);
+
+        if (data.status === 'failed' || data.status === 'unavailable') {
+          modelCache.set(imageUrl, { status: data.status });
+          setLoading(false);
           return;
         }
       } catch {
-        // Continue polling
+        // Keep polling.
       }
+
+      await new Promise((resolve) => setTimeout(resolve, 5000));
     }
-    if (mountedRef.current) setGenerating(false);
+
+    modelCache.set(imageUrl, { status: 'failed' });
+    if (mountedRef.current) setLoading(false);
   };
 
-  const proceduralFallback = (
-    <group>
-      <FurnitureModel category={item.category} w={w} d={d} h={h} color={color} />
-      {item.image_url && (
-        <ProductBillboard imageUrl={item.image_url} category={item.category} w={w} d={d} h={h} />
-      )}
-    </group>
-  );
-
-  // Show procedural model as fallback, with a loading indicator overlay if generating
   if (!glbUrl) {
     return (
       <group>
-        {proceduralFallback}
-        {generating && (
-          <mesh position={[0, h + 0.05, 0]} rotation={[-Math.PI / 4, 0, 0]}>
-            <planeGeometry args={[0.15, 0.04]} />
-            <meshBasicMaterial color="#7c3aed" transparent opacity={0.85} />
+        <ProceduralFallback w={w} d={d} h={h} color={color} />
+        {loading && (
+          <mesh position={[0, h + 0.04, 0]}>
+            <sphereGeometry args={[0.03, 16, 16]} />
+            <meshStandardMaterial color="#c58d45" emissive="#c58d45" emissiveIntensity={0.6} />
           </mesh>
         )}
       </group>
     );
   }
 
-  // Render GLB with fallback
   return (
-    <GLBErrorBoundary fallback={proceduralFallback}>
-      <Suspense fallback={proceduralFallback}>
-        <GLBModel url={glbUrl} w={w} d={d} h={h} color={color} />
+    <ModelErrorBoundary fallback={<ProceduralFallback w={w} d={d} h={h} color={color} />}>
+      <Suspense fallback={<ProceduralFallback w={w} d={d} h={h} color={color} />}>
+        <GLBModel url={glbUrl} w={w} d={d} h={h} />
       </Suspense>
-    </GLBErrorBoundary>
+    </ModelErrorBoundary>
   );
 }

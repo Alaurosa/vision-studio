@@ -1,52 +1,48 @@
-import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { useEffect, useState } from 'react';
+import { supabase, hasSupabase } from '@/lib/supabaseClient';
 
-const isDemoMode = !import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-const DEMO_USER = {
-  id: 'demo-user-00000000-0000-0000-0000-000000000000',
-  email: 'demo@visionstudio.local',
-  role: 'authenticated',
-};
-
+// Auth hook with graceful demo fallback when Supabase is unavailable.
+// Returns { user, loading, signInWithEmail, signOut, isDemo }.
 export function useAuth() {
-  const [user, setUser] = useState(isDemoMode ? DEMO_USER : null);
-  const [loading, setLoading] = useState(!isDemoMode);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isDemo, setIsDemo] = useState(!hasSupabase);
 
   useEffect(() => {
-    if (isDemoMode) return; // Skip — already set
-
+    let sub = null;
+    if (!hasSupabase) {
+      setUser({ id: 'demo-user', email: 'demo@vision.studio' });
+      setLoading(false);
+      setIsDemo(true);
+      return;
+    }
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+      setUser(session?.user ?? { id: 'demo-user', email: 'demo@vision.studio' });
+      setIsDemo(!session?.user);
       setLoading(false);
     });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+    const { data } = supabase.auth.onAuthStateChange((_e, session) => {
+      setUser(session?.user ?? { id: 'demo-user', email: 'demo@vision.studio' });
+      setIsDemo(!session?.user);
     });
-
-    return () => subscription.unsubscribe();
+    sub = data.subscription;
+    return () => sub?.unsubscribe?.();
   }, []);
 
   const signInWithEmail = async (email) => {
-    if (isDemoMode) {
-      // Demo mode — just set user directly
-      setUser(DEMO_USER);
-      return;
-    }
+    if (!hasSupabase) throw new Error('Supabase not configured');
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: window.location.origin + '/dashboard' },
+      options: { emailRedirectTo: window.location.origin },
     });
     if (error) throw error;
   };
 
-  const signOut = () => {
-    if (isDemoMode) return;
-    supabase.auth.signOut();
+  const signOut = async () => {
+    if (hasSupabase) await supabase.auth.signOut();
+    setUser({ id: 'demo-user', email: 'demo@vision.studio' });
+    setIsDemo(true);
   };
 
-  return { user, loading, signInWithEmail, signOut, isDemoMode };
+  return { user, loading, signInWithEmail, signOut, isDemo };
 }

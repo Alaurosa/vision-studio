@@ -1,163 +1,169 @@
-import { Rect, Text, Group, Transformer, Circle } from 'react-konva';
-import { useRef, useEffect, useState } from 'react';
-import { CATEGORY_COLORS, GRID_SNAP_INCHES } from '../../utils/constants';
-import { inchesToPx, snapToGrid } from '../../utils/scale';
-import { getAABB, overlaps, snapToEdge } from '../../utils/collision';
+import { useEffect, useRef } from 'react';
+import { Group, Rect, Text, Transformer } from 'react-konva';
+import { CATEGORY_COLORS } from '@/utils/constants';
+import { snapToGrid, getRotatedBoundingBox, normalizeRotation } from '@/utils/scale';
+import { getAABB, overlaps, withinRoom } from '@/utils/collision';
+import { GRID_SNAP_INCHES } from '@/utils/constants';
 
-export default function FurnitureItem({ item, scale, offsetX = 0, offsetY = 0, isSelected, onSelect, onChange, allFurniture = [], room, onContextMenu }) {
-  const groupRef = useRef();
-  const trRef = useRef();
-  const [hasCollision, setHasCollision] = useState(false);
-
-  const color = CATEGORY_COLORS[item.category] || CATEGORY_COLORS.default;
-  const w = (item.width || 30) * scale;
-  const d = (item.depth || 30) * scale;
-  // Position the group at the center of the furniture for correct rotation
-  const x = (item.x_inches || 0) * scale + offsetX + w / 2;
-  const y = (item.y_inches || 0) * scale + offsetY + d / 2;
-
-  // Check collisions whenever item position/rotation changes
-  useEffect(() => {
-    if (allFurniture.length < 2) { setHasCollision(false); return; }
-    const myBox = getAABB(item);
-    const colliding = allFurniture.some(other => {
-      if (other.id === item.id) return false;
-      return overlaps(myBox, getAABB(other));
-    });
-    setHasCollision(colliding);
-  }, [item.x_inches, item.y_inches, item.rotation, item.width, item.depth, allFurniture]);
+export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selected, onSelect, onChange, room, allItems, onInvalidPlacement }) {
+  const groupRef = useRef(null);
+  const transformerRef = useRef(null);
+  const color = item.color || CATEGORY_COLORS[item.category] || CATEGORY_COLORS.default;
+  const rot = normalizeRotation(item.rotation || 0);
+  const w = item.width * pxPerInch;
+  const d = item.depth * pxPerInch;
+  const bbox = getRotatedBoundingBox(item.width || 0, item.depth || 0, rot);
+  const bboxW = bbox.width * pxPerInch;
+  const bboxH = bbox.depth * pxPerInch;
+  const cx = offsetX + (item.x_inches || 0) * pxPerInch + bboxW / 2;
+  const cy = offsetY + (item.y_inches || 0) * pxPerInch + bboxH / 2;
 
   useEffect(() => {
-    if (isSelected && trRef.current && groupRef.current) {
-      trRef.current.nodes([groupRef.current]);
-      trRef.current.getLayer().batchDraw();
+    if (!selected || !groupRef.current || !transformerRef.current) return;
+    transformerRef.current.nodes([groupRef.current]);
+    transformerRef.current.getLayer()?.batchDraw();
+  }, [selected, w, d]);
+
+  const revertNode = () => {
+    const node = groupRef.current;
+    if (!node) return;
+    node.position({ x: cx, y: cy });
+    node.rotation(rot);
+    node.scaleX(1);
+    node.scaleY(1);
+    node.getLayer()?.batchDraw();
+  };
+
+  const canCommitPatch = (patch) => {
+    const nextItem = { ...item, ...patch };
+    const box = getAABB(nextItem);
+    if (!withinRoom(box, room)) {
+      onInvalidPlacement?.(`${item.name || 'Item'} would extend outside the room.`);
+      return false;
     }
-  }, [isSelected]);
 
-  const checkCollision = (candidateItem) => {
-    const myBox = getAABB(candidateItem);
-    return allFurniture.some(other => {
+    const conflicts = (allItems || []).some((other) => {
       if (other.id === item.id) return false;
-      return overlaps(myBox, getAABB(other));
+      return overlaps(box, getAABB(other));
     });
+
+    if (conflicts) {
+      onInvalidPlacement?.(`${item.name || 'Item'} would overlap another furniture item.`);
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleDragStart = (e) => {
+    e.cancelBubble = true;
+  };
+
+  const handleDragMove = (e) => {
+    e.cancelBubble = true;
   };
 
   const handleDragEnd = (e) => {
-    const gridPx = GRID_SNAP_INCHES * scale;
-    // Group position is at center; convert back to top-left inches
-    const rawX = e.target.x() - offsetX - w / 2;
-    const rawY = e.target.y() - offsetY - d / 2;
-    let newX = snapToGrid(rawX, gridPx) / scale;
-    let newY = snapToGrid(rawY, gridPx) / scale;
-
-    // Check collision at new position — snap to edge if overlapping
-    const candidate = { ...item, x_inches: newX, y_inches: newY };
-    if (checkCollision(candidate)) {
-      const result = snapToEdge(candidate, allFurniture, room);
-      newX = result.x_inches;
-      newY = result.y_inches;
-    }
-
-    e.target.x(newX * scale + offsetX + w / 2);
-    e.target.y(newY * scale + offsetY + d / 2);
-    onChange({ x_inches: newX, y_inches: newY });
-  };
-
-  const handleTransformEnd = () => {
-    const node = groupRef.current;
-    if (!node) return;
-    const rawRotation = node.rotation();
-    const snappedRotation = Math.round(rawRotation / 90) * 90 % 360;
-    const finalRotation = snappedRotation < 0 ? snappedRotation + 360 : snappedRotation;
-
-    // Check collision at new rotation
-    const candidate = { ...item, rotation: finalRotation };
-    if (checkCollision(candidate)) {
-      // Revert rotation
-      node.rotation(item.rotation || 0);
-      node.scaleX(1);
-      node.scaleY(1);
+    e.cancelBubble = true;
+    const newCX = e.target.x();
+    const newCY = e.target.y();
+    const xInches = snapToGrid((newCX - bboxW / 2 - offsetX) / pxPerInch, GRID_SNAP_INCHES);
+    const yInches = snapToGrid((newCY - bboxH / 2 - offsetY) / pxPerInch, GRID_SNAP_INCHES);
+    const patch = { x_inches: Math.max(0, xInches), y_inches: Math.max(0, yInches) };
+    if (!canCommitPatch(patch)) {
+      revertNode();
       return;
     }
+    e.target.position({
+      x: offsetX + patch.x_inches * pxPerInch + bboxW / 2,
+      y: offsetY + patch.y_inches * pxPerInch + bboxH / 2,
+    });
+    onChange(patch);
+  };
 
-    node.rotation(finalRotation);
+  const handleTransformEnd = (e) => {
+    e.cancelBubble = true;
+    const node = groupRef.current;
+    if (!node) return;
+    const rotation = normalizeRotation(node.rotation());
+    const rotatedBox = getRotatedBoundingBox(item.width || 0, item.depth || 0, rotation);
+    const xInches = Math.max(0, (node.x() - offsetX) / pxPerInch - rotatedBox.width / 2);
+    const yInches = Math.max(0, (node.y() - offsetY) / pxPerInch - rotatedBox.depth / 2);
     node.scaleX(1);
     node.scaleY(1);
-    onChange({ rotation: finalRotation });
+    const patch = {
+      rotation,
+      x_inches: snapToGrid(xInches, GRID_SNAP_INCHES),
+      y_inches: snapToGrid(yInches, GRID_SNAP_INCHES),
+    };
+    if (!canCommitPatch(patch)) {
+      revertNode();
+      return;
+    }
+    onChange(patch);
   };
 
   return (
     <>
       <Group
         ref={groupRef}
-        x={x}
-        y={y}
-        draggable
-        onClick={onSelect}
-        onTap={onSelect}
-        onDragEnd={handleDragEnd}
-        onContextMenu={(e) => {
-          e.evt.preventDefault();
-          onSelect();
-          onContextMenu?.({
-            x: e.evt.clientX,
-            y: e.evt.clientY,
-            item,
-          });
-        }}
-        rotation={item.rotation || 0}
+        x={cx}
+        y={cy}
         offsetX={w / 2}
         offsetY={d / 2}
+        rotation={rot}
+        draggable
+        onDragStart={handleDragStart}
+        onDragMove={handleDragMove}
+        onDragEnd={handleDragEnd}
+        onTransformEnd={handleTransformEnd}
+        onClick={(e) => { e.cancelBubble = true; onSelect(); }}
+        onTap={(e) => { e.cancelBubble = true; onSelect(); }}
       >
         <Rect
           width={w}
           height={d}
-          fill={hasCollision ? '#fecaca' : color}
-          stroke={hasCollision ? '#ef4444' : isSelected ? '#2563eb' : '#555'}
-          strokeWidth={hasCollision ? 2.5 : isSelected ? 2 : 1}
-          cornerRadius={3}
-          opacity={0.85}
-          shadowColor="rgba(0,0,0,0.1)"
-          shadowBlur={isSelected ? 8 : 2}
+          fill={color}
+          stroke={selected ? '#100f0d' : 'rgba(16,15,13,0.35)'}
+          strokeWidth={selected ? 2 : 1}
+          cornerRadius={2}
+          shadowColor="rgba(0,0,0,0.15)"
+          shadowBlur={selected ? 12 : 4}
           shadowOffset={{ x: 0, y: 2 }}
         />
+        <Rect width={w} height={3} fill="rgba(16,15,13,0.35)" />
         <Text
-          text={item.name || item.category || '?'}
-          x={4}
-          y={4}
-          width={w - 8}
-          fontSize={Math.min(12, w / 5)}
-          fill="#333"
-          wrap="none"
+          x={6} y={6}
+          width={Math.max(0, w - 12)}
+          text={item.name || item.category}
+          fontSize={11}
+          fontFamily="Inter, sans-serif"
+          fill="rgba(16,15,13,0.85)"
           ellipsis
+          listening={false}
         />
-        {item.width && item.depth && (
-          <Text
-            text={`${item.width}"×${item.depth}"`}
-            x={4}
-            y={d - 16}
-            width={w - 8}
-            fontSize={9}
-            fill="#666"
-            wrap="none"
-          />
-        )}
+        <Text
+          x={6} y={d - 16}
+          width={Math.max(0, w - 12)}
+          text={`${item.width}" × ${item.depth}"`}
+          fontSize={9}
+          fill="rgba(16,15,13,0.55)"
+          listening={false}
+        />
       </Group>
-      {isSelected && (
+      {selected && (
         <Transformer
-          ref={trRef}
+          ref={transformerRef}
+          enabledAnchors={[]}
           rotateEnabled
-          resizeEnabled={false}
-          borderStroke="#2563eb"
-          borderStrokeWidth={1.5}
-          anchorStroke="#2563eb"
-          anchorFill="#dbeafe"
-          anchorSize={10}
-          anchorCornerRadius={5}
-          rotateAnchorOffset={20}
-          rotationSnaps={[0, 90, 180, 270]}
-          rotateAnchorCursor="grab"
-          onTransformEnd={handleTransformEnd}
+          rotateAnchorOffset={22}
+          borderStroke="#100f0d"
+          borderStrokeWidth={1}
+          anchorStroke="#100f0d"
+          anchorFill="#faf7f1"
+          anchorSize={8}
+          keepRatio
+          boundBoxFunc={(oldBox) => oldBox}
         />
       )}
     </>

@@ -476,8 +476,7 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
         const { data } = await supabaseAdmin.from('placements').select('*').eq('room_id', roomId);
         allPlacements = data || [];
       } else {
-        const updatedRoom = fallback.getRoom(roomId, '');
-        allPlacements = updatedRoom?.placements || [];
+        allPlacements = fallback.getPlacementsForRoom(roomId);
       }
 
       // Run the arrange_room logic on all placements

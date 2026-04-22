@@ -1,48 +1,28 @@
 import { useEffect, useState } from 'react';
-import { supabase, hasSupabase } from '@/lib/supabaseClient';
+import { supabase } from '@/lib/supabaseClient';
 
-// Auth hook with graceful demo fallback when Supabase is unavailable.
-// Returns { user, loading, signInWithEmail, signOut, isDemo }.
 export function useAuth() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [isDemo, setIsDemo] = useState(!hasSupabase);
 
   useEffect(() => {
-    let sub = null;
-    if (!hasSupabase) {
-      setUser({ id: 'demo-user', email: 'demo@vision.studio' });
-      setLoading(false);
-      setIsDemo(true);
-      return;
-    }
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? { id: 'demo-user', email: 'demo@vision.studio' });
-      setIsDemo(!session?.user);
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ?? null);
       setLoading(false);
     });
-    const { data } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user ?? { id: 'demo-user', email: 'demo@vision.studio' });
-      setIsDemo(!session?.user);
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
     });
-    sub = data.subscription;
-    return () => sub?.unsubscribe?.();
+    return () => sub.subscription.unsubscribe();
   }, []);
 
-  const signInWithEmail = async (email) => {
-    if (!hasSupabase) throw new Error('Supabase not configured');
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.origin },
-    });
-    if (error) throw error;
-  };
+  const signIn = (email, password) =>
+    supabase.auth.signInWithPassword({ email, password });
 
-  const signOut = async () => {
-    if (hasSupabase) await supabase.auth.signOut();
-    setUser({ id: 'demo-user', email: 'demo@vision.studio' });
-    setIsDemo(true);
-  };
+  const signUp = (email, password) =>
+    supabase.auth.signUp({ email, password });
 
-  return { user, loading, signInWithEmail, signOut, isDemo };
+  const signOut = () => supabase.auth.signOut();
+
+  return { user, loading, signIn, signUp, signOut };
 }

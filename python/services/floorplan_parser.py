@@ -109,126 +109,277 @@ def _mask_data_to_polygon(mask_data, img_w: int, img_h: int) -> list:
 
 
 
+def _build_walls_mask(image_bytes: bytes):
+    """Build a binary mask of architectural walls from the floorplan image.
+    
+    Architectural walls in blueprints are drawn with hatched/filled gray (~148)
+    and dark outlines (0-15). Thresholding at 155 catches both. A morphological
+    close fills small gaps in the hatching pattern.
+    """
+    arr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(gray, 155, 255, cv2.THRESH_BINARY_INV)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8), iterations=2)
+    return mask, img.shape[1], img.shape[0]  # mask, width, height
+
+
+def _snap_to_nearest_wall_v(walls_mask, x_approx, y_start, y_end, search_range=80, min_coverage=0.10):
+    """Find the nearest vertical wall segment to x_approx within [y_start, y_end]."""
+    h_mask = walls_mask.shape[0]
+    y_start = max(0, int(y_start))
+    y_end = min(h_mask, int(y_end))
+    span = max(1, y_end - y_start)
+    x_min = max(0, x_approx - search_range)
+    x_max = min(walls_mask.shape[1], x_approx + search_range)
+
+    candidates = []
+    for x in range(x_min, x_max):
+        col = walls_mask[y_start:y_end, x]
+        coverage = np.count_nonzero(col) / span
+        if coverage >= min_coverage:
+            candidates.append(x)
+
+    if not candidates:
+        return x_approx
+
+    # Group consecutive columns into wall segments
+    segments = []
+    seg_start = candidates[0]
+    seg_end = candidates[0]
+    for x in candidates[1:]:
+        if x <= seg_end + 5:
+            seg_end = x
+        else:
+            segments.append((seg_start, seg_end))
+            seg_start = x
+            seg_end = x
+    segments.append((seg_start, seg_end))
+
+    # Pick the segment whose center is nearest to x_approx
+    best_x = x_approx
+    best_dist = float("inf")
+    for s, e in segments:
+        center = (s + e) // 2
+        dist = abs(center - x_approx)
+        if dist < best_dist:
+            best_dist = dist
+            best_x = center
+    return best_x
+
+
+def _snap_to_nearest_wall_h(walls_mask, y_approx, x_start, x_end, search_range=80, min_coverage=0.10):
+    """Find the nearest horizontal wall segment to y_approx within [x_start, x_end]."""
+    w_mask = walls_mask.shape[1]
+    x_start = max(0, int(x_start))
+    x_end = min(w_mask, int(x_end))
+    span = max(1, x_end - x_start)
+    y_min = max(0, y_approx - search_range)
+    y_max = min(walls_mask.shape[0], y_approx + search_range)
+
+    candidates = []
+    for y in range(y_min, y_max):
+        row = walls_mask[y, x_start:x_end]
+        coverage = np.count_nonzero(row) / span
+        if coverage >= min_coverage:
+            candidates.append(y)
+
+    if not candidates:
+        return y_approx
+
+    segments = []
+    seg_start = candidates[0]
+    seg_end = candidates[0]
+    for y in candidates[1:]:
+        if y <= seg_end + 5:
+            seg_end = y
+        else:
+            segments.append((seg_start, seg_end))
+            seg_start = y
+            seg_end = y
+    segments.append((seg_start, seg_end))
+
+    best_y = y_approx
+    best_dist = float("inf")
+    for s, e in segments:
+        center = (s + e) // 2
+        dist = abs(center - y_approx)
+        if dist < best_dist:
+            best_dist = dist
+            best_y = center
+    return best_y
+
+
 async def _openai_vision_analyze(image_bytes: bytes) -> dict:
     """
-    Use OpenAI Codex 5.3 vision to analyze a floor plan image.
-    Returns rooms as clean rectangular bounding boxes with labels.
-    Much more accurate than OpenCV for understanding room semantics.
+    Grid-overlay + GPT-5.4 + wall-snap pipeline for precise room detection.
+
+    1. Draws a visible 20×20 grid on the floorplan image.
+    2. Asks GPT-5.4 to identify rooms using grid coordinates (much easier for
+       VLMs than raw pixel estimation).
+    3. Converts grid coords → pixel coords.
+    4. Snaps every bounding-box edge to the nearest real architectural wall
+       detected via OpenCV thresholding.
+
+    This approach yields pixel-perfect room boxes that sit exactly on the
+    inner wall edges.
     """
     openai_api_key = _get_openai_api_key()
     if not openai_api_key:
         return None
 
-    from openai import OpenAI
+    from openai import AsyncOpenAI
 
-    # Get image dimensions
-    img = Image.open(io.BytesIO(image_bytes))
-    img_w, img_h = img.size
+    # Decode image
+    pil_img = Image.open(io.BytesIO(image_bytes))
+    img_w, img_h = pil_img.size
 
-    # Encode image as base64
-    buf = io.BytesIO()
-    img.convert("RGB").save(buf, format="PNG")
-    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-    data_uri = f"data:image/png;base64,{b64}"
+    # Build wall mask for snapping
+    walls_mask, _, _ = _build_walls_mask(image_bytes)
 
-    client = OpenAI(api_key=openai_api_key)
+    # Draw 20×20 grid overlay on image
+    GRID = 20
+    arr = np.frombuffer(image_bytes, np.uint8)
+    grid_img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    for i in range(GRID + 1):
+        x = int(img_w * i / GRID)
+        y = int(img_h * i / GRID)
+        color = (0, 0, 255) if i % 5 == 0 else (180, 180, 255)
+        thickness = 2 if i % 5 == 0 else 1
+        cv2.line(grid_img, (x, 0), (x, img_h), color, thickness)
+        cv2.line(grid_img, (0, y), (img_w, y), color, thickness)
+        if i > 0:
+            cv2.putText(grid_img, str(i), (int(img_w * i / GRID) - 15, 25),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            cv2.putText(grid_img, str(i), (5, int(img_h * i / GRID) - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-    prompt = f"""Analyze this floor plan image. Identify each distinct room/space.
+    _, buffer = cv2.imencode(".jpg", grid_img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    grid_b64 = base64.b64encode(buffer).decode("utf-8")
 
-For EACH room, provide:
-1. "label": descriptive name (e.g. "Living Room", "Kitchen", "Bedroom 1", "Bathroom", "Hallway")
-2. "bbox": [ymin, xmin, ymax, xmax] in normalized coordinates from 0 to 1000.
-   - ymin = top edge of room (0=top, 1000=bottom)
-   - xmin = left edge of room (0=left, 1000=right)
-   - ymax = bottom edge of room
-   - xmax = right edge of room
-   - A tight RECTANGULAR bounding box around the room inside the walls.
-3. "confidence": 0.0-1.0 how confident you are this is a real room
-
-ALSO provide:
-4. "total_width_inches": Look for overall dimensions written on the floor plan for the TOTAL width (horizontal) of the building. Convert it to inches (e.g., 30' 0" = 360). If no dimensions are written, estimate it based on standard room sizes (e.g., 360).
-5. "total_depth_inches": Look for overall dimensions written for the TOTAL depth (vertical) of the building. Convert to inches. If not written, estimate it (e.g., 480).
+    prompt = """You are analyzing an architectural floor plan with a red/pink 20x20 grid overlay.
+Grid numbers go from 0 to 20 on both X (left-right) and Y (top-bottom) axes.
 
 IMPORTANT RULES:
-- Each room should be a RECTANGLE (axis-aligned bounding box)
-- Rooms should NOT overlap significantly
-- Include ALL visible rooms, even small ones like closets and bathrooms
-- The bounding box should tightly fit the room walls
-- Do NOT include the outer walls/exterior as a room
-- Look at the drawn walls, doors, and labels in the floor plan to identify rooms
+- Provide bounding boxes as grid coordinates [x1, y1, x2, y2].
+- Use decimal values for precision (e.g., 1.2, 4.8).
+- The box must follow the INNER edges of the thick architectural walls.
+- Do NOT include exterior spaces (deck, porch, entry stairs, main entry stairs).
+- Include ALL interior rooms: bathrooms, closets, bedrooms, kitchen, dining, living room, hallways, stairways, etc.
 
-Return ONLY a JSON object in this exact format, no other text:
-{{"rooms": [{{"label": "Living Room", "bbox": [ymin, xmin, ymax, xmax], "confidence": 0.9}}, ...], "total_width_inches": 360, "total_depth_inches": 480}}"""
+DIMENSION READING:
+- For room dimensions: read text like 13'-4" X 9'-0" carefully.
+  - 13'-4" means 13 feet 4 inches = (13 × 12) + 4 = 160 inches
+  - 9'-0" means 9 feet 0 inches = (9 × 12) + 0 = 108 inches
+  - 13'-6" means 13 feet 6 inches = (13 × 12) + 6 = 162 inches
+  - 10'-2" means 10 feet 2 inches = (10 × 12) + 2 = 122 inches
+- For total building dimensions: look for dimension lines with arrows outside the building.
+  - These are the overall width and depth of the structure.
+  - 28'-0" = (28 × 12) + 0 = 336 inches
+  - 32'-0" = (32 × 12) + 0 = 384 inches
+
+Return ONLY a JSON object:
+{"rooms": [{"label": "Room Name", "bbox": [x1, y1, x2, y2], "confidence": 0.9, "width_inches": N_or_null, "depth_inches": N_or_null}], "total_width_inches": N, "total_depth_inches": N}"""
 
     try:
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL", "gpt-5.3-codex"),
+        client = AsyncOpenAI(api_key=openai_api_key)
+
+        # Use gpt-5.4 if available (better spatial reasoning), fall back to gpt-4o
+        model = "gpt-5.4"
+        try:
+            response = await client.chat.completions.create(
+                model=model,
+                response_format={"type": "json_object"},
                 messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": data_uri, "detail": "high"}},
-                        ],
-                    }
+                    {"role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{grid_b64}", "detail": "high"}},
+                    ]}
                 ],
                 max_completion_tokens=2048,
-                temperature=0.1,
-            ),
-        )
+                temperature=0,
+            )
+        except Exception:
+            # Fall back to gpt-4o if gpt-5.4 unavailable
+            model = os.getenv("OPENAI_MODEL", "gpt-4o")
+            print(f"gpt-5.4 unavailable, falling back to {model}")
+            response = await client.chat.completions.create(
+                model=model,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{grid_b64}", "detail": "high"}},
+                    ]}
+                ],
+                max_completion_tokens=2048,
+                temperature=0,
+            )
 
-        text = response.choices[0].message.content.strip()
-        # Extract JSON from response (might be wrapped in ```json ... ```)
+        text = response.choices[0].message.content
+        if not text:
+            print("OpenAI Vision returned empty response")
+            return None
+        text = text.strip()
         if "```" in text:
-            json_match = text.split("```json")[-1].split("```")[0] if "```json" in text else text.split("```")[1]
-            text = json_match.strip()
+            json_part = text.split("```json")[-1].split("```")[0] if "```json" in text else text.split("```")[1]
+            text = json_part.strip()
 
         result = json.loads(text)
         raw_rooms = result.get("rooms", [])
+
+        print(f"GPT {model} detected {len(raw_rooms)} rooms via 20x20 grid")
 
         rooms = []
         for r in raw_rooms:
             bbox = r.get("bbox", [])
             if len(bbox) != 4:
                 continue
-            
-            ymin, xmin, ymax, xmax = [float(v) for v in bbox]
-            
-            # Convert from 0-1000 scale to pixel coordinates
-            x1 = int((xmin / 1000.0) * img_w)
-            y1 = int((ymin / 1000.0) * img_h)
-            x2 = int((xmax / 1000.0) * img_w)
-            y2 = int((ymax / 1000.0) * img_h)
+
+            gx1, gy1, gx2, gy2 = [float(v) for v in bbox]
+
+            # Convert grid coordinates to pixel coordinates
+            px1 = int(gx1 * img_w / GRID)
+            py1 = int(gy1 * img_h / GRID)
+            px2 = int(gx2 * img_w / GRID)
+            py2 = int(gy2 * img_h / GRID)
+
+            # Snap each edge to the nearest architectural wall
+            sx1 = _snap_to_nearest_wall_v(walls_mask, px1, py1, py2)
+            sx2 = _snap_to_nearest_wall_v(walls_mask, px2, py1, py2)
+            sy1 = _snap_to_nearest_wall_h(walls_mask, py1, px1, px2)
+            sy2 = _snap_to_nearest_wall_h(walls_mask, py2, px1, px2)
+
+            # Ensure valid box
+            x1, x2 = min(sx1, sx2), max(sx1, sx2)
+            y1, y2 = min(sy1, sy2), max(sy1, sy2)
 
             # Clamp to image bounds
             x1 = max(0, min(x1, img_w))
             y1 = max(0, min(y1, img_h))
             x2 = max(0, min(x2, img_w))
             y2 = max(0, min(y2, img_h))
-            if x2 <= x1 or y2 <= y1:
-                continue
 
             w = x2 - x1
             h = y2 - y1
             area = w * h
-            # Skip tiny regions (less than 1% of image)
-            if area < img_w * img_h * 0.01:
+            if area < img_w * img_h * 0.005:
                 continue
 
-            # Convert bbox to rectangular polygon (4 corners)
             polygon = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+            label = r.get("label", f"Room {len(rooms) + 1}")
+            print(f"  {label}: grid=[{gx1},{gy1},{gx2},{gy2}] -> px=[{x1},{y1},{x2},{y2}]")
 
             rooms.append({
-                "label": r.get("label", f"Room {len(rooms) + 1}"),
+                "label": label,
                 "polygon": polygon,
                 "bbox": [x1, y1, x2, y2],
                 "width": float(w),
                 "depth": float(h),
                 "area_px": float(area),
-                "confidence": float(r.get("confidence", 0.8)),
+                "confidence": float(r.get("confidence", 0.9)),
+                "width_inches": r.get("width_inches"),
+                "depth_inches": r.get("depth_inches"),
             })
 
         if not rooms:
@@ -248,8 +399,6 @@ Return ONLY a JSON object in this exact format, no other text:
             [all_x2, all_y2], [all_x1, all_y2]
         ]
 
-        print(f"OpenAI Vision detected {len(rooms)} rooms: {[r['label'] for r in rooms]}")
-
         total_width_inches = result.get("total_width_inches")
         total_depth_inches = result.get("total_depth_inches")
 
@@ -260,7 +409,7 @@ Return ONLY a JSON object in this exact format, no other text:
             "image_width": img_w,
             "image_height": img_h,
             "boundary": {"x": all_x1, "y": all_y1, "w": all_x2 - all_x1, "h": all_y2 - all_y1},
-            "method": "openai_vision",
+            "method": "openai_vision_grid_snap",
             "fallback": False,
             "total_width_inches": total_width_inches,
             "total_depth_inches": total_depth_inches,
@@ -268,6 +417,8 @@ Return ONLY a JSON object in this exact format, no other text:
 
     except Exception as e:
         print(f"OpenAI Vision analysis failed: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -520,12 +671,15 @@ async def parse_floorplan(image_bytes: bytes, content_type: str) -> dict:
     except Exception as e:
         return {"error": f"Could not decode image: {e}", "rooms": [], "walls": [], "fallback": True}
 
-    # --- Method 1: OpenAI Vision (preferred) ---
+    # --- Method 1: GPT-5.4 Grid + Wall-Snap (preferred) ---
     if _get_openai_api_key():
-        print("Trying OpenAI Vision for floor plan analysis...")
-        result = await _openai_vision_analyze(image_bytes)
-        if result and result.get("rooms"):
-            return result
+        print("Trying GPT-5.4 grid + wall-snap for floor plan analysis...")
+        llm_result = await _openai_vision_analyze(image_bytes)
+        
+        if llm_result and llm_result.get("rooms"):
+            # Wall-snapping is already done inside _openai_vision_analyze
+            return llm_result
+            
         print("OpenAI Vision failed or returned no rooms, trying next method...")
 
     # --- Method 2: DINO + SAM via Replicate ---

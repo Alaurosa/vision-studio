@@ -21,6 +21,8 @@ function normalizeZones(parseResult) {
     width: room.width || (room.bbox?.[2] != null ? room.bbox[2] - room.bbox[0] : null),
     depth: room.depth || (room.bbox?.[3] != null ? room.bbox[3] - room.bbox[1] : null),
     confidence: room.confidence || null,
+    width_inches: room.width_inches || null,
+    depth_inches: room.depth_inches || null,
   }));
 }
 

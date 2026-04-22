@@ -1,6 +1,7 @@
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import clsx from 'clsx';
+import { useAuth } from '@/hooks/useAuth';
 
 const links = [
   { to: '/',        label: 'Home' },
@@ -10,9 +11,16 @@ const links = [
 
 export default function Navbar() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const { user, signOut } = useAuth();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isStudio = pathname.startsWith('/studio');
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login');
+  };
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10);
@@ -66,10 +74,24 @@ export default function Navbar() {
           ))}
         </nav>
 
-        <div className="flex items-center gap-3">
-          <Link to="/upload" className="hidden md:inline-flex btn-ink text-[10px] py-2 px-4">
-            Get Started
-          </Link>
+        <div className="flex items-center gap-4">
+          {user ? (
+            <>
+              <span className="hidden md:inline text-[11px] uppercase tracking-editorial text-ink-500">
+                {user.email}
+              </span>
+              <button
+                onClick={handleSignOut}
+                className="hidden md:inline text-[11px] uppercase tracking-editorial text-ink-500 hover:text-ink-900 transition"
+              >
+                Sign out
+              </button>
+            </>
+          ) : (
+            <Link to="/login" className="hidden md:inline-flex btn-ink text-[10px] py-2 px-4">
+              Sign in
+            </Link>
+          )}
 
           {/* Mobile hamburger */}
           <button
@@ -103,9 +125,23 @@ export default function Navbar() {
                 {l.label}
               </NavLink>
             ))}
-            <Link to="/upload" className="btn-ink text-[10px] py-2 px-4 text-center mt-2">
-              Get Started
-            </Link>
+            {user ? (
+              <>
+                <p className="text-[11px] uppercase tracking-editorial text-ink-500 pt-2">
+                  {user.email}
+                </p>
+                <button
+                  onClick={handleSignOut}
+                  className="btn-ink text-[10px] py-2 px-4 text-center mt-2"
+                >
+                  Sign out
+                </button>
+              </>
+            ) : (
+              <Link to="/login" className="btn-ink text-[10px] py-2 px-4 text-center mt-2">
+                Sign in
+              </Link>
+            )}
           </nav>
         </div>
       )}

@@ -1,17 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_ANON_KEY || 'placeholder-key';
-const isPlaceholder = supabaseUrl.includes('placeholder');
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_ANON_KEY;
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+if (!supabaseUrl || !supabaseKey) {
+  console.warn(
+    '[auth] SUPABASE_URL / SUPABASE_ANON_KEY missing — every request will 401.'
+  );
+}
 
-// Demo user for when Supabase auth is unavailable
-const DEMO_USER = {
-  id: 'demo-user-00000000-0000-0000-0000-000000000000',
-  email: 'demo@visionstudio.local',
-  role: 'authenticated',
-};
+const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseKey || 'placeholder-key'
+);
 
 export async function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -20,27 +21,14 @@ export async function requireAuth(req, res, next) {
   }
   const token = authHeader.split(' ')[1];
 
-  // Demo mode: if token is 'demo' or Supabase is placeholder, use demo user
-  if (token === 'demo' || isPlaceholder) {
-    req.user = DEMO_USER;
-    return next();
-  }
-
   try {
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser(token);
-    if (error || !user) {
-      // Fallback to demo user if Supabase auth fails (e.g. expired/invalid in dev)
-      req.user = DEMO_USER;
-      return next();
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data.user) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
     }
-    req.user = user;
+    req.user = data.user;
     next();
-  } catch {
-    // Network error reaching Supabase — fall back to demo
-    req.user = DEMO_USER;
-    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Auth verification failed' });
   }
 }

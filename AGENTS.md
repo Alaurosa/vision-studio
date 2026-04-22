@@ -20,7 +20,7 @@ Full-stack implementation — monorepo with React client, Express server, and Fa
 | Styling       | Tailwind CSS 3.4 (warm neutral theme)         |
 | Server        | Express 4.19 (Node.js, ES modules)            |
 | AI/LLM        | OpenAI Codex 5.3 (function calling)               |
-| Python AI     | FastAPI + OpenAI Codex 5.3 Vision (primary room analysis) + Replicate (Grounding DINO + SAM 3) + OpenCV fallback (distance transform + watershed room segmentation) |
+| Python AI     | FastAPI + GPT-5.4 Vision (20×20 grid + wall-snap room segmentation) + Replicate (Grounding DINO + SAM 3) + OpenCV fallback |
 | Database      | Supabase (PostgreSQL + Auth + Storage)         |
 | 3D Models     | Meshy AI v2 (image-to-3D GLB generation) + catalog GLB URLs |
 | 3D Viewer     | React Three Fiber + @react-three/drei + GLTFLoader |
@@ -242,7 +242,8 @@ All tables use RLS — users can only access their own data.
 
 - Furniture can be rotated freely in the 2D editor via the Konva transformer handle, 15° toolbar nudges, or the in-canvas rotation slider.
 - The 3D viewer prefers real GLB assets from `model_url` and will request Meshy generation from `image_url` when a placement has no model yet.
-- Floorplan upload normalizes detected rooms into editable `zones` stored in room-local coordinates so GPT vision room segmentation can be rendered directly in the studio canvas.
+- Floorplan upload uses a 3-stage pipeline: (1) 20×20 grid overlay drawn on image, (2) GPT-5.4 identifies rooms via grid coordinates, (3) OpenCV wall-snap aligns each bbox edge to the nearest architectural wall. Results are normalized into editable `zones` stored in room-local coordinates.
+- GPT-5.4 also reads dimension labels from the floorplan (e.g., 13'-4" X 9'-0") and pre-populates room widthIn/depthIn in the RoomEditor.
 - The studio canvas supports room-focused editing: selecting a zone zooms the center pane to that room, constrains furniture placement to the selected room, and exposes draggable/resizable color-coded room boxes plus a bottom room inspector.
 - Client-side route changes reset the window scroll position to the top so navigation between Home, Upload, and Studio never preserves mid-page scroll offsets.
 - The homepage uses eased, staggered Framer Motion reveals with reduced-motion fallbacks so sections enter smoothly without abrupt jumps.

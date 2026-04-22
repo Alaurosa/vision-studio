@@ -19,9 +19,9 @@ function initZones(zones) {
     bbox: [...(z.bbox || [0, 0, 100, 100])],
     color: z.color || ROOM_ZONE_COLORS[i % ROOM_ZONE_COLORS.length],
     confidence: z.confidence ?? null,
-    // User-editable dimensions (in inches) — initialised later from scale
-    widthIn: null,
-    depthIn: null,
+    // Pre-populate from AI-detected dimensions if available
+    widthIn: z.width_inches || null,
+    depthIn: z.depth_inches || null,
   }));
 }
 
@@ -412,8 +412,9 @@ export default function RoomEditor({
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
             {zones.map((z, i) => {
               const [x1, y1, x2, y2] = z.bbox;
-              const wIn = pxToInches(x2 - x1, scale);
-              const hIn = pxToInches(y2 - y1, scale);
+              // If LLM parsed explicit dimensions, use them as defaults; otherwise compute from pixel scale
+              const wIn = z.widthIn || pxToInches(x2 - x1, scale);
+              const hIn = z.depthIn || pxToInches(y2 - y1, scale);
               const isSelected = z.id === selectedId;
               const isEditing = editPanel === z.id;
 

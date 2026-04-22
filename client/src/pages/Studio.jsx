@@ -9,7 +9,9 @@ import ChatPanel from '@/components/chatbot/ChatPanel';
 import RoomViewer3D from '@/components/viewer/RoomViewer3D';
 import StudioToolbar from '@/components/studio/StudioToolbar';
 import RoomSetupModal from '@/components/studio/RoomSetupModal';
+import ZoneBottomBar from '@/components/studio/ZoneBottomBar';
 import { ROOM_TEMPLATES } from '@/utils/constants';
+import { inchesToFeet } from '@/utils/scale';
 
 export default function Studio() {
   const { roomId } = useParams();
@@ -18,6 +20,7 @@ export default function Studio() {
   const [showSetup, setShowSetup] = useState(false);
   const [rooms, setRooms] = useState([]);
   const [loadingList, setLoadingList] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
 
   // Load the requested room, or show a dashboard/setup UI
   useEffect(() => {
@@ -51,6 +54,17 @@ export default function Studio() {
     }
   };
 
+  const deleteRoom = async (id, e) => {
+    e.stopPropagation();
+    if (!window.confirm('Delete this room and all its furniture? This cannot be undone.')) return;
+    try {
+      await api.delete(`/api/rooms/${id}`);
+      setRooms((prev) => prev.filter((r) => r.id !== id));
+    } catch (err) {
+      console.error('Delete room failed:', err);
+    }
+  };
+
   // -------- No room selected → room dashboard --------
   if (!roomId) {
     return (
@@ -62,22 +76,35 @@ export default function Studio() {
         </div>
 
         {loadingList ? (
-          <div className="text-ink-500 eyebrow">Loading rooms…</div>
-        ) : rooms.length === 0 ? (
           <div className="grid md:grid-cols-3 gap-6">
-            {ROOM_TEMPLATES.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => createAndEnter({ name: t.name, width: t.width, depth: t.depth, height: t.height })}
-                className="text-left panel p-8 hover:border-ink-900 transition group"
-              >
-                <div className="eyebrow mb-6 text-ink-500">Template</div>
-                <div className="display-md mb-3">{t.name}</div>
-                <div className="text-sm text-ink-500">
-                  {(t.width / 12).toFixed(1)}' × {(t.depth / 12).toFixed(1)}'
-                </div>
-              </button>
+            {[1, 2, 3].map(i => (
+              <div key={i} className="panel p-8 animate-pulse">
+                <div className="h-3 w-20 bg-ink-300/30 rounded mb-6" />
+                <div className="h-6 w-32 bg-ink-300/30 rounded mb-3" />
+                <div className="h-3 w-24 bg-ink-300/30 rounded" />
+              </div>
             ))}
+          </div>
+        ) : rooms.length === 0 ? (
+          <div>
+            <p className="text-ink-500 mb-8 max-w-lg leading-relaxed">
+              No rooms yet. Pick a template to get started, or create a custom room.
+            </p>
+            <div className="grid md:grid-cols-3 gap-6">
+              {ROOM_TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => createAndEnter({ name: t.name, width: t.width, depth: t.depth, height: t.height })}
+                  className="text-left panel p-8 hover:border-ink-900 transition group"
+                >
+                  <div className="eyebrow mb-6 text-ink-500">Template</div>
+                  <div className="display-md mb-3">{t.name}</div>
+                  <div className="text-sm text-ink-500">
+                    {inchesToFeet(t.width)} × {inchesToFeet(t.depth)}
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           <div className="grid md:grid-cols-3 gap-6">
@@ -85,15 +112,22 @@ export default function Studio() {
               <button
                 key={r.id}
                 onClick={() => openRoom(r.id)}
-                className="text-left panel p-8 hover:border-ink-900 transition"
+                className="text-left panel p-8 hover:border-ink-900 transition group relative"
               >
                 <div className="eyebrow mb-6 text-ink-500">
                   {r.placements?.length || 0} items
                 </div>
                 <div className="display-md mb-3">{r.name}</div>
                 <div className="text-sm text-ink-500">
-                  {r.width ? `${(r.width/12).toFixed(1)}' × ${(r.depth/12).toFixed(1)}'` : 'Unsized'}
+                  {r.width ? `${inchesToFeet(r.width)} × ${inchesToFeet(r.depth)}` : 'Unsized'}
                 </div>
+                <button
+                  onClick={(e) => deleteRoom(r.id, e)}
+                  className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] uppercase tracking-editorial px-3 py-1.5 rounded-full border border-red-300 text-red-600 hover:bg-red-600 hover:text-white"
+                  aria-label={`Delete ${r.name}`}
+                >
+                  Delete
+                </button>
               </button>
             ))}
           </div>
@@ -117,22 +151,42 @@ export default function Studio() {
 
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col bg-paper-100">
-      <StudioToolbar />
-      <div className="flex-1 grid grid-cols-[320px_minmax(0,1fr)_auto] overflow-hidden">
-        <aside className="border-r border-ink-900/10 bg-paper-50 overflow-y-auto">
+      <StudioToolbar onToggleCatalog={() => setCatalogOpen(!catalogOpen)} catalogOpen={catalogOpen} />
+      <div className="flex-1 flex overflow-hidden">
+        {/* Catalog — collapsible drawer on mobile, fixed sidebar on desktop */}
+        <aside className={`
+          ${catalogOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+          fixed md:relative z-30 md:z-auto inset-y-0 left-0
+          w-[320px] border-r border-ink-900/10 bg-paper-50 overflow-y-auto
+          transition-transform duration-300 md:transition-none
+          top-[calc(4rem+3.5rem)] md:top-0 h-[calc(100vh-4rem-3.5rem)] md:h-auto
+        `}>
           <CatalogPanel />
         </aside>
 
-        <section className="relative overflow-hidden">
-          {viewMode === '3d' ? (
-            <RoomViewer3D />
-          ) : (
-            <RoomCanvas />
-          )}
+        {/* Backdrop for mobile catalog */}
+        {catalogOpen && (
+          <div
+            className="fixed inset-0 z-20 bg-ink-900/20 md:hidden"
+            onClick={() => setCatalogOpen(false)}
+          />
+        )}
+
+        <section className="relative overflow-hidden flex-1 min-w-0">
+          <div className="h-full flex flex-col">
+            <div className="min-h-0 flex-1 relative overflow-hidden">
+              {viewMode === '3d' ? (
+                <RoomViewer3D />
+              ) : (
+                <RoomCanvas />
+              )}
+            </div>
+            <ZoneBottomBar />
+          </div>
         </section>
 
         {isChatOpen && (
-          <aside className="w-[360px] border-l border-ink-900/10 bg-paper-50 overflow-hidden flex flex-col">
+          <aside className="hidden md:flex w-[360px] border-l border-ink-900/10 bg-paper-50 overflow-hidden flex-col">
             <ChatPanel />
           </aside>
         )}

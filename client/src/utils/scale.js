@@ -45,3 +45,9 @@ export function computeRotation(item, nextRotation = null) {
     y_inches: Math.max(0, oldCenter.y - newBbox.depth / 2),
   };
 }
+
+/**
+ * Format inches to a readable feet string, e.g. 180 → "15.0'"
+ */
+export const inchesToFeet = (inches) => `${(inches / 12).toFixed(1)}'`;
+

@@ -1,13 +1,8 @@
 import express from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { supabaseAdmin } from '../services/supabase.js';
-import * as fallback from '../services/fallbackStore.js';
+import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 
 const router = express.Router();
-
-async function useDb() {
-  return fallback.checkDbAvailable(supabaseAdmin);
-}
 
 // GET /api/furniture/catalog?category=sofa&provider=ikea&q=billy
 router.get('/catalog', async (req, res) => {

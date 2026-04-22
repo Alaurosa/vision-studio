@@ -11,28 +11,10 @@ const STEPS = [
   { key: 'finalize',   label: 'Finalizing geometry',    eyebrow: '06' },
 ];
 
-function normalizeRoomsToZones(rooms, boundary) {
-  const originX = boundary?.x || 0;
-  const originY = boundary?.y || 0;
-  return rooms.map((room, index) => {
-    const polygon = (room.polygon || []).map(([x, y]) => [x - originX, y - originY]);
-    const bbox = room.bbox || [];
-    const nextBbox = bbox.length === 4
-      ? [bbox[0] - originX, bbox[1] - originY, bbox[2] - originX, bbox[3] - originY]
-      : bbox;
-    return {
-      id: room.id || `zone-${index}`,
-      name: room.label || `Room ${index + 1}`,
-      polygon,
-      bbox: nextBbox,
-      width: nextBbox.length === 4 ? nextBbox[2] - nextBbox[0] : room.width,
-      depth: nextBbox.length === 4 ? nextBbox[3] - nextBbox[1] : room.depth,
-      color: room.color || null,
-      confidence: room.confidence || null,
-    };
-  });
-}
-
+/**
+ * AnalysisWorkflow runs the floor-plan upload + AI parse pipeline
+ * and calls onComplete(room, parseResult, imageUrl) when finished.
+ */
 export default function AnalysisWorkflow({ file, roomName, onComplete, onError }) {
   const [step, setStep] = useState(0);
   const ranRef = useRef(false);
@@ -74,40 +56,24 @@ export default function AnalysisWorkflow({ file, roomName, onComplete, onError }
 
       await advance(5);
 
-      // 3. Persist detected geometry.  The server returns either:
-      //    - parse_result.rooms  = [{ label, polygon, bbox, width, depth }]
-      //    - parse_result.walls  = [{ start, end }]
-      //    - parse_result.points = [[x,y], ...]  (legacy fallback polygon)
-      const pr = data?.parse_result || {};
-      const updates = {};
-      const boundary = pr.boundary || null;
-
-      if (Array.isArray(pr.rooms) && pr.rooms.length) {
-        updates.zones = normalizeRoomsToZones(pr.rooms, boundary);
-      } else if (Array.isArray(pr.walls) && pr.walls.length) {
-        updates.walls = pr.walls;
-      } else if (Array.isArray(pr.points) && pr.points.length) {
-        updates.walls = pr.points;
+      // 3. Build image URL for the room editor
+      // The server returns floor_plan_url which may be a Supabase URL or a local path
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+      let imageUrl = data?.floor_plan_url || '';
+      if (imageUrl.startsWith('/uploads/')) {
+        imageUrl = `${baseUrl}${imageUrl}`;
       }
-      if (Array.isArray(pr.walls) && pr.walls.length) {
-        updates.walls = boundary
-          ? pr.walls.map(([x, y]) => [x - boundary.x, y - boundary.y])
-          : pr.walls;
-      }
-      if (pr.scale_px_per_inch) updates.scale_px_per_inch = pr.scale_px_per_inch;
-      if (boundary?.w) updates.width = Math.round(boundary.w);
-      if (boundary?.h) updates.depth = Math.round(boundary.h);
-      if (pr.room_width) updates.width = pr.room_width;
-      if (pr.room_depth) updates.depth = pr.room_depth;
-
-      if (Object.keys(updates).length) {
-        await api.put(`/api/rooms/${room.id}`, updates).catch((err) => {
-          console.warn('Failed to persist parsed geometry:', err?.message);
-        });
+      // Fallback: use the local file preview URL
+      if (!imageUrl) {
+        imageUrl = URL.createObjectURL(file);
       }
 
-      await new Promise((r) => setTimeout(r, 500));
-      onComplete?.(room);
+      const parseResult = data?.parse_result || {};
+
+      await new Promise((r) => setTimeout(r, 400));
+
+      // Pass room, parseResult, and imageUrl to parent for the room editor
+      onComplete?.(room, parseResult, imageUrl);
     } catch (e) {
       console.error(e);
       onError?.(e?.response?.data?.error || e.message);

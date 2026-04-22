@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid, Environment } from '@react-three/drei';
 import { useLayoutStore } from '@/store/layoutStore';
@@ -8,14 +9,27 @@ import SmartFurnitureModel from './SmartFurnitureModel';
 // Inches → meters
 const IN_TO_M = 0.0254;
 
+function LoadingOverlay() {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center z-10 bg-paper-100/80 pointer-events-none">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-2 border-ink-300 border-t-ink-900 rounded-full animate-spin" />
+        <span className="eyebrow text-ink-500">Loading 3D view…</span>
+      </div>
+    </div>
+  );
+}
+
 export default function RoomViewer3D() {
-  const { room, furniture } = useLayoutStore();
+  const { room, getVisibleFurniture } = useLayoutStore();
+  const furniture = getVisibleFurniture();
   const w = (room?.width || 180) * IN_TO_M;
   const d = (room?.depth || 144) * IN_TO_M;
   const h = (room?.height || 96) * IN_TO_M;
 
   return (
-    <div className="w-full h-full bg-paper-100">
+    <div className="w-full h-full bg-paper-100 relative">
+      <Suspense fallback={<LoadingOverlay />}>
       <Canvas shadows camera={{ position: [w * 1.1, h * 1.3, d * 1.4], fov: 45 }}>
         <color attach="background" args={['#f4efe4']} />
         <ambientLight intensity={0.55} />
@@ -79,6 +93,7 @@ export default function RoomViewer3D() {
 
         <OrbitControls target={[w / 2, h / 3, d / 2]} />
       </Canvas>
+      </Suspense>
     </div>
   );
 }

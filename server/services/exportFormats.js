@@ -120,8 +120,10 @@ export function buildDXF(room, placements) {
   for (const p of placements) {
     const x = p.x_inches || 0;
     const y = p.y_inches || 0;
-    const w = p.width || 0;
-    const d = p.depth || 0;
+    // Account for rotation: swap width/depth when rotated 90° or 270°
+    const rot = p.rotation || 0;
+    const w = (rot === 90 || rot === 270) ? (p.depth || 0) : (p.width || 0);
+    const d = (rot === 90 || rot === 270) ? (p.width || 0) : (p.depth || 0);
     lines.push('0', 'LINE', '8', 'FURNITURE', '10', String(x), '20', String(y), '11', String(x + w), '21', String(y));
     lines.push('0', 'LINE', '8', 'FURNITURE', '10', String(x + w), '20', String(y), '11', String(x + w), '21', String(y + d));
     lines.push('0', 'LINE', '8', 'FURNITURE', '10', String(x + w), '20', String(y + d), '11', String(x), '21', String(y + d));

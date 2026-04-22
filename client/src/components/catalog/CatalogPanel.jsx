@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLayoutStore } from '@/store/layoutStore';
 import { CATEGORY_COLORS } from '@/utils/constants';
 import api from '@/lib/api';
@@ -10,6 +10,7 @@ export default function CatalogPanel() {
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState('catalog'); // 'catalog' | 'recommended'
+  const initialRender = useRef(true);
 
   const { recommendedItems, addFurniture, findOpenSlot, room } = useLayoutStore();
 
@@ -26,8 +27,13 @@ export default function CatalogPanel() {
     }).catch(() => {});
   }, []);
 
-  // Debounced search
+  // Debounced search — skip initial render to avoid double-fetch
   useEffect(() => {
+    if (initialRender.current) {
+      initialRender.current = false;
+      search();
+      return;
+    }
     const t = setTimeout(() => search(), 300);
     return () => clearTimeout(t);
   }, [category, q]);
@@ -109,7 +115,7 @@ export default function CatalogPanel() {
                   className={`text-[10px] uppercase tracking-editorial rounded-full px-3 py-1 border transition ${
                     category === c ? 'bg-ink-900 text-paper-50 border-ink-900' : 'border-ink-900/15 text-ink-700 hover:border-ink-900'
                   }`}
-                >{c.replace('_', ' ')}</button>
+                >{c.replace(/_/g, ' ')}</button>
               ))}
             </div>
           </>
@@ -123,13 +129,32 @@ export default function CatalogPanel() {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {loading && tab === 'catalog' && (
-          <div className="text-ink-500 eyebrow py-10 text-center">Loading…</div>
+          <div className="space-y-2">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="border border-ink-900/10 bg-paper-50 p-4 animate-pulse">
+                <div className="aspect-[4/3] mb-3 bg-paper-200 rounded" />
+                <div className="h-4 w-3/4 bg-paper-300 rounded mb-2" />
+                <div className="h-3 w-1/2 bg-paper-200 rounded mb-3" />
+                <div className="h-8 w-full bg-paper-200 rounded-full" />
+              </div>
+            ))}
+          </div>
         )}
         {list.map((it) => (
           <div
             key={it.id || it.catalog_id || it.name}
             className="border border-ink-900/10 bg-paper-50 hover:border-ink-900 transition group"
           >
+            {it.image_url && (
+              <div className="aspect-[4/3] overflow-hidden bg-paper-200">
+                <img
+                  src={it.image_url}
+                  alt={it.name}
+                  className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
+                  loading="lazy"
+                />
+              </div>
+            )}
             <div className="p-4">
               <div className="flex justify-between gap-3 mb-1">
                 <div className="text-sm font-medium text-ink-900 truncate">{it.name}</div>

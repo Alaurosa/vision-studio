@@ -1,14 +1,9 @@
 import express from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { supabaseAdmin } from '../services/supabase.js';
+import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import { buildLayoutJSON, buildDXF, buildSVG } from '../services/exportFormats.js';
-import * as fallback from '../services/fallbackStore.js';
 
 const router = express.Router();
-
-async function useDb() {
-  return fallback.checkDbAvailable(supabaseAdmin);
-}
 
 async function getRoomAndPlacements(roomId, userId) {
   if (await useDb()) {

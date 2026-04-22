@@ -34,3 +34,14 @@ export const ROOM_TEMPLATES = [
   { id: 'office',     name: 'Home Office', width: 120, depth: 108, height: 96 },
   { id: 'dining',     name: 'Dining Room', width: 168, depth: 144, height: 96 },
 ];
+
+export const ROOM_ZONE_COLORS = [
+  '#c58d45',
+  '#4f8f6b',
+  '#4273b7',
+  '#9858a6',
+  '#b35c42',
+  '#5f7d4f',
+  '#c06b8f',
+  '#7b6cc7',
+];

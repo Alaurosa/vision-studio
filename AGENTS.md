@@ -65,45 +65,45 @@ vision-studio/
 │   ├── .env.local.example        # Template for client env vars
 │   └── src/
 │       ├── main.jsx              # ReactDOM.createRoot + StrictMode
-│       ├── App.jsx               # BrowserRouter — /, /dashboard, /editor/:roomId
+│       ├── App.jsx               # Route shell for home/upload/studio with scroll-to-top on navigation
 │       ├── index.css             # Tailwind directives + base body styles
 │       ├── lib/
 │       │   ├── supabaseClient.js # Supabase client singleton
-│       │   └── api.js            # Axios + JWT interceptor + 401 auto-signout
+│       │   └── api.js            # Axios + JWT interceptor + cached auth token + 401 auto-signout
 │       ├── hooks/
 │       │   └── useAuth.js        # Auth state, signInWithOtp, signOut
 │       ├── store/
 │       │   └── layoutStore.js    # Zustand: room, furniture, detections, chat, view state
 │       ├── utils/
 │       │   ├── constants.js      # Grid snap, clearance, category colors
-│       │   ├── scale.js          # px↔inches conversion, snap-to-grid
-│       │   ├── collision.js      # AABB detection, overlap check, room bounds
-│       │   └── exportLayout.js   # Build JSON export schema
+│       │   ├── scale.js          # px↔inches conversion, snap-to-grid, inchesToFeet formatter
+│       │   └── collision.js      # AABB detection, overlap check, room bounds
 │       ├── components/
 │       │   ├── layout/
-│       │   │   ├── Navbar.jsx        # Top nav (Home/Upload/Studio), scroll-aware
+│       │   │   ├── Navbar.jsx        # Top nav (Home/Upload/Studio), scroll-aware, mobile hamburger menu
 │       │   │   └── Footer.jsx        # Editorial footer (hidden in /studio)
 │       │   ├── canvas/
 │       │   │   ├── RoomCanvas.jsx    # Konva Stage with zoom/pan, room-zone overlays, and free-angle rotation controls
 │       │   │   ├── FurnitureItem.jsx # Draggable/rotatable Konva Group with Transformer-based free rotation
 │       │   │   ├── WallOutline.jsx   # Wall polygon/segment renderer
-│       │   │   └── GridOverlay.jsx   # 6" snap grid
+│       │   │   └── GridOverlay.jsx   # 6" snap grid (memoized)
 │       │   ├── upload/
 │       │   │   └── AnalysisWorkflow.jsx # 6-step animated floor-plan pipeline overlay
 │       │   ├── studio/
-│       │   │   ├── StudioToolbar.jsx # Undo/Redo/Grid/Validate/Auto-Arrange/2D/3D/Export/Chat
-│       │   │   └── RoomSetupModal.jsx # Template + dimensions picker
+│       │   │   ├── StudioToolbar.jsx # Undo/Redo/Grid/Validate/Auto-Arrange/2D/3D/Export/Chat/Shortcuts
+│       │   │   ├── RoomSetupModal.jsx # Template + dimensions picker
+│       │   │   └── ZoneBottomBar.jsx # Bottom room switcher + room box inspector/add-remove actions
 │       │   ├── catalog/
-│       │   │   └── CatalogPanel.jsx  # Search + category chips + Recommended tab
+│       │   │   └── CatalogPanel.jsx  # Search + category chips + product images + Recommended tab
 │       │   ├── viewer/
-│       │   │   ├── RoomViewer3D.jsx  # React Three Fiber — floor/walls/GLB furniture + OrbitControls
+│       │   │   ├── RoomViewer3D.jsx  # React Three Fiber — floor/walls/GLB furniture + OrbitControls + Suspense loading
 │       │   │   └── SmartFurnitureModel.jsx # Loads model_url GLBs or backfills via Meshy from product images
 │       │   └── chatbot/
 │       │       └── ChatPanel.jsx     # Agentic chat, 5 quick actions, auto-refresh on mutate
 │       └── pages/
-│           ├── Home.jsx              # Editorial landing (Batako-inspired: hero, process, quote band, services, CTA)
+│           ├── Home.jsx              # Editorial landing (Batako-inspired: hero, process, quote band, services, CTA, smooth staggered reveals)
 │           ├── Upload.jsx            # Drop-zone → AnalysisWorkflow → /studio/:roomId
-│           └── Studio.jsx            # Room dashboard + 3-panel editor (catalog / canvas|3D / chat)
+│           └── Studio.jsx            # Room dashboard (with delete) + responsive 3-panel editor (catalog drawer / canvas|3D / chat)
 │
 ├── server/                       # Node.js + Express backend
 │   ├── package.json
@@ -119,16 +119,20 @@ vision-studio/
 │   │   ├── auth.js               # GET /api/auth/me
 │   │   ├── rooms.js              # CRUD + floor plan upload + calibrate
 │   │   ├── furniture.js          # Catalog search + placements CRUD
-│   │   ├── layout.js             # LLM auto-placement + validation
-│   │   ├── chat.js               # Codex 5.3 agentic chat (8 tools: move/rotate/suggest/add/remove/validate/arrange/swap)
+│   │   ├── layout.js             # LLM auto-placement + validation (uses shared overlapResolver)
+│   │   ├── chat.js               # Agentic chat route (9 tools via chatFunctions.js)
 │   │   ├── models.js             # Meshy API v2 image-to-3D GLB generation
 │   │   ├── recognition.js        # Room photo → DINO detection + SAM click-segment
 │   │   └── export.js             # JSON/DXF/SVG download endpoints
 │   ├── services/
 │   │   ├── supabase.js           # Admin client (service role key)
+│   │   ├── db.js                 # Shared useDb() + re-exports supabaseAdmin/fallback
 │   │   ├── fallbackStore.js      # In-memory store when Supabase unavailable
+│   │   ├── fileStorage.js        # Shared local file storage helper (saves to uploads/)
+│   │   ├── overlapResolver.js    # Shared overlap resolver + layout validator
+│   │   ├── chatFunctions.js      # Chat tool definitions (9 tools) + executeFunction()
 │   │   ├── llmRouter.js          # OpenAI Codex 5.3 chat completions + function calling
-│   │   └── exportFormats.js      # Build JSON, SVG, DXF export payloads
+│   │   └── exportFormats.js      # Build JSON, SVG, DXF export payloads (rotation-aware)
 │   └── scripts/
 │       ├── setup.js              # Setup verification (env, DB, seed)
 │       └── seedFurniture.js      # Seed 22 IKEA + 5 Ashley catalog items
@@ -239,10 +243,13 @@ All tables use RLS — users can only access their own data.
 - Furniture can be rotated freely in the 2D editor via the Konva transformer handle, 15° toolbar nudges, or the in-canvas rotation slider.
 - The 3D viewer prefers real GLB assets from `model_url` and will request Meshy generation from `image_url` when a placement has no model yet.
 - Floorplan upload normalizes detected rooms into editable `zones` stored in room-local coordinates so GPT vision room segmentation can be rendered directly in the studio canvas.
+- The studio canvas supports room-focused editing: selecting a zone zooms the center pane to that room, constrains furniture placement to the selected room, and exposes draggable/resizable color-coded room boxes plus a bottom room inspector.
+- Client-side route changes reset the window scroll position to the top so navigation between Home, Upload, and Studio never preserves mid-page scroll offsets.
+- The homepage uses eased, staggered Framer Motion reveals with reduced-motion fallbacks so sections enter smoothly without abrupt jumps.
 
 ## Chatbot Function Calling
 
-The chat endpoint supports 8 layout manipulation functions via LLM tool use:
+The chat endpoint supports 9 layout manipulation functions via LLM tool use:
 - `move_furniture` — Move item to (x, y) position
 - `rotate_furniture` — Rotate to 0/90/180/270°
 - `suggest_furniture` — Query catalog by category, size, provider
@@ -251,6 +258,7 @@ The chat endpoint supports 8 layout manipulation functions via LLM tool use:
 - `validate_layout` — Check overlaps and bounds
 - `arrange_room` — AI auto-arrange all furniture (uses nested LLM call)
 - `swap_furniture` — Replace one item with another from catalog
+- `furnish_room` — Autonomously select + place + arrange furniture for a room type
 
 ## Agent Guidelines
 

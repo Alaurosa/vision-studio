@@ -95,47 +95,47 @@ export default function SmartFurnitureModel({ item, w, d, h, color }) {
       return;
     }
 
-    triggerGeneration();
+    triggerGeneration(item.image_url, item.catalog_id, item.name, item.id);
   }, [item.id, item.image_url, item.model_url]);
 
-  const persistModel = (url) => {
+  const persistModel = (url, itemId) => {
     setGlbUrl(url);
-    updateFurniture(item.id, { model_url: url });
+    updateFurniture(itemId, { model_url: url });
   };
 
-  const triggerGeneration = async () => {
+  const triggerGeneration = async (imageUrl, catalogId, name, itemId) => {
     try {
       setLoading(true);
       const { data } = await api.post('/api/models/generate', {
-        image_url: item.image_url,
-        catalog_id: item.catalog_id,
-        name: item.name,
+        image_url: imageUrl,
+        catalog_id: catalogId,
+        name: name,
       });
 
       if (!mountedRef.current) return;
 
       if (data.status === 'ready' && data.glb_url) {
-        modelCache.set(item.image_url, { status: 'ready', glb_url: data.glb_url });
-        persistModel(data.glb_url);
+        modelCache.set(imageUrl, { status: 'ready', glb_url: data.glb_url });
+        persistModel(data.glb_url, itemId);
         setLoading(false);
         return;
       }
 
       if (data.status === 'pending' && data.task_id) {
-        modelCache.set(item.image_url, { status: 'pending', task_id: data.task_id });
-        pollForModel(item.image_url, data.task_id, item.id);
+        modelCache.set(imageUrl, { status: 'pending', task_id: data.task_id });
+        pollForModel(imageUrl, data.task_id, itemId);
         return;
       }
 
-      modelCache.set(item.image_url, { status: data.status || 'unavailable' });
+      modelCache.set(imageUrl, { status: data.status || 'unavailable' });
       setLoading(false);
     } catch {
-      modelCache.set(item.image_url, { status: 'failed' });
+      modelCache.set(imageUrl, { status: 'failed' });
       if (mountedRef.current) setLoading(false);
     }
   };
 
-  const pollForModel = async (imageUrl, taskId) => {
+  const pollForModel = async (imageUrl, taskId, itemId) => {
     for (let attempt = 0; attempt < 36; attempt += 1) {
       try {
         const { data } = await api.get(`/api/models/status/${taskId}`);
@@ -143,7 +143,7 @@ export default function SmartFurnitureModel({ item, w, d, h, color }) {
 
         if (data.status === 'ready' && data.glb_url) {
           modelCache.set(imageUrl, { status: 'ready', glb_url: data.glb_url });
-          persistModel(data.glb_url);
+          persistModel(data.glb_url, itemId);
           setLoading(false);
           return;
         }

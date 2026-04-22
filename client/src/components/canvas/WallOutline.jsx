@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { Line } from 'react-konva';
 
 // Accepts several wall formats:
@@ -6,7 +7,7 @@ import { Line } from 'react-konva';
 // For a pixel polygon we map to the room box assuming the polygon is in
 // image pixels and we already know room.width/depth in inches; we scale the
 // polygon to the room box.
-export default function WallOutline({ walls, pxPerInch, offsetX, offsetY, roomWidth, roomDepth }) {
+export default function WallOutline({ walls, pxPerInch, offsetX, offsetY, roomWidth, roomDepth, viewOriginX = 0, viewOriginY = 0 }) {
   if (!walls || walls.length === 0) return null;
 
   // Detect format
@@ -21,26 +22,30 @@ export default function WallOutline({ walls, pxPerInch, offsetX, offsetY, roomWi
     const roomPxW = (roomWidth || 120) * pxPerInch;
     const roomPxH = (roomDepth || 120) * pxPerInch;
     const pts = walls.flatMap(([x, y]) => [
-      offsetX + ((x - minX) / w) * roomPxW,
-      offsetY + ((y - minY) / h) * roomPxH,
+      offsetX + (((x - minX) / w) * roomPxW) - viewOriginX * pxPerInch,
+      offsetY + (((y - minY) / h) * roomPxH) - viewOriginY * pxPerInch,
     ]);
     return <Line points={pts} closed stroke="#100f0d" strokeWidth={2} />;
   }
 
   if (walls[0]?.start && walls[0]?.end) {
-    return walls.map((seg, i) => (
-      <Line
-        key={i}
-        points={[
-          offsetX + seg.start[0] * pxPerInch,
-          offsetY + seg.start[1] * pxPerInch,
-          offsetX + seg.end[0] * pxPerInch,
-          offsetY + seg.end[1] * pxPerInch,
-        ]}
-        stroke="#100f0d"
-        strokeWidth={2}
-      />
-    ));
+    return (
+      <Fragment>
+        {walls.map((seg, i) => (
+          <Line
+            key={i}
+            points={[
+              offsetX + (seg.start[0] - viewOriginX) * pxPerInch,
+              offsetY + (seg.start[1] - viewOriginY) * pxPerInch,
+              offsetX + (seg.end[0] - viewOriginX) * pxPerInch,
+              offsetY + (seg.end[1] - viewOriginY) * pxPerInch,
+            ]}
+            stroke="#100f0d"
+            strokeWidth={2}
+          />
+        ))}
+      </Fragment>
+    );
   }
   return null;
 }

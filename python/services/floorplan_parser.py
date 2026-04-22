@@ -7,14 +7,20 @@ import numpy as np
 from PIL import Image
 import io
 import httpx
-
-REPLICATE_TOKEN = os.getenv("REPLICATE_API_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+from typing import Optional
 GROUNDING_DINO_MODEL = "adirik/grounding-dino:efd10a8ddc57ea28773327e881ce95e20cc1d734c589f7dd01d2036921ed78aa"
 SAM3_MODEL = "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83"
 
 # Room labels for Grounding DINO detection
 ROOM_LABELS = "room . bedroom . kitchen . bathroom . living room . hallway . dining room . office . closet . garage . laundry room"
+
+
+def _get_openai_api_key() -> Optional[str]:
+    return os.getenv("OPENAI_API_KEY")
+
+
+def _get_replicate_token() -> Optional[str]:
+    return os.getenv("REPLICATE_API_TOKEN")
 
 
 def _image_to_data_uri(image_bytes: bytes) -> tuple:
@@ -109,7 +115,8 @@ async def _openai_vision_analyze(image_bytes: bytes) -> dict:
     Returns rooms as clean rectangular bounding boxes with labels.
     Much more accurate than OpenCV for understanding room semantics.
     """
-    if not OPENAI_API_KEY:
+    openai_api_key = _get_openai_api_key()
+    if not openai_api_key:
         return None
 
     from openai import OpenAI
@@ -124,17 +131,23 @@ async def _openai_vision_analyze(image_bytes: bytes) -> dict:
     b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
     data_uri = f"data:image/png;base64,{b64}"
 
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    client = OpenAI(api_key=openai_api_key)
 
-    prompt = f"""Analyze this floor plan image ({img_w}x{img_h} pixels). Identify each distinct room/space.
+    prompt = f"""Analyze this floor plan image. Identify each distinct room/space.
 
 For EACH room, provide:
 1. "label": descriptive name (e.g. "Living Room", "Kitchen", "Bedroom 1", "Bathroom", "Hallway")
-2. "bbox": [x1, y1, x2, y2] in pixel coordinates — a tight RECTANGULAR bounding box around the room
-   - x1,y1 = top-left corner of the room
-   - x2,y2 = bottom-right corner of the room
-   - Coordinates must be in pixel space (0 to {img_w} for x, 0 to {img_h} for y)
+2. "bbox": [ymin, xmin, ymax, xmax] in normalized coordinates from 0 to 1000.
+   - ymin = top edge of room (0=top, 1000=bottom)
+   - xmin = left edge of room (0=left, 1000=right)
+   - ymax = bottom edge of room
+   - xmax = right edge of room
+   - A tight RECTANGULAR bounding box around the room inside the walls.
 3. "confidence": 0.0-1.0 how confident you are this is a real room
+
+ALSO provide:
+4. "total_width_inches": Look for overall dimensions written on the floor plan for the TOTAL width (horizontal) of the building. Convert it to inches (e.g., 30' 0" = 360). If no dimensions are written, estimate it based on standard room sizes (e.g., 360).
+5. "total_depth_inches": Look for overall dimensions written for the TOTAL depth (vertical) of the building. Convert to inches. If not written, estimate it (e.g., 480).
 
 IMPORTANT RULES:
 - Each room should be a RECTANGLE (axis-aligned bounding box)
@@ -145,14 +158,14 @@ IMPORTANT RULES:
 - Look at the drawn walls, doors, and labels in the floor plan to identify rooms
 
 Return ONLY a JSON object in this exact format, no other text:
-{{"rooms": [{{"label": "Living Room", "bbox": [x1, y1, x2, y2], "confidence": 0.9}}, ...]}}"""
+{{"rooms": [{{"label": "Living Room", "bbox": [ymin, xmin, ymax, xmax], "confidence": 0.9}}, ...], "total_width_inches": 360, "total_depth_inches": 480}}"""
 
     try:
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None,
             lambda: client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL", "gpt-4o"),
+                model=os.getenv("OPENAI_MODEL", "gpt-5.3-codex"),
                 messages=[
                     {
                         "role": "user",
@@ -181,7 +194,15 @@ Return ONLY a JSON object in this exact format, no other text:
             bbox = r.get("bbox", [])
             if len(bbox) != 4:
                 continue
-            x1, y1, x2, y2 = [int(v) for v in bbox]
+            
+            ymin, xmin, ymax, xmax = [float(v) for v in bbox]
+            
+            # Convert from 0-1000 scale to pixel coordinates
+            x1 = int((xmin / 1000.0) * img_w)
+            y1 = int((ymin / 1000.0) * img_h)
+            x2 = int((xmax / 1000.0) * img_w)
+            y2 = int((ymax / 1000.0) * img_h)
+
             # Clamp to image bounds
             x1 = max(0, min(x1, img_w))
             y1 = max(0, min(y1, img_h))
@@ -229,6 +250,9 @@ Return ONLY a JSON object in this exact format, no other text:
 
         print(f"OpenAI Vision detected {len(rooms)} rooms: {[r['label'] for r in rooms]}")
 
+        total_width_inches = result.get("total_width_inches")
+        total_depth_inches = result.get("total_depth_inches")
+
         return {
             "rooms": rooms,
             "walls": walls,
@@ -238,6 +262,8 @@ Return ONLY a JSON object in this exact format, no other text:
             "boundary": {"x": all_x1, "y": all_y1, "w": all_x2 - all_x1, "h": all_y2 - all_y1},
             "method": "openai_vision",
             "fallback": False,
+            "total_width_inches": total_width_inches,
+            "total_depth_inches": total_depth_inches,
         }
 
     except Exception as e:
@@ -495,7 +521,7 @@ async def parse_floorplan(image_bytes: bytes, content_type: str) -> dict:
         return {"error": f"Could not decode image: {e}", "rooms": [], "walls": [], "fallback": True}
 
     # --- Method 1: OpenAI Vision (preferred) ---
-    if OPENAI_API_KEY:
+    if _get_openai_api_key():
         print("Trying OpenAI Vision for floor plan analysis...")
         result = await _openai_vision_analyze(image_bytes)
         if result and result.get("rooms"):
@@ -503,7 +529,7 @@ async def parse_floorplan(image_bytes: bytes, content_type: str) -> dict:
         print("OpenAI Vision failed or returned no rooms, trying next method...")
 
     # --- Method 2: DINO + SAM via Replicate ---
-    if not REPLICATE_TOKEN:
+    if not _get_replicate_token():
         print("No REPLICATE_API_TOKEN — using OpenCV fallback for floor plan parsing")
         return _opencv_fallback(image_bytes)
 

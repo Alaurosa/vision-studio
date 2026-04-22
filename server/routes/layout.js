@@ -1,15 +1,11 @@
 import express from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { supabaseAdmin } from '../services/supabase.js';
+import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import { buildLayoutJSON } from '../services/exportFormats.js';
 import { chat } from '../services/llmRouter.js';
-import * as fallback from '../services/fallbackStore.js';
+import { resolveOverlaps, getEffectiveDims, validateLayout } from '../services/overlapResolver.js';
 
 const router = express.Router();
-
-async function useDb() {
-  return fallback.checkDbAvailable(supabaseAdmin);
-}
 
 // POST /api/layout/auto-place — Use LLM to compute optimal placement for all furniture
 router.post('/auto-place', requireAuth, async (req, res) => {
@@ -81,10 +77,8 @@ Compute the optimal position and rotation for each item. Return ONLY a JSON arra
 
     const response = await chat({ messages, systemPrompt });
     
-    // Parse the LLM response
     let arrangements;
     try {
-      // Extract JSON from response (handle markdown code blocks)
       let jsonStr = response.text.trim();
       const jsonMatch = jsonStr.match(/\[[\s\S]*?\]/);
       if (jsonMatch) jsonStr = jsonMatch[0];
@@ -94,61 +88,17 @@ Compute the optimal position and rotation for each item. Return ONLY a JSON arra
     }
 
     // Build candidates with effective dimensions and clamp within room bounds
-    const effDims = (p, rotation) => {
-      const swapped = rotation === 90 || rotation === 270;
-      return { effW: swapped ? p.depth : p.width, effD: swapped ? p.width : p.depth };
-    };
     const candidates = arrangements.map(arr => {
       const placement = placements.find(p => p.id === arr.id);
       if (!placement) return null;
       const rotation = [0, 90, 180, 270].includes(arr.rotation) ? arr.rotation : 0;
-      const { effW, effD } = effDims(placement, rotation);
+      const { effW, effD } = getEffectiveDims(placement, rotation);
       const x = Math.max(0, Math.min(Math.round(arr.x_inches || 0), roomW - effW));
       const y = Math.max(0, Math.min(Math.round(arr.y_inches || 0), roomD - effD));
       return { placement, rotation, x, y, effW, effD };
     }).filter(Boolean);
 
-    // Overlap resolver: greedy placement with spiral nudge
-    const boxOverlaps = (a, b) => !(a.x + a.effW <= b.x || b.x + b.effW <= a.x || a.y + a.effD <= b.y || b.y + b.effD <= a.y);
-    const gridStep = 6;
-    const placed = [];
-
-    for (const c of candidates) {
-      let bestX = c.x, bestY = c.y, found = false;
-      const tryPlace = (tx, ty) => {
-        if (tx < 0 || ty < 0 || tx + c.effW > roomW || ty + c.effD > roomD) return false;
-        const test = { x: tx, y: ty, effW: c.effW, effD: c.effD };
-        return !placed.some(o => boxOverlaps(test, o));
-      };
-
-      if (tryPlace(c.x, c.y)) {
-        found = true;
-      } else {
-        // Spiral outward to find nearest non-overlapping position
-        outer: for (let r = gridStep; r <= Math.max(roomW, roomD); r += gridStep) {
-          for (let dx = -r; dx <= r; dx += gridStep) {
-            for (let dy = -r; dy <= r; dy += gridStep) {
-              if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-              const tx = Math.round((c.x + dx) / gridStep) * gridStep;
-              const ty = Math.round((c.y + dy) / gridStep) * gridStep;
-              if (tryPlace(tx, ty)) { bestX = tx; bestY = ty; found = true; break outer; }
-            }
-          }
-        }
-      }
-
-      // Last resort: linear scan for any valid position in the room
-      if (!found) {
-        for (let tx = 0; tx + c.effW <= roomW; tx += gridStep) {
-          for (let ty = 0; ty + c.effD <= roomD; ty += gridStep) {
-            if (tryPlace(tx, ty)) { bestX = tx; bestY = ty; found = true; break; }
-          }
-          if (found) break;
-        }
-      }
-
-      placed.push({ x: bestX, y: bestY, effW: c.effW, effD: c.effD, placement: c.placement, rotation: c.rotation });
-    }
+    const placed = resolveOverlaps(candidates, roomW, roomD);
 
     // Save resolved positions
     const updates = [];
@@ -170,17 +120,6 @@ Compute the optimal position and rotation for each item. Return ONLY a JSON arra
   }
 });
 
-// POST /api/layout/generate — AI-powered layout generation
-router.post('/generate', requireAuth, async (req, res) => {
-  const { room_id } = req.body;
-  // Redirect to auto-place
-  req.body.room_id = room_id;
-  res.json({
-    message: 'Use POST /api/layout/auto-place for AI layout generation.',
-    placements: [],
-  });
-});
-
 // POST /api/layout/validate — validate current layout
 router.post('/validate', requireAuth, async (req, res) => {
   const { room_id } = req.body;
@@ -200,37 +139,7 @@ router.post('/validate', requireAuth, async (req, res) => {
     placements = room.placements || [];
   }
 
-  const errors = [];
-  const getEffectiveDims = (p) => {
-    if (p.rotation === 90 || p.rotation === 270) {
-      return { w: p.depth, d: p.width };
-    }
-    return { w: p.width, d: p.depth };
-  };
-
-  for (let i = 0; i < placements.length; i++) {
-    const a = placements[i];
-    const ad = getEffectiveDims(a);
-    // Check bounds
-    if (room.width && (a.x_inches + ad.w > room.width)) {
-      errors.push(`${a.name} extends beyond room width`);
-    }
-    if (room.depth && (a.y_inches + ad.d > room.depth)) {
-      errors.push(`${a.name} extends beyond room depth`);
-    }
-    // Check overlaps
-    for (let j = i + 1; j < placements.length; j++) {
-      const b = placements[j];
-      const bd = getEffectiveDims(b);
-      const ax2 = a.x_inches + ad.w, ay2 = a.y_inches + ad.d;
-      const bx2 = b.x_inches + bd.w, by2 = b.y_inches + bd.d;
-      if (!(ax2 <= b.x_inches || bx2 <= a.x_inches || ay2 <= b.y_inches || by2 <= a.y_inches)) {
-        errors.push(`${a.name} overlaps with ${b.name}`);
-      }
-    }
-  }
-
-  res.json({ valid: errors.length === 0, errors });
+  res.json(validateLayout(placements, room));
 });
 
 export default router;

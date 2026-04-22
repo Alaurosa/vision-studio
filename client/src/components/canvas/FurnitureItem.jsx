@@ -5,7 +5,7 @@ import { snapToGrid, getRotatedBoundingBox, normalizeRotation } from '@/utils/sc
 import { getAABB, overlaps, withinRoom } from '@/utils/collision';
 import { GRID_SNAP_INCHES } from '@/utils/constants';
 
-export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selected, onSelect, onChange, room, allItems, onInvalidPlacement }) {
+export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selected, onSelect, onChange, room, allItems, onInvalidPlacement, placementBounds = null, viewOriginX = 0, viewOriginY = 0 }) {
   const groupRef = useRef(null);
   const transformerRef = useRef(null);
   const color = item.color || CATEGORY_COLORS[item.category] || CATEGORY_COLORS.default;
@@ -15,8 +15,8 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
   const bbox = getRotatedBoundingBox(item.width || 0, item.depth || 0, rot);
   const bboxW = bbox.width * pxPerInch;
   const bboxH = bbox.depth * pxPerInch;
-  const cx = offsetX + (item.x_inches || 0) * pxPerInch + bboxW / 2;
-  const cy = offsetY + (item.y_inches || 0) * pxPerInch + bboxH / 2;
+  const cx = offsetX + ((item.x_inches || 0) - viewOriginX) * pxPerInch + bboxW / 2;
+  const cy = offsetY + ((item.y_inches || 0) - viewOriginY) * pxPerInch + bboxH / 2;
 
   useEffect(() => {
     if (!selected || !groupRef.current || !transformerRef.current) return;
@@ -52,6 +52,17 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
       return false;
     }
 
+    if (placementBounds) {
+      const insideZone = box.left >= placementBounds.left
+        && box.top >= placementBounds.top
+        && box.right <= placementBounds.right
+        && box.bottom <= placementBounds.bottom;
+      if (!insideZone) {
+        onInvalidPlacement?.(`${item.name || 'Item'} must stay inside the selected room.`);
+        return false;
+      }
+    }
+
     return true;
   };
 
@@ -67,16 +78,16 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
     e.cancelBubble = true;
     const newCX = e.target.x();
     const newCY = e.target.y();
-    const xInches = snapToGrid((newCX - bboxW / 2 - offsetX) / pxPerInch, GRID_SNAP_INCHES);
-    const yInches = snapToGrid((newCY - bboxH / 2 - offsetY) / pxPerInch, GRID_SNAP_INCHES);
+    const xInches = snapToGrid((newCX - bboxW / 2 - offsetX) / pxPerInch + viewOriginX, GRID_SNAP_INCHES);
+    const yInches = snapToGrid((newCY - bboxH / 2 - offsetY) / pxPerInch + viewOriginY, GRID_SNAP_INCHES);
     const patch = { x_inches: Math.max(0, xInches), y_inches: Math.max(0, yInches) };
     if (!canCommitPatch(patch)) {
       revertNode();
       return;
     }
     e.target.position({
-      x: offsetX + patch.x_inches * pxPerInch + bboxW / 2,
-      y: offsetY + patch.y_inches * pxPerInch + bboxH / 2,
+      x: offsetX + (patch.x_inches - viewOriginX) * pxPerInch + bboxW / 2,
+      y: offsetY + (patch.y_inches - viewOriginY) * pxPerInch + bboxH / 2,
     });
     onChange(patch);
   };
@@ -87,8 +98,8 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
     if (!node) return;
     const rotation = normalizeRotation(node.rotation());
     const rotatedBox = getRotatedBoundingBox(item.width || 0, item.depth || 0, rotation);
-    const xInches = Math.max(0, (node.x() - offsetX) / pxPerInch - rotatedBox.width / 2);
-    const yInches = Math.max(0, (node.y() - offsetY) / pxPerInch - rotatedBox.depth / 2);
+    const xInches = Math.max(0, (node.x() - offsetX) / pxPerInch - rotatedBox.width / 2 + viewOriginX);
+    const yInches = Math.max(0, (node.y() - offsetY) / pxPerInch - rotatedBox.depth / 2 + viewOriginY);
     node.scaleX(1);
     node.scaleY(1);
     const patch = {

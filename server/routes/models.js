@@ -1,7 +1,6 @@
 import express from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { supabaseAdmin } from '../services/supabase.js';
-import * as fallback from '../services/fallbackStore.js';
+import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import axios from 'axios';
 
 const router = express.Router();
@@ -11,10 +10,6 @@ const meshyHeaders = () => ({ Authorization: `Bearer ${process.env.MESHY_API_KEY
 
 // In-memory cache: image_url -> { glb_url, status, taskId, error }
 const modelCache = new Map();
-
-async function useDb() {
-  return fallback.checkDbAvailable(supabaseAdmin);
-}
 
 /**
  * POST /api/models/generate

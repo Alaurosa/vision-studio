@@ -29,8 +29,8 @@ export const DEFAULTS = {
     warnNarrowPath: true,
   },
   llm: {
-    defaultModel: process.env.OPENAI_MODEL || 'gpt-4o',
-    fallbackModel: process.env.OPENAI_MODEL || 'gpt-4o',
+    defaultModel: process.env.OPENAI_MODEL || 'gpt-5.3-codex',
+    fallbackModel: process.env.OPENAI_MODEL || 'gpt-5.3-codex',
     maxTokens: 2048,
     temperature: 0.3,
   },

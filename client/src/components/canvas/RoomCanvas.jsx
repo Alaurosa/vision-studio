@@ -1,11 +1,36 @@
-import { useEffect, useRef, useState } from 'react';
-import { Stage, Layer, Image as KImage, Rect, Group, Text, Line } from 'react-konva';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import { Stage, Layer, Image as KImage, Rect, Group, Text, Line, Circle } from 'react-konva';
 import useImage from 'use-image';
 import { useLayoutStore } from '@/store/layoutStore';
-import { computeRotation } from '@/utils/scale';
+import { computeRotation, snapToGrid, inchesToFeet } from '@/utils/scale';
 import FurnitureItem from './FurnitureItem';
 import GridOverlay from './GridOverlay';
 import WallOutline from './WallOutline';
+
+function getZoneBox(zone) {
+  if (Array.isArray(zone?.bbox) && zone.bbox.length === 4) {
+    return zone.bbox;
+  }
+
+  if (Array.isArray(zone?.polygon) && zone.polygon.length > 0) {
+    const xs = zone.polygon.map(([x]) => x);
+    const ys = zone.polygon.map(([, y]) => y);
+    return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  }
+
+  return [0, 0, 0, 0];
+}
+
+function clampZoneBox(bbox, room) {
+  const width = Math.max(24, bbox[2] - bbox[0]);
+  const depth = Math.max(24, bbox[3] - bbox[1]);
+  const maxLeft = Math.max(0, (room?.width || width) - width);
+  const maxTop = Math.max(0, (room?.depth || depth) - depth);
+  const left = Math.min(Math.max(0, bbox[0]), maxLeft);
+  const top = Math.min(Math.max(0, bbox[1]), maxTop);
+
+  return [left, top, left + width, top + depth];
+}
 
 export default function RoomCanvas() {
   const wrapRef = useRef(null);
@@ -16,7 +41,7 @@ export default function RoomCanvas() {
 
   const {
     room, furniture, selectedId, detections, zones, activeZoneId, gridEnabled,
-    selectFurniture, clearSelection, updateFurniture, removeFurniture, setActiveZone,
+    selectFurniture, clearSelection, updateFurniture, removeFurniture, setActiveZone, updateZone, getVisibleFurniture,
   } = useLayoutStore();
 
   // Resize observer
@@ -31,9 +56,15 @@ export default function RoomCanvas() {
   }, []);
 
   // Compute scale so the room fills the canvas with margin
+  const activeZone = activeZoneId ? zones.find((zone) => zone.id === activeZoneId) : null;
+  const focusBox = activeZone ? getZoneBox(activeZone) : [0, 0, room?.width || 0, room?.depth || 0];
+  const focusWidth = Math.max(1, focusBox[2] - focusBox[0]);
+  const focusDepth = Math.max(1, focusBox[3] - focusBox[1]);
+  const visibleFurniture = getVisibleFurniture();
+
   const margin = 48;
-  const pxPerInchFit = room?.width && room?.depth
-    ? Math.min((size.w - margin * 2) / room.width, (size.h - margin * 2) / room.depth)
+  const pxPerInchFit = focusWidth && focusDepth
+    ? Math.min((size.w - margin * 2) / focusWidth, (size.h - margin * 2) / focusDepth)
     : 4;
   const pxPerInch = pxPerInchFit > 0 ? pxPerInchFit : 4;
 
@@ -59,7 +90,7 @@ export default function RoomCanvas() {
     });
   };
 
-  const onKeyDown = (e) => {
+  const onKeyDown = useCallback((e) => {
     const { selectedId, furniture, removeFurniture, updateFurniture, clearSelection } = useLayoutStore.getState();
     if (!selectedId) return;
     if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -74,29 +105,45 @@ export default function RoomCanvas() {
     } else if (e.key === 'Escape') {
       clearSelection();
     }
-  };
+  }, []);
 
   useEffect(() => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [onKeyDown]);
+
+  useEffect(() => {
+    setViewport({ x: 0, y: 0, scale: 1 });
+  }, [room?.id, activeZoneId]);
 
   const roomPxW = (room?.width || 0) * pxPerInch;
   const roomPxH = (room?.depth || 0) * pxPerInch;
-  const roomOffsetX = Math.max(margin, (size.w - roomPxW) / 2);
-  const roomOffsetY = Math.max(margin, (size.h - roomPxH) / 2);
+  const focusPxW = focusWidth * pxPerInch;
+  const focusPxH = focusDepth * pxPerInch;
+  const roomOffsetX = Math.max(margin, (size.w - focusPxW) / 2);
+  const roomOffsetY = Math.max(margin, (size.h - focusPxH) / 2);
+  const pendingDetections = Array.isArray(detections)
+    ? detections.filter((d) => d.status === 'pending')
+    : [];
+  const placementBounds = activeZone
+    ? { left: focusBox[0], top: focusBox[1], right: focusBox[2], bottom: focusBox[3] }
+    : null;
 
-  const showPlacementWarning = (message) => {
+  const toCanvasX = (value) => roomOffsetX + (value - focusBox[0]) * pxPerInch;
+  const toCanvasY = (value) => roomOffsetY + (value - focusBox[1]) * pxPerInch;
+
+  const warningTimeoutRef = useRef(null);
+  const showPlacementWarning = useCallback((message) => {
     setPlacementWarning(message);
-    window.clearTimeout(showPlacementWarning.timeoutId);
-    showPlacementWarning.timeoutId = window.setTimeout(() => setPlacementWarning(''), 2200);
-  };
+    if (warningTimeoutRef.current) window.clearTimeout(warningTimeoutRef.current);
+    warningTimeoutRef.current = window.setTimeout(() => setPlacementWarning(''), 2200);
+  }, []);
 
   return (
     <div ref={wrapRef} className="relative w-full h-full bg-paper-100" style={{ touchAction: 'none', userSelect: 'none' }}>
       {/* Corner metadata */}
       <div className="absolute top-4 left-4 eyebrow text-ink-500 z-10 pointer-events-none">
-        {room?.width ? `${room.width}" × ${room.depth}"` : 'Untitled canvas'}
+        {room?.width ? `${inchesToFeet(room.width)} × ${inchesToFeet(room.depth)}` : 'Untitled canvas'}
       </div>
       <div className="absolute bottom-4 right-4 eyebrow text-ink-500 z-10 pointer-events-none">
         Zoom {(viewport.scale * 100).toFixed(0)}%
@@ -131,16 +178,16 @@ export default function RoomCanvas() {
           {bgImage && room?.width && (
             <KImage
               image={bgImage}
-              x={roomOffsetX} y={roomOffsetY}
+              x={toCanvasX(0)} y={toCanvasY(0)}
               width={roomPxW} height={roomPxH}
               opacity={0.28}
             />
           )}
           {/* Room floor */}
-          {room?.width && (
+          {focusWidth > 0 && (
             <Rect
               x={roomOffsetX} y={roomOffsetY}
-              width={roomPxW} height={roomPxH}
+              width={focusPxW} height={focusPxH}
               fill="#faf7f1"
               stroke="#100f0d"
               strokeWidth={2 / viewport.scale}
@@ -154,8 +201,8 @@ export default function RoomCanvas() {
             <GridOverlay
               originX={roomOffsetX}
               originY={roomOffsetY}
-              width={roomPxW}
-              height={roomPxH}
+              width={focusPxW}
+              height={focusPxH}
               pxPerInch={pxPerInch}
             />
           )}
@@ -171,6 +218,8 @@ export default function RoomCanvas() {
               offsetY={roomOffsetY}
               roomWidth={room.width}
               roomDepth={room.depth}
+              viewOriginX={focusBox[0]}
+              viewOriginY={focusBox[1]}
             />
           )}
         </Layer>
@@ -178,19 +227,22 @@ export default function RoomCanvas() {
         {zones?.length > 0 && (
           <Layer>
             {zones.map((zone, index) => {
-              if (!zone?.polygon || zone.polygon.length < 3) return null;
+              const bbox = getZoneBox(zone);
+              const zoneWidth = Math.max(24, bbox[2] - bbox[0]);
+              const zoneDepth = Math.max(24, bbox[3] - bbox[1]);
               const isActive = zone.id === activeZoneId;
-              const points = zone.polygon.flatMap(([px, py]) => [
-                roomOffsetX + px * pxPerInch,
-                roomOffsetY + py * pxPerInch,
-              ]);
-              const center = zone.polygon.reduce(
-                (acc, [px, py]) => ({ x: acc.x + px, y: acc.y + py }),
-                { x: 0, y: 0 }
-              );
-              const cx = roomOffsetX + (center.x / zone.polygon.length) * pxPerInch;
-              const cy = roomOffsetY + (center.y / zone.polygon.length) * pxPerInch;
+              const zx = toCanvasX(bbox[0]);
+              const zy = toCanvasY(bbox[1]);
+              const zw = zoneWidth * pxPerInch;
+              const zh = zoneDepth * pxPerInch;
               const color = zone.color || ['#c58d45', '#4f8f6b', '#4273b7', '#9858a6'][index % 4];
+
+              const commitBox = (nextBox) => {
+                updateZone(zone.id, {
+                  bbox: clampZoneBox(nextBox, room),
+                });
+              };
+
               return (
                 <Group
                   key={zone.id || index}
@@ -198,7 +250,12 @@ export default function RoomCanvas() {
                   onTap={() => setActiveZone(isActive ? null : zone.id)}
                 >
                   <Line
-                    points={points}
+                    points={[
+                      zx, zy,
+                      zx + zw, zy,
+                      zx + zw, zy + zh,
+                      zx, zy + zh,
+                    ]}
                     closed
                     fill={color}
                     opacity={isActive ? 0.18 : activeZoneId ? 0.05 : 0.1}
@@ -206,15 +263,43 @@ export default function RoomCanvas() {
                     strokeWidth={isActive ? 2.5 : 1.25}
                     dash={isActive ? undefined : [6, 4]}
                   />
+                  <Rect
+                    x={zx}
+                    y={zy}
+                    width={zw}
+                    height={zh}
+                    fill="transparent"
+                    strokeEnabled={false}
+                    draggable
+                    onDragEnd={(e) => {
+                      const left = focusBox[0] + ((e.target.x() - roomOffsetX) / pxPerInch);
+                      const top = focusBox[1] + ((e.target.y() - roomOffsetY) / pxPerInch);
+                      commitBox([left, top, left + zoneWidth, top + zoneDepth]);
+                    }}
+                  />
                   <Text
-                    x={cx - 70}
-                    y={cy - 8}
-                    width={140}
-                    align="center"
-                    text={zone.name || `Room ${index + 1}`}
+                    x={zx + 10}
+                    y={zy + 10}
+                    width={Math.max(80, zw - 20)}
+                    align="left"
+                    text={`${zone.name || `Room ${index + 1}`}\n${Math.round(zoneWidth)}" × ${Math.round(zoneDepth)}"`}
                     fontSize={11 / viewport.scale}
                     fill={color}
                     listening={false}
+                  />
+                  <Circle
+                    x={zx + zw}
+                    y={zy + zh}
+                    radius={6 / viewport.scale}
+                    fill={isActive ? color : '#ffffff'}
+                    stroke={color}
+                    strokeWidth={1.5 / viewport.scale}
+                    draggable
+                    onDragEnd={(e) => {
+                      const right = focusBox[0] + ((e.target.x() - roomOffsetX) / pxPerInch);
+                      const bottom = focusBox[1] + ((e.target.y() - roomOffsetY) / pxPerInch);
+                      commitBox([bbox[0], bbox[1], Math.max(bbox[0] + 24, right), Math.max(bbox[1] + 24, bottom)]);
+                    }}
                   />
                 </Group>
               );
@@ -224,14 +309,14 @@ export default function RoomCanvas() {
 
         {/* Detections overlay */}
         <Layer listening={false}>
-          {(detections || []).filter((d) => d.status === 'pending').map((det, i) => {
+          {pendingDetections.map((det, i) => {
             const b = det.bbox || [];
             if (b.length !== 4) return null;
             const [x1, y1, x2, y2] = b;
-            const px1 = roomOffsetX + x1 * roomPxW;
-            const py1 = roomOffsetY + y1 * roomPxH;
-            const px2 = roomOffsetX + x2 * roomPxW;
-            const py2 = roomOffsetY + y2 * roomPxH;
+            const px1 = toCanvasX(x1 * (room?.width || 0));
+            const py1 = toCanvasY(y1 * (room?.depth || 0));
+            const px2 = toCanvasX(x2 * (room?.width || 0));
+            const py2 = toCanvasY(y2 * (room?.depth || 0));
             return (
               <Group key={i}>
                 <Rect
@@ -254,7 +339,7 @@ export default function RoomCanvas() {
 
         {/* Furniture */}
         <Layer>
-          {furniture.map((it) => (
+          {visibleFurniture.map((it) => (
             <FurnitureItem
               key={it.id}
               item={it}
@@ -263,7 +348,10 @@ export default function RoomCanvas() {
               offsetY={roomOffsetY}
               selected={selectedId === it.id}
               room={room}
-              allItems={furniture}
+              allItems={visibleFurniture}
+              placementBounds={placementBounds}
+              viewOriginX={focusBox[0]}
+              viewOriginY={focusBox[1]}
               onSelect={() => selectFurniture(it.id)}
               onInvalidPlacement={showPlacementWarning}
               onChange={(patch) => updateFurniture(it.id, patch)}
@@ -280,7 +368,7 @@ export default function RoomCanvas() {
 
       {/* Selected item info bar */}
       {selectedId && (() => {
-        const sel = furniture.find(f => f.id === selectedId);
+        const sel = visibleFurniture.find(f => f.id === selectedId);
         if (!sel) return null;
         return (
           <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 bg-white/90 backdrop-blur-sm border border-ink-900/15 rounded-lg px-4 py-2 shadow-sm">

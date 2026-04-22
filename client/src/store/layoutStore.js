@@ -1,10 +1,75 @@
 import { create } from 'zustand';
 import api from '@/lib/api';
 import { getAABB, overlaps, withinRoom, validateAll } from '@/utils/collision';
-import { GRID_SNAP_INCHES } from '@/utils/constants';
+import { GRID_SNAP_INCHES, ROOM_ZONE_COLORS } from '@/utils/constants';
 import { computeRotation } from '@/utils/scale';
 
+const snapToGrid = (value, gridSize) => Math.round(value / gridSize) * gridSize;
+
 let saveTimers = {};
+let zoneSaveTimer = null;
+
+function normalizeZone(zone, index = 0) {
+  const bbox = Array.isArray(zone?.bbox) && zone.bbox.length === 4
+    ? zone.bbox.map((value) => Number(value) || 0)
+    : [0, 0, zone?.width || 120, zone?.depth || 120];
+  const width = zone?.width ?? Math.max(0, bbox[2] - bbox[0]);
+  const depth = zone?.depth ?? Math.max(0, bbox[3] - bbox[1]);
+  const polygon = Array.isArray(zone?.polygon) && zone.polygon.length >= 3
+    ? zone.polygon
+    : [[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]]];
+
+  return {
+    id: zone?.id || `zone-${index}`,
+    name: zone?.name || zone?.label || `Room ${index + 1}`,
+    bbox,
+    polygon,
+    width,
+    depth,
+    color: zone?.color || ROOM_ZONE_COLORS[index % ROOM_ZONE_COLORS.length],
+    confidence: zone?.confidence ?? null,
+  };
+}
+
+function normalizeZonesArray(zones) {
+  return (Array.isArray(zones) ? zones : []).map((zone, index) => normalizeZone(zone, index));
+}
+
+function getZoneBounds(zone) {
+  if (!zone) return null;
+  const bbox = Array.isArray(zone.bbox) && zone.bbox.length === 4 ? zone.bbox : null;
+  if (bbox) return { left: bbox[0], top: bbox[1], right: bbox[2], bottom: bbox[3] };
+  return null;
+}
+
+function getFurnitureCenter(item) {
+  const box = getAABB(item);
+  return {
+    x: (box.left + box.right) / 2,
+    y: (box.top + box.bottom) / 2,
+  };
+}
+
+function furnitureBelongsToZone(item, zone) {
+  const bounds = getZoneBounds(zone);
+  if (!bounds) return true;
+  const center = getFurnitureCenter(item);
+  return center.x >= bounds.left && center.x <= bounds.right && center.y >= bounds.top && center.y <= bounds.bottom;
+}
+
+function normalizeDetectedObjects(detectedObjects) {
+  if (Array.isArray(detectedObjects)) return detectedObjects;
+  if (Array.isArray(detectedObjects?.detections)) return detectedObjects.detections;
+  if (Array.isArray(detectedObjects?.objects)) return detectedObjects.objects;
+  return [];
+}
+
+function normalizeZoneObjects(data) {
+  if (Array.isArray(data?.zones)) return normalizeZonesArray(data.zones);
+  if (Array.isArray(data?.detected_objects?.zones)) return normalizeZonesArray(data.detected_objects.zones);
+  if (Array.isArray(data?.detected_objects?.rooms)) return normalizeZonesArray(data.detected_objects.rooms);
+  return normalizeZonesArray([]);
+}
 
 export const useLayoutStore = create((set, get) => ({
   // ---------- state ----------
@@ -31,12 +96,13 @@ export const useLayoutStore = create((set, get) => ({
     set({ loading: true });
     try {
       const { data } = await api.get(`/api/rooms/${roomId}`);
-      const fallbackZones = data.zones || data.detected_objects?.zones || data.detected_objects?.rooms || [];
+      const fallbackZones = normalizeZoneObjects(data);
       set({
         room: data,
         furniture: data.placements || [],
-        detections: data.detected_objects || [],
+        detections: normalizeDetectedObjects(data.detected_objects),
         zones: fallbackZones,
+        activeZoneId: fallbackZones[0]?.id || null,
         loading: false,
       });
     } catch (e) {
@@ -171,23 +237,102 @@ export const useLayoutStore = create((set, get) => ({
   },
 
   // ---------- zones ----------
-  saveZones: (zones) => set({ zones }),
+  _persistZones: () => {
+    clearTimeout(zoneSaveTimer);
+    zoneSaveTimer = setTimeout(async () => {
+      const { room, zones } = get();
+      if (!room?.id) return;
+      try {
+        await api.put(`/api/rooms/${room.id}`, { zones });
+      } catch (e) {
+        console.error('save zones', e);
+      }
+    }, 250);
+  },
+
+  saveZones: (zones) => {
+    const normalized = normalizeZonesArray(zones);
+    set({ zones: normalized, activeZoneId: normalized[0]?.id || null });
+    get()._persistZones();
+  },
+
+  addZone: (zonePatch = {}) => {
+    const { room, zones } = get();
+    const offset = 24 + zones.length * 12;
+    const width = Math.min(144, Math.max(72, (room?.width || 240) - offset * 2));
+    const depth = Math.min(144, Math.max(72, (room?.depth || 180) - offset * 2));
+    const nextZone = normalizeZone({
+      id: `zone-${Date.now()}`,
+      name: zonePatch.name || `Room ${zones.length + 1}`,
+      bbox: zonePatch.bbox || [offset, offset, offset + width, offset + depth],
+      width,
+      depth,
+      ...zonePatch,
+    }, zones.length);
+    set((state) => ({ zones: [...state.zones, nextZone], activeZoneId: nextZone.id }));
+    get()._persistZones();
+  },
+
+  updateZone: (id, patch) => {
+    set((state) => ({
+      zones: state.zones.map((zone, index) => {
+        if (zone.id !== id) return zone;
+        const bbox = patch.bbox || zone.bbox;
+        const width = patch.width ?? Math.max(0, bbox[2] - bbox[0]);
+        const depth = patch.depth ?? Math.max(0, bbox[3] - bbox[1]);
+        const polygon = patch.polygon || [[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]]];
+        return normalizeZone({ ...zone, ...patch, bbox, polygon, width, depth }, index);
+      }),
+    }));
+    get()._persistZones();
+  },
+
+  removeZone: (id) => {
+    set((state) => {
+      const nextZones = state.zones.filter((zone) => zone.id !== id);
+      return {
+        zones: nextZones,
+        activeZoneId: state.activeZoneId === id ? nextZones[0]?.id || null : state.activeZoneId,
+      };
+    });
+    get()._persistZones();
+  },
+
   setActiveZone: (id) => set({ activeZoneId: id }),
+
+  getActiveZone: () => {
+    const { zones, activeZoneId } = get();
+    return zones.find((zone) => zone.id === activeZoneId) || null;
+  },
+
+  getVisibleFurniture: () => {
+    const { furniture } = get();
+    const activeZone = get().getActiveZone();
+    if (!activeZone) return furniture;
+    return furniture.filter((item) => furnitureBelongsToZone(item, activeZone));
+  },
 
   // ---------- helpers ----------
   findOpenSlot: (w, d) => {
     const { room, furniture } = get();
+    const activeZone = get().getActiveZone();
     if (!room?.width || !room?.depth) return { x: 0, y: 0 };
     const step = GRID_SNAP_INCHES;
-    for (let y = step; y + d <= room.depth - step; y += step) {
-      for (let x = step; x + w <= room.width - step; x += step) {
+    const bounds = getZoneBounds(activeZone) || { left: 0, top: 0, right: room.width, bottom: room.depth };
+    const minX = Math.max(step, snapToGrid(bounds.left, step));
+    const minY = Math.max(step, snapToGrid(bounds.top, step));
+    const maxX = Math.min(room.width - step, bounds.right);
+    const maxY = Math.min(room.depth - step, bounds.bottom);
+    for (let y = minY; y + d <= maxY; y += step) {
+      for (let x = minX; x + w <= maxX; x += step) {
         const box = { left: x, top: y, right: x + w, bottom: y + d };
         if (!withinRoom(box, room)) continue;
+        if (activeZone && (box.left < bounds.left || box.top < bounds.top || box.right > bounds.right || box.bottom > bounds.bottom)) continue;
         const clash = furniture.some((f) => overlaps(box, getAABB(f)));
         if (!clash) return { x, y };
       }
     }
-    return { x: step, y: step };
+    return { x: minX, y: minY };
   },
 
   validate: () => {

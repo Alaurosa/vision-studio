@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '@/lib/api';
 import AnalysisWorkflow from '@/components/upload/AnalysisWorkflow';
+import RoomEditor from '@/components/upload/RoomEditor';
 
 export default function Upload() {
   const navigate = useNavigate();
@@ -11,6 +12,10 @@ export default function Upload() {
   const [roomName, setRoomName] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState(null);
+
+  // Post-analysis state for the room editor
+  const [editorData, setEditorData] = useState(null); // { room, imageUrl, parseResult }
+
   const inputRef = useRef(null);
 
   const handleFile = (f) => {
@@ -32,14 +37,61 @@ export default function Upload() {
     setError(null);
   };
 
-  const onComplete = (room) => {
+  /** Called by AnalysisWorkflow when AI analysis finishes */
+  const onAnalysisComplete = (room, parseResult, imageUrl) => {
     setAnalyzing(false);
-    if (room?.id) navigate(`/studio/${room.id}`);
+    // Open the room editor overlay instead of navigating directly
+    setEditorData({ room, parseResult, imageUrl });
   };
 
-  const onError = (msg) => {
+  const onAnalysisError = (msg) => {
     setAnalyzing(false);
     setError(msg || 'Analysis failed. Please try again.');
+  };
+
+  const onEditorConfirm = async (finalZones) => {
+    if (!editorData?.room?.id) return;
+    try {
+      const scale = editorData.parseResult?.scale_px_per_inch || 1;
+      let roomWidth = 240;
+      let roomDepth = 180;
+      let normalizedZones = finalZones;
+
+      if (finalZones.length > 0) {
+        const minX = Math.min(...finalZones.map(z => z.bbox[0]));
+        const minY = Math.min(...finalZones.map(z => z.bbox[1]));
+        const maxX = Math.max(...finalZones.map(z => z.bbox[2]));
+        const maxY = Math.max(...finalZones.map(z => z.bbox[3]));
+
+        // Normalize zones to start at (0,0) so the Studio origin matches the top-left room
+        normalizedZones = finalZones.map(z => ({
+          ...z,
+          bbox: [z.bbox[0] - minX, z.bbox[1] - minY, z.bbox[2] - minX, z.bbox[3] - minY],
+          polygon: z.polygon.map(([x, y]) => [x - minX, y - minY]),
+        }));
+
+        roomWidth = (maxX - minX) / scale;
+        roomDepth = (maxY - minY) / scale;
+      } else if (editorData.parseResult?.boundary) {
+        roomWidth = editorData.parseResult.boundary.w / scale;
+        roomDepth = editorData.parseResult.boundary.h / scale;
+      }
+
+      await api.put(`/api/rooms/${editorData.room.id}`, {
+        zones: normalizedZones,
+        width: Math.round(roomWidth),
+        depth: Math.round(roomDepth),
+      });
+      navigate(`/studio/${editorData.room.id}`);
+    } catch (err) {
+      console.error('Failed to save rooms:', err);
+      // Navigate anyway – the room exists, zones just weren't saved
+      navigate(`/studio/${editorData.room.id}`);
+    }
+  };
+
+  const onEditorCancel = () => {
+    setEditorData(null);
   };
 
   return (
@@ -112,11 +164,10 @@ export default function Upload() {
 
               <div className="eyebrow mb-2 text-ink-600">What happens next</div>
               <ol className="text-sm text-ink-700 space-y-2 mb-8">
-                <li>01 — Image intake</li>
-                <li>02 — Wall + opening detection</li>
-                <li>03 — Sub-room segmentation</li>
-                <li>04 — Scale calibration</li>
-                <li>05 — Hand-off to the Studio</li>
+                <li>01 — Image intake & preprocessing</li>
+                <li>02 — AI room segmentation</li>
+                <li>03 — You adjust the detected rooms</li>
+                <li>04 — Hand-off to the Studio</li>
               </ol>
 
               {error && (
@@ -141,6 +192,7 @@ export default function Upload() {
         </div>
       </section>
 
+      {/* Analysis pipeline overlay */}
       <AnimatePresence>
         {analyzing && file && (
           <motion.div
@@ -150,10 +202,26 @@ export default function Upload() {
             <AnalysisWorkflow
               file={file}
               roomName={roomName || 'Untitled room'}
-              onComplete={onComplete}
-              onError={onError}
+              onComplete={onAnalysisComplete}
+              onError={onAnalysisError}
             />
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Room editor overlay (after analysis) */}
+      <AnimatePresence>
+        {editorData && (
+          <RoomEditor
+            imageUrl={editorData.imageUrl}
+            imageWidth={editorData.parseResult?.image_width || 800}
+            imageHeight={editorData.parseResult?.image_height || 600}
+            initialZones={editorData.parseResult?.rooms || []}
+            boundary={editorData.parseResult?.boundary || null}
+            scalePxPerInch={editorData.parseResult?.scale_px_per_inch || 1}
+            onConfirm={onEditorConfirm}
+            onCancel={onEditorCancel}
+          />
         )}
       </AnimatePresence>
     </div>

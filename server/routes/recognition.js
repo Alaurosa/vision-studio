@@ -2,31 +2,12 @@ import express from 'express';
 import axios from 'axios';
 import FormData from 'form-data';
 import multer from 'multer';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { requireAuth } from '../middleware/auth.js';
-import { supabaseAdmin } from '../services/supabase.js';
-import * as fallback from '../services/fallbackStore.js';
+import { useDb, supabaseAdmin, fallback } from '../services/db.js';
+import { saveFileLocally } from '../services/fileStorage.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
-
-function saveFileLocally(buffer, folder, filename) {
-  const dir = path.join(UPLOADS_DIR, folder);
-  fs.mkdirSync(dir, { recursive: true });
-  const safeName = `${Date.now()}-${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-  const filePath = path.join(dir, safeName);
-  fs.writeFileSync(filePath, buffer);
-  return `/uploads/${folder}/${safeName}`;
-}
-
-async function useDb() {
-  return fallback.checkDbAvailable(supabaseAdmin);
-}
 
 const FURNITURE_LABELS = [
   'sofa', 'couch', 'chair', 'armchair', 'bed', 'desk', 'table', 'dining table',

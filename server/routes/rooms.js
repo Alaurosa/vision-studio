@@ -2,34 +2,12 @@ import express from 'express';
 import multer from 'multer';
 import FormData from 'form-data';
 import axios from 'axios';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { requireAuth } from '../middleware/auth.js';
-import { supabaseAdmin } from '../services/supabase.js';
-import * as fallback from '../services/fallbackStore.js';
+import { useDb, supabaseAdmin, fallback } from '../services/db.js';
+import { saveFileLocally } from '../services/fileStorage.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
-
-/**
- * Save file locally and return a URL accessible from the client.
- */
-function saveFileLocally(buffer, folder, filename) {
-  const dir = path.join(UPLOADS_DIR, folder);
-  fs.mkdirSync(dir, { recursive: true });
-  const safeName = `${Date.now()}-${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-  const filePath = path.join(dir, safeName);
-  fs.writeFileSync(filePath, buffer);
-  return `/uploads/${folder}/${safeName}`;
-}
-
-async function useDb() {
-  return fallback.checkDbAvailable(supabaseAdmin);
-}
 
 function normalizeZones(parseResult) {
   const boundary = parseResult?.boundary || { x: 0, y: 0 };
@@ -221,14 +199,24 @@ router.post('/:id/upload-floorplan', requireAuth, upload.single('file'), async (
     const imgW = parseResult.image_width;
     const imgH = parseResult.image_height;
     if (boundary && boundary.w > 0 && imgW && imgH) {
-      // Default scale: 1 px = 1 inch (user can calibrate later)
-      const defaultScale = 1.0;
-      // Use an estimated scale so the room fits usably on screen
-      // We'll set width/depth derived from the boundary, and set scale_px_per_inch
-      // so that detecteed coords match inch coords at scale 1:1
-      roomUpdates.width = Math.round(boundary.w);
-      roomUpdates.depth = Math.round(boundary.h);
-      roomUpdates.scale_px_per_inch = defaultScale;
+      let calcScale = 1.0;
+      let roomW = Math.round(boundary.w);
+      let roomH = Math.round(boundary.h);
+
+      if (parseResult.total_width_inches && parseResult.total_width_inches > 0) {
+        // scale = pixels / inches
+        calcScale = boundary.w / parseResult.total_width_inches;
+        roomW = Math.round(parseResult.total_width_inches);
+        roomH = Math.round(boundary.h / calcScale);
+      } else if (parseResult.total_depth_inches && parseResult.total_depth_inches > 0) {
+        calcScale = boundary.h / parseResult.total_depth_inches;
+        roomH = Math.round(parseResult.total_depth_inches);
+        roomW = Math.round(boundary.w / calcScale);
+      }
+
+      roomUpdates.width = roomW;
+      roomUpdates.depth = roomH;
+      roomUpdates.scale_px_per_inch = calcScale;
     }
 
     // Store detected room data (rooms, boundary) as detected_objects for reference

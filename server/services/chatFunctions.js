@@ -114,6 +114,21 @@ export const LAYOUT_FUNCTIONS = [
       required: ['room_type'],
     },
   },
+  {
+    name: 'set_style_preference',
+    description: 'Record the user\'s style and aesthetic preferences so all future suggestions match their taste. Call this when the user describes their style (e.g., "I like Scandinavian", "modern and minimal", "warm and cozy"). You can also call this to acknowledge their preferences before making recommendations.',
+    parameters: {
+      type: 'object',
+      properties: {
+        style: { type: 'string', description: 'The design style: scandinavian, modern, minimalist, industrial, mid-century, bohemian, rustic, japandi, traditional, coastal' },
+        mood: { type: 'string', description: 'The mood/feeling: warm, cool, cozy, airy, dramatic, serene, vibrant, calm' },
+        color_palette: { type: 'string', description: 'Preferred color direction: warm neutrals, cool grays, earthy tones, bold colors, monochrome, pastels' },
+        budget_preference: { type: 'string', description: 'Budget tier: budget, mid-range, premium', enum: ['budget', 'mid-range', 'premium'] },
+        notes: { type: 'string', description: 'Any additional preference notes from the user' },
+      },
+      required: ['style'],
+    },
+  },
 ];
 
 /**
@@ -411,6 +426,35 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
         message: `Furnished ${args.room_type.replace('_', ' ')} with ${selectedItems.length} items: ${itemNames}. Total estimated cost: $${totalCost.toFixed(0)}. ${arrangeResult.success ? 'Arranged optimally.' : ''}`,
         refresh: true,
         suggestions: selectedItems,
+      };
+    }
+    case 'set_style_preference': {
+      const prefs = {
+        style: args.style,
+        mood: args.mood || null,
+        color_palette: args.color_palette || null,
+        budget_preference: args.budget_preference || null,
+        notes: args.notes || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Persist style preferences in the room metadata
+      if (db) {
+        const existing = room.style_preferences || {};
+        await supabaseAdmin
+          .from('rooms')
+          .update({ style_preferences: { ...existing, ...prefs } })
+          .eq('id', roomId);
+      }
+
+      const parts = [`Style: ${args.style}`];
+      if (args.mood) parts.push(`Mood: ${args.mood}`);
+      if (args.color_palette) parts.push(`Colors: ${args.color_palette}`);
+      if (args.budget_preference) parts.push(`Budget: ${args.budget_preference}`);
+
+      return {
+        success: true,
+        message: `Noted your preferences — ${parts.join(', ')}. I'll keep these in mind for all suggestions.`,
       };
     }
     default:

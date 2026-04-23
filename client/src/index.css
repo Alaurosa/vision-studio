@@ -11,6 +11,7 @@
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
   }
   body {
     font-feature-settings: 'ss01', 'ss02', 'kern', 'liga';
@@ -25,6 +26,23 @@
     font-family: 'Fraunces', 'Cormorant Garamond', Georgia, serif;
     font-weight: 400;
     letter-spacing: -0.01em;
+  }
+
+  /* Accessibility: visible focus rings */
+  *:focus-visible {
+    outline: 2px solid #9c6a3f;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Respect reduced motion preference */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
@@ -59,24 +77,28 @@
   .btn-ink {
     @apply inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full
            bg-ink-900 text-paper-50 text-[12px] tracking-editorial uppercase
-           transition hover:bg-ink-700 disabled:opacity-40 disabled:cursor-not-allowed;
+           transition hover:bg-ink-700 disabled:opacity-40 disabled:cursor-not-allowed
+           focus-visible:ring-2 focus-visible:ring-sienna-500 focus-visible:ring-offset-2;
   }
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full
            border border-ink-900/20 text-ink-900 text-[12px] tracking-editorial uppercase
-           transition hover:border-ink-900 hover:bg-ink-900 hover:text-paper-50;
+           transition hover:border-ink-900 hover:bg-ink-900 hover:text-paper-50
+           focus-visible:ring-2 focus-visible:ring-sienna-500 focus-visible:ring-offset-2;
   }
   .btn-sienna {
     @apply inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full
            bg-sienna-500 text-paper-50 text-[12px] tracking-editorial uppercase
-           transition hover:bg-sienna-600;
+           transition hover:bg-sienna-600
+           focus-visible:ring-2 focus-visible:ring-sienna-500 focus-visible:ring-offset-2;
   }
   .panel {
-    @apply bg-paper-100/70 border border-ink-900/10 backdrop-blur;
+    @apply bg-paper-100/70 border border-ink-900/10 backdrop-blur rounded-lg;
   }
   .input-field {
     @apply w-full bg-transparent border-b border-ink-900/20 px-0 py-2 text-ink-900
-           focus:outline-none focus:border-ink-900 placeholder:text-ink-400 text-sm;
+           focus:outline-none focus:border-ink-900 placeholder:text-ink-400 text-sm
+           transition-colors duration-200;
   }
 }
 
@@ -96,3 +118,34 @@
   mix-blend-mode: multiply;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
+
+/* Skip-to-content link for accessibility */
+.skip-to-content {
+  @apply sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100];
+  @apply bg-ink-900 text-paper-50 px-4 py-2 rounded-full text-sm;
+}
+
+/* Chat typing indicator dots */
+.typing-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #8f877b;
+  animation: typing-bounce 1.2s ease-in-out infinite;
+}
+
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+
+/* Hide scrollbar utility (for horizontal scroll areas) */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+

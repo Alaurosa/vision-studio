@@ -95,7 +95,29 @@ export default function RoomCanvas() {
   };
 
   const onKeyDown = useCallback((e) => {
-    const { selectedId, furniture, removeFurniture, updateFurniture, clearSelection } = useLayoutStore.getState();
+    const state = useLayoutStore.getState();
+    const { selectedId, furniture, removeFurniture, updateFurniture, clearSelection, undo, redo } = state;
+
+    // Undo / Redo — works everywhere
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      undo();
+      return;
+    }
+    if (mod && (e.key === 'Z' || (e.key === 'z' && e.shiftKey))) {
+      e.preventDefault();
+      redo();
+      return;
+    }
+
+    // Escape deselects
+    if (e.key === 'Escape') {
+      clearSelection();
+      return;
+    }
+
+    // Below shortcuts require a selection
     if (!selectedId) return;
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
@@ -106,8 +128,6 @@ export default function RoomCanvas() {
         const patch = computeRotation(item, (item.rotation || 0) + 15);
         updateFurniture(item.id, patch);
       }
-    } else if (e.key === 'Escape') {
-      clearSelection();
     }
   }, []);
 

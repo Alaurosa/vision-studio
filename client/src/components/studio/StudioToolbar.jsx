@@ -1,5 +1,10 @@
 import { useState } from 'react';
+<<<<<<< Updated upstream
 import { Link, useNavigate } from 'react-router-dom';
+=======
+import { Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
+>>>>>>> Stashed changes
 import { useLayoutStore } from '@/store/layoutStore';
 import { useAuth } from '@/hooks/useAuth';
 import { inchesToFeet } from '@/utils/scale';
@@ -16,7 +21,6 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [exporting, setExporting] = useState(false);
-  const [validationMsg, setValidationMsg] = useState(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
@@ -42,8 +46,9 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
       a.download = `${(room.name || 'layout').replace(/\s+/g, '_')}.${format}`;
       a.click();
       URL.revokeObjectURL(url);
+      toast.success(`Exported ${format.toUpperCase()} successfully`);
     } catch (e) {
-      console.error(e);
+      toast.error(`Export failed — ${e?.response?.data?.error || e.message}`);
     } finally {
       setExporting(false);
     }
@@ -51,22 +56,32 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
 
   const doValidate = () => {
     const { valid, errors } = validate();
-    setValidationMsg(valid ? 'Layout looks clean — no overlaps or overflow.' : errors.slice(0, 4).join(' · '));
-    setTimeout(() => setValidationMsg(null), 5000);
+    if (valid) {
+      toast.success('Layout looks clean — no overlaps or overflow.');
+    } else {
+      toast.error(errors.slice(0, 3).join(' · '));
+    }
   };
 
   const autoPlace = async () => {
     if (!room?.id) return;
+<<<<<<< Updated upstream
     if (draft) {
       setValidationMsg('Auto-arrange requires a saved room. Save first.');
       setTimeout(() => setValidationMsg(null), 4000);
       return;
     }
+=======
+    const toastId = toast.loading('Auto-arranging furniture…');
+>>>>>>> Stashed changes
     try {
       await api.post('/api/layout/auto-place', { room_id: room.id });
       const { data } = await api.get(`/api/rooms/${room.id}`);
       useLayoutStore.setState({ furniture: data.placements || [] });
-    } catch (e) { console.error(e); }
+      toast.success('Auto-arranged successfully', { id: toastId });
+    } catch (e) {
+      toast.error('Auto-arrange failed', { id: toastId });
+    }
   };
 
   // Called either directly (if already signed in) or after the login modal finishes.
@@ -114,6 +129,7 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
 
       <div className="flex-1 min-w-4" />
 
+<<<<<<< Updated upstream
       {(validationMsg || saveMsg) && (
         <span className="text-[11px] uppercase tracking-editorial text-sienna-600 shrink-0 hidden lg:inline">
           {saveMsg || validationMsg}
@@ -131,6 +147,8 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
         </button>
       )}
 
+=======
+>>>>>>> Stashed changes
       {/* Catalog toggle (visible on mobile) */}
       <ToolbarBtn onClick={onToggleCatalog} active={catalogOpen} className="md:hidden">Catalog</ToolbarBtn>
 
@@ -164,6 +182,8 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
           <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-ink-900/10 shadow-lg rounded-lg p-4 z-50">
             <div className="eyebrow mb-3">Keyboard Shortcuts</div>
             <ul className="text-xs text-ink-700 space-y-2">
+              <li className="flex justify-between"><span>Undo</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">⌘Z</kbd></li>
+              <li className="flex justify-between"><span>Redo</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">⌘⇧Z</kbd></li>
               <li className="flex justify-between"><span>Rotate selected</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">R</kbd></li>
               <li className="flex justify-between"><span>Delete selected</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">Del</kbd></li>
               <li className="flex justify-between"><span>Deselect</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">Esc</kbd></li>

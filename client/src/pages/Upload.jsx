@@ -1,6 +1,8 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
+import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { useLayoutStore } from '@/store/layoutStore';
@@ -64,7 +66,9 @@ export default function Upload() {
 
   const onAnalysisError = (msg) => {
     setAnalyzing(false);
-    setError(msg || 'Analysis failed. Please try again.');
+    const message = msg || 'Analysis failed. Please try again.';
+    setError(message);
+    toast.error(message);
   };
 
   const onEditorConfirm = async (finalZones) => {
@@ -134,6 +138,10 @@ export default function Upload() {
 
   return (
     <div className="relative">
+      <Helmet>
+        <title>Upload Floorplan — Vision Studio</title>
+        <meta name="description" content="Upload a PNG, JPEG, or PDF floorplan. Our AI vision pipeline detects walls, segments rooms, and measures dimensions automatically." />
+      </Helmet>
       <section className="max-w-8xl mx-auto px-6 md:px-10 pt-20 pb-10">
         <p className="eyebrow mb-6">Step 01 — Intake</p>
         <h1 className="display-lg max-w-4xl">

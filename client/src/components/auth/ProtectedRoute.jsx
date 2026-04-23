@@ -6,8 +6,11 @@ export default function ProtectedRoute({ children }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-32 text-ink-500 text-sm uppercase tracking-editorial">
-        Loading…
+      <div className="min-h-[60vh] grid place-items-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-2 border-ink-300 border-t-ink-900 rounded-full animate-spin" />
+          <span className="eyebrow text-ink-500">Verifying session…</span>
+        </div>
       </div>
     );
   }

@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { motion, useReducedMotion } from 'framer-motion';
 
 const sections = [
@@ -42,6 +43,10 @@ export default function Home() {
 
   return (
     <div className="relative">
+      <Helmet>
+        <title>Vision Studio — AI-Powered Spatial Layout Engine</title>
+        <meta name="description" content="Upload a floorplan, let AI detect rooms and dimensions, then design layouts with real IKEA and Ashley furniture. Export to JSON, SVG, or DXF." />
+      </Helmet>
       {/* HERO */}
       <section className="relative overflow-hidden noise">
         <motion.div

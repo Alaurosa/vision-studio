@@ -82,7 +82,8 @@ vision-studio/
 │       │   ├── ErrorBoundary.jsx      # React error boundary with polished fallback UI
 │       │   ├── ConfirmModal.jsx       # Animated confirmation modal (replaces window.confirm)
 │       │   ├── auth/
-│       │   │   └── ProtectedRoute.jsx # Auth gate with branded spinner
+│       │   │   ├── ProtectedRoute.jsx # Auth gate with branded spinner
+│       │   │   └── LoginModal.jsx    # Inline sign-in/sign-up modal for draft→account save flow
 │       │   ├── layout/
 │       │   │   ├── Navbar.jsx        # Top nav (Home/Upload/Studio), scroll-aware, mobile hamburger, skip-to-content
 │       │   │   └── Footer.jsx        # Editorial footer with semantic HTML (hidden in /studio)
@@ -92,7 +93,7 @@ vision-studio/
 │       │   │   ├── WallOutline.jsx   # Wall polygon/segment renderer
 │       │   │   └── GridOverlay.jsx   # 6" snap grid (memoized)
 │       │   ├── upload/
-│       │   │   └── AnalysisWorkflow.jsx # 6-step animated floor-plan pipeline overlay
+│       │   │   └── AnalysisWorkflow.jsx # 6-step animated floor-plan pipeline overlay (guest + authed paths)
 │       │   ├── studio/
 │       │   │   ├── StudioToolbar.jsx # Undo/Redo/Grid/Validate/Auto-Arrange/2D/3D/Export/Chat/Shortcuts
 │       │   │   ├── RoomSetupModal.jsx # Template + dimensions picker
@@ -130,6 +131,7 @@ vision-studio/
 │   │   ├── furniture.js          # Catalog search + placements CRUD
 │   │   ├── layout.js             # LLM auto-placement + validation (uses shared overlapResolver)
 │   │   ├── chat.js               # Agentic chat route (9 tools via chatFunctions.js)
+│   │   ├── publicParse.js        # POST /api/public/parse-floorplan — stateless guest parse, no auth
 │   │   ├── models.js             # Meshy API v2 image-to-3D GLB generation
 │   │   ├── recognition.js        # Room photo → DINO detection + SAM click-segment
 │   │   └── export.js             # JSON/DXF/SVG download endpoints
@@ -184,7 +186,7 @@ vision-studio/
 
 ## State Management (Zustand)
 
-Store in `client/src/store/layoutStore.js`:
+Store in `client/src/store/layoutStore.js` (wrapped with `zustand/persist` for draft localStorage support):
 
 | Field          | Type              | Purpose                                     |
 | -------------- | ----------------- | ------------------------------------------- |
@@ -202,7 +204,7 @@ Store in `client/src/store/layoutStore.js`:
 | `zones`        | `array`           | Confirmed sub-rooms `{id,name,color,polygon,bbox,width,depth}` |
 | `activeZoneId` | `string \| null`  | Currently focused sub-room (null = whole plan) |
 
-Actions: `loadRoom`, `createRoom`, `saveRoomGeometry`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`.
+Actions: `loadRoom`, `createRoom`, `createDraftRoom`, `clearDraft`, `saveDraftToAccount`, `saveRoomGeometry`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`.
 
 ## API Routes
 
@@ -222,6 +224,7 @@ Actions: `loadRoom`, `createRoom`, `saveRoomGeometry`, `updateRoom`, `addFurnitu
 | DELETE | `/api/furniture/placements/:id` | Remove placement |
 | POST | `/api/layout/auto-place` | LLM auto-place all furniture optimally |
 | POST | `/api/chat/message` | Agentic chat (LLM + 10 function tools incl. style preferences) |
+| POST | `/api/public/parse-floorplan` | Stateless guest floorplan parse (no auth, no DB writes) |
 | POST | `/api/models/generate` | Submit image-to-3D task via Meshy |
 | GET | `/api/models/status/:task_id` | Poll Meshy task progress |
 | GET | `/api/models/lookup` | Cache lookup by image URL |
@@ -270,6 +273,7 @@ All tables use RLS — users can only access their own data.
 - Structured logging (`services/logger.js`) replaces raw `console.log/error` in server code.
 - The build uses manual Rollup chunks to split React, Konva, Three.js, Framer Motion, and Supabase into separate vendor bundles for optimal caching.
 - A skip-to-content link is rendered before the header for keyboard/screen-reader accessibility.
+- **Guest / Draft Mode**: Upload and Studio pages are accessible without authentication. Guests create local "draft" rooms stored in localStorage via Zustand `persist`. The `StudioToolbar` shows a "Save to account" button that opens a `LoginModal` inline. On save, `saveDraftToAccount()` pushes the room, zones, and placements to the server. The guest upload path uses `/api/public/parse-floorplan` to avoid auth. 401 responses from the API are silently handled (no redirect).
 
 ## Chatbot Function Calling
 

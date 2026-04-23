@@ -95,29 +95,21 @@ export const useLayoutStore = create(
       isChatOpen: true,
       undoStack: [],
       redoStack: [],
-      errors: [],
-      // Stored when a guest uploads a floor plan — used by the 2D canvas to show the image underlay.
+      // Draft-mode state (persisted to localStorage for guest users)
       draftFloorPlanDataUrl: null,
-      draftScalePxPerInch: 1,
-
-      // ---------- helpers ----------
-      isDraft: () => isDraftId(get().room?.id),
+      draftScalePxPerInch: null,
 
       // ---------- room ----------
-      setRoom: (room) => set({ room }),
-
       loadRoom: async (roomId) => {
-        // Draft rooms live entirely in localStorage (persisted by this store).
+        // Draft rooms are purely client-side — just set them from persisted state
         if (isDraftId(roomId)) {
-          const current = get().room;
-          if (current?.id === roomId) {
+          const { room } = get();
+          if (room?.id === roomId) {
+            // Already loaded from persist
             set({ loading: false });
-            return;
           }
-          set({ loading: false, errors: [...get().errors, 'Draft room not found'] });
           return;
         }
-
         set({ loading: true });
         try {
           const { data } = await api.get(`/api/rooms/${roomId}`);
@@ -129,11 +121,10 @@ export const useLayoutStore = create(
             zones: fallbackZones,
             activeZoneId: fallbackZones[0]?.id || null,
             loading: false,
-            draftFloorPlanDataUrl: null,
           });
         } catch (e) {
           console.error('loadRoom', e);
-          set({ loading: false, errors: [...get().errors, 'Failed to load room'] });
+          set({ loading: false });
         }
       },
 
@@ -142,34 +133,31 @@ export const useLayoutStore = create(
         return data;
       },
 
-      // Create a draft room entirely client-side. No server calls. Used by guests.
-      createDraftRoom: (payload = {}) => {
+      // Create a local draft room (guest mode — no server call)
+      createDraftRoom: (payload) => {
+        const id = newDraftId();
         const room = {
-          id: newDraftId(),
-          name: payload.name || 'Untitled draft',
+          id,
+          name: payload.name || 'Draft Room',
           unit: payload.unit || 'inches',
-          width: payload.width ?? 240,
-          depth: payload.depth ?? 180,
-          height: payload.height ?? 96,
-          scale_px_per_inch: payload.scale_px_per_inch ?? 1,
-          zones: payload.zones ?? [],
-          placements: [],
-          detected_objects: payload.detected_objects ?? null,
-          floor_plan_url: null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          width: payload.width || null,
+          depth: payload.depth || null,
+          height: payload.height || null,
+          scale_px_per_inch: payload.scale_px_per_inch || null,
+          walls: payload.walls || null,
         };
         const zones = normalizeZonesArray(payload.zones || []);
         set({
           room,
           furniture: [],
-          detections: [],
           zones,
           activeZoneId: zones[0]?.id || null,
+          detections: [],
+          chatHistory: [],
           undoStack: [],
           redoStack: [],
           draftFloorPlanDataUrl: payload.floorPlanDataUrl || null,
-          draftScalePxPerInch: payload.scale_px_per_inch ?? 1,
+          draftScalePxPerInch: payload.scale_px_per_inch || null,
         });
         return room;
       },
@@ -181,35 +169,21 @@ export const useLayoutStore = create(
           zones: [],
           activeZoneId: null,
           detections: [],
+          chatHistory: [],
           undoStack: [],
           redoStack: [],
           draftFloorPlanDataUrl: null,
-          draftScalePxPerInch: 1,
+          draftScalePxPerInch: null,
         });
       },
 
       updateRoom: async (patch) => {
         const { room } = get();
         if (!room) return;
-        set({ room: { ...room, ...patch, updated_at: new Date().toISOString() } });
-        if (isDraftId(room.id)) return;
-        await api.put(`/api/rooms/${room.id}`, patch);
-      },
-
-      saveRoomGeometry: async (walls, scale) => {
-        const { room } = get();
-        if (!room) return;
-        if (isDraftId(room.id)) {
-          set({
-            room: { ...room, walls, scale_px_per_inch: scale, updated_at: new Date().toISOString() },
-            draftScalePxPerInch: scale,
-          });
-          return;
+        set({ room: { ...room, ...patch } });
+        if (!isDraftId(room.id)) {
+          await api.put(`/api/rooms/${room.id}`, patch);
         }
-        const { data } = await api.put(`/api/rooms/${room.id}`, {
-          walls, scale_px_per_inch: scale,
-        });
-        set({ room: data });
       },
 
       // ---------- furniture ----------
@@ -224,14 +198,12 @@ export const useLayoutStore = create(
         if (!room) return;
         get()._snapshot();
 
+        // Draft mode — add locally with a generated ID
         if (isDraftId(room.id)) {
           const placement = {
             id: newPlacementId(),
             room_id: room.id,
             ...item,
-            image_url: item.image_url || null,
-            model_url: item.model_url || null,
-            created_at: new Date().toISOString(),
           };
           set((s) => ({ furniture: [...s.furniture, placement] }));
           return placement;
@@ -252,11 +224,13 @@ export const useLayoutStore = create(
       },
 
       updateFurniture: (id, changes) => {
+        const { room } = get();
         set((s) => ({
           furniture: s.furniture.map((f) => (f.id === id ? { ...f, ...changes } : f)),
         }));
-        const { room } = get();
-        if (isDraftId(room?.id)) return;
+        // Skip server save for draft rooms
+        if (room && isDraftId(room.id)) return;
+        // Debounce API save
         clearTimeout(saveTimers[id]);
         saveTimers[id] = setTimeout(async () => {
           try { await api.put(`/api/furniture/placements/${id}`, changes); }
@@ -265,13 +239,13 @@ export const useLayoutStore = create(
       },
 
       removeFurniture: async (id) => {
+        const { room } = get();
         get()._snapshot();
         set((s) => ({
           furniture: s.furniture.filter((f) => f.id !== id),
           selectedId: s.selectedId === id ? null : s.selectedId,
         }));
-        const { room } = get();
-        if (isDraftId(room?.id)) return;
+        if (room && isDraftId(room.id)) return;
         try { await api.delete(`/api/furniture/placements/${id}`); }
         catch (e) { console.error('remove', e); }
       },

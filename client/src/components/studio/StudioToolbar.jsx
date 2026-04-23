@@ -1,22 +1,20 @@
 import { useState } from 'react';
-<<<<<<< Updated upstream
 import { Link, useNavigate } from 'react-router-dom';
-=======
-import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
->>>>>>> Stashed changes
 import { useLayoutStore } from '@/store/layoutStore';
 import { useAuth } from '@/hooks/useAuth';
 import { inchesToFeet } from '@/utils/scale';
 import api from '@/lib/api';
 import LoginModal from '@/components/auth/LoginModal';
 
+const isDraftId = (id) => typeof id === 'string' && id.startsWith('draft-');
+
 export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
   const {
     room, viewMode, setViewMode, gridEnabled, toggleGrid,
-    isChatOpen, toggleChat, undo, redo, validate, updateRoom,
+    isChatOpen, toggleChat, undo, redo, validate,
     selectedId, furniture, rotateFurniture, removeFurniture,
-    saveDraftToAccount, isDraft,
+    saveDraftToAccount,
   } = useLayoutStore();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -27,13 +25,12 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
   const [showLogin, setShowLogin] = useState(false);
   const selectedItem = furniture.find((item) => item.id === selectedId);
 
-  const draft = isDraft();
+  const draft = isDraftId(room?.id);
 
   const runExport = async (format) => {
     if (!room?.id) return;
     if (draft) {
-      setValidationMsg('Save to your account before exporting.');
-      setTimeout(() => setValidationMsg(null), 4000);
+      toast.error('Save to your account before exporting.');
       return;
     }
     setExporting(true);
@@ -65,15 +62,11 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
 
   const autoPlace = async () => {
     if (!room?.id) return;
-<<<<<<< Updated upstream
     if (draft) {
-      setValidationMsg('Auto-arrange requires a saved room. Save first.');
-      setTimeout(() => setValidationMsg(null), 4000);
+      toast.error('Auto-arrange requires a saved room. Save first.');
       return;
     }
-=======
     const toastId = toast.loading('Auto-arranging furniture…');
->>>>>>> Stashed changes
     try {
       await api.post('/api/layout/auto-place', { room_id: room.id });
       const { data } = await api.get(`/api/rooms/${room.id}`);
@@ -91,12 +84,15 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
     try {
       const serverRoom = await saveDraftToAccount();
       setSaveMsg('Saved ✓');
+      toast.success('Room saved to your account!');
       setTimeout(() => setSaveMsg(null), 3000);
       // Switch the URL to the now-real room id.
       if (serverRoom?.id) navigate(`/studio/${serverRoom.id}`, { replace: true });
     } catch (e) {
       console.error('save draft', e);
-      setSaveMsg(e?.response?.data?.error || e.message || 'Save failed');
+      const msg = e?.response?.data?.error || e.message || 'Save failed';
+      setSaveMsg(msg);
+      toast.error(msg);
       setTimeout(() => setSaveMsg(null), 5000);
     } finally {
       setSaving(false);
@@ -129,10 +125,9 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
 
       <div className="flex-1 min-w-4" />
 
-<<<<<<< Updated upstream
-      {(validationMsg || saveMsg) && (
+      {(saveMsg) && (
         <span className="text-[11px] uppercase tracking-editorial text-sienna-600 shrink-0 hidden lg:inline">
-          {saveMsg || validationMsg}
+          {saveMsg}
         </span>
       )}
 
@@ -147,8 +142,6 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
         </button>
       )}
 
-=======
->>>>>>> Stashed changes
       {/* Catalog toggle (visible on mobile) */}
       <ToolbarBtn onClick={onToggleCatalog} active={catalogOpen} className="md:hidden">Catalog</ToolbarBtn>
 

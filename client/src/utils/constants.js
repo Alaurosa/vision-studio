@@ -44,4 +44,24 @@ export const ROOM_ZONE_COLORS = [
   '#5f7d4f',
   '#c06b8f',
   '#7b6cc7',
+  '#2e8b8b',
+  '#d4764e',
+  '#6a8e3f',
+  '#a0522d',
+  '#5b7fa5',
+  '#c44569',
+  '#8b6914',
+  '#3d7a68',
 ];
+
+/** Generate a random saturated color for zones beyond the preset palette. */
+export function randomZoneColor() {
+  const h = Math.floor(Math.random() * 360);
+  return `hsl(${h}, 55%, 45%)`;
+}
+
+/** Get a zone color by index — uses presets first, then generates random ones. */
+export function getZoneColor(index) {
+  if (index < ROOM_ZONE_COLORS.length) return ROOM_ZONE_COLORS[index];
+  return randomZoneColor();
+}

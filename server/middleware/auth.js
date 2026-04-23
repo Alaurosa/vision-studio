@@ -42,3 +42,24 @@ export async function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Auth verification failed' });
   }
 }
+
+/**
+ * Like requireAuth but allows unauthenticated requests through with a guest user.
+ * Sets req.user to a guest stub if no valid token is provided.
+ */
+export async function optionalAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (supabase && authHeader?.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.split(' ')[1];
+      const { data, error } = await supabase.auth.getUser(token);
+      if (!error && data.user) {
+        req.user = data.user;
+        return next();
+      }
+    } catch { /* fall through to guest */ }
+  }
+  // Guest fallback
+  req.user = { id: 'guest', email: 'guest' };
+  next();
+}

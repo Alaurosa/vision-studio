@@ -6,13 +6,7 @@ import cv2
 import numpy as np
 from PIL import Image
 import io
-import httpx
 from typing import Optional
-GROUNDING_DINO_MODEL = "adirik/grounding-dino:efd10a8ddc57ea28773327e881ce95e20cc1d734c589f7dd01d2036921ed78aa"
-SAM3_MODEL = "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83"
-
-# Room labels for Grounding DINO detection
-ROOM_LABELS = "room . bedroom . kitchen . bathroom . living room . hallway . dining room . office . closet . garage . laundry room"
 
 
 def _get_openai_api_key() -> Optional[str]:
@@ -46,67 +40,6 @@ def _prepare_floorplan_bytes(image_bytes: bytes, content_type: str) -> bytes:
     out = io.BytesIO()
     pages[0].convert("RGB").save(out, format="PNG")
     return out.getvalue()
-
-
-def _mask_url_to_polygon(mask_url: str, img_w: int, img_h: int) -> list:
-    """Download a SAM mask image URL and extract polygon contour via OpenCV."""
-    try:
-        resp = httpx.get(mask_url, timeout=30)
-        resp.raise_for_status()
-        nparr = np.frombuffer(resp.content, np.uint8)
-        mask = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
-        if mask is None:
-            return []
-        # Resize mask to match original image dimensions if needed
-        if mask.shape[0] != img_h or mask.shape[1] != img_w:
-            mask = cv2.resize(mask, (img_w, img_h), interpolation=cv2.INTER_NEAREST)
-        # Threshold to binary
-        _, binary = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
-        # Find contours
-        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return []
-        largest = max(contours, key=cv2.contourArea)
-        # Douglas-Peucker simplification
-        epsilon = 0.01 * cv2.arcLength(largest, True)
-        approx = cv2.approxPolyDP(largest, epsilon, True)
-        return [[int(p[0][0]), int(p[0][1])] for p in approx]
-    except Exception as e:
-        print(f"Mask polygon extraction failed: {e}")
-        return []
-
-
-def _mask_data_to_polygon(mask_data, img_w: int, img_h: int) -> list:
-    """Extract polygon from various SAM mask output formats."""
-    if isinstance(mask_data, str) and (mask_data.startswith("http") or mask_data.startswith("data:")):
-        if mask_data.startswith("http"):
-            return _mask_url_to_polygon(mask_data, img_w, img_h)
-        # data URI mask
-        try:
-            b64_part = mask_data.split(",", 1)[1]
-            mask_bytes = base64.b64decode(b64_part)
-            nparr = np.frombuffer(mask_bytes, np.uint8)
-            mask = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
-            if mask is None:
-                return []
-            _, binary = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
-            contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if not contours:
-                return []
-            largest = max(contours, key=cv2.contourArea)
-            epsilon = 0.01 * cv2.arcLength(largest, True)
-            approx = cv2.approxPolyDP(largest, epsilon, True)
-            return [[int(p[0][0]), int(p[0][1])] for p in approx]
-        except Exception:
-            return []
-    # Dict with polygon or mask key
-    if isinstance(mask_data, dict):
-        if "polygon" in mask_data:
-            return mask_data["polygon"]
-        if "mask" in mask_data:
-            return _mask_data_to_polygon(mask_data["mask"], img_w, img_h)
-    return []
-
 
 
 def _build_walls_mask(image_bytes: bytes):
@@ -212,17 +145,13 @@ def _snap_to_nearest_wall_h(walls_mask, y_approx, x_start, x_end, search_range=8
 
 async def _openai_vision_analyze(image_bytes: bytes) -> dict:
     """
-    Grid-overlay + GPT-5.4 + wall-snap pipeline for precise room detection.
+    Grid-overlay + OpenAI Vision + wall-snap pipeline for precise room detection.
 
     1. Draws a visible 20×20 grid on the floorplan image.
-    2. Asks GPT-5.4 to identify rooms using grid coordinates (much easier for
-       VLMs than raw pixel estimation).
+    2. Asks the vision model to identify rooms using grid coordinates.
     3. Converts grid coords → pixel coords.
     4. Snaps every bounding-box edge to the nearest real architectural wall
        detected via OpenCV thresholding.
-
-    This approach yields pixel-perfect room boxes that sit exactly on the
-    inner wall edges.
     """
     openai_api_key = _get_openai_api_key()
     if not openai_api_key:
@@ -260,61 +189,39 @@ async def _openai_vision_analyze(image_bytes: bytes) -> dict:
     prompt = """You are analyzing an architectural floor plan with a red/pink 20x20 grid overlay.
 Grid numbers go from 0 to 20 on both X (left-right) and Y (top-bottom) axes.
 
-IMPORTANT RULES:
-- Provide bounding boxes as grid coordinates [x1, y1, x2, y2].
-- Use decimal values for precision (e.g., 1.2, 4.8).
+RULES:
+- Provide bounding boxes as grid coordinates [x1, y1, x2, y2] using decimals for precision.
 - The box must follow the INNER edges of the thick architectural walls.
-- Do NOT include exterior spaces (deck, porch, entry stairs, main entry stairs).
-- Include ALL interior rooms: bathrooms, closets, bedrooms, kitchen, dining, living room, hallways, stairways, etc.
+- ONLY include real habitable rooms: bedrooms, bathrooms, kitchen, dining room, living room, den, office/study, laundry room, pantry, closets, walk-in closets, en-suite bathrooms, powder rooms, utility rooms, bonus rooms, family rooms, sunrooms, nurseries, game rooms, media rooms.
+- Do NOT include: hallways, corridors, stairs/stairways, entry/foyer areas, porches, decks, patios, garages, exterior spaces, landings, vestibules, or any transitional/circulation spaces.
+- If a room has a label on the plan, use that exact label.
+- If you see dimension text inside or near a room (like 13'-4" X 9'-0"), read it and include it.
 
 DIMENSION READING:
-- For room dimensions: read text like 13'-4" X 9'-0" carefully.
-  - 13'-4" means 13 feet 4 inches = (13 × 12) + 4 = 160 inches
-  - 9'-0" means 9 feet 0 inches = (9 × 12) + 0 = 108 inches
-  - 13'-6" means 13 feet 6 inches = (13 × 12) + 6 = 162 inches
-  - 10'-2" means 10 feet 2 inches = (10 × 12) + 2 = 122 inches
+- 13'-4" = (13 × 12) + 4 = 160 inches
+- 9'-0" = (9 × 12) + 0 = 108 inches
+- 28'-0" = (28 × 12) + 0 = 336 inches
 - For total building dimensions: look for dimension lines with arrows outside the building.
-  - These are the overall width and depth of the structure.
-  - 28'-0" = (28 × 12) + 0 = 336 inches
-  - 32'-0" = (32 × 12) + 0 = 384 inches
 
 Return ONLY a JSON object:
-{"rooms": [{"label": "Room Name", "bbox": [x1, y1, x2, y2], "confidence": 0.9, "width_inches": N_or_null, "depth_inches": N_or_null}], "total_width_inches": N, "total_depth_inches": N}"""
+{"rooms": [{"label": "Room Name", "bbox": [x1, y1, x2, y2], "confidence": 0.9, "width_inches": N_or_null, "depth_inches": N_or_null}], "total_width_inches": N_or_null, "total_depth_inches": N_or_null}"""
 
     try:
         client = AsyncOpenAI(api_key=openai_api_key)
 
-        # Use gpt-5.4 if available (better spatial reasoning), fall back to gpt-4o
         model = "gpt-5.4"
-        try:
-            response = await client.chat.completions.create(
-                model=model,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "user", "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{grid_b64}", "detail": "high"}},
-                    ]}
-                ],
-                max_completion_tokens=2048,
-                temperature=0,
-            )
-        except Exception:
-            # Fall back to gpt-4o if gpt-5.4 unavailable
-            model = os.getenv("OPENAI_MODEL", "gpt-4o")
-            print(f"gpt-5.4 unavailable, falling back to {model}")
-            response = await client.chat.completions.create(
-                model=model,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "user", "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{grid_b64}", "detail": "high"}},
-                    ]}
-                ],
-                max_completion_tokens=2048,
-                temperature=0,
-            )
+        response = await client.chat.completions.create(
+            model=model,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{grid_b64}", "detail": "high"}},
+                ]}
+            ],
+            max_completion_tokens=2048,
+            temperature=0,
+        )
 
         text = response.choices[0].message.content
         if not text:
@@ -656,7 +563,7 @@ async def parse_floorplan(image_bytes: bytes, content_type: str) -> dict:
     Parse a floor plan image to detect and segment individual rooms.
 
     Pipeline (priority order):
-    1. OpenAI Codex 5.3 Vision — best accuracy, returns clean rectangular room outlines
+    1. OpenAI Vision (gpt-5.4 → gpt-4o fallback) — best accuracy, grid + wall-snap
     2. Grounding DINO + SAM 3 via Replicate — good but irregular polygons
     3. OpenCV fallback — works offline but least accurate
     """
@@ -671,137 +578,16 @@ async def parse_floorplan(image_bytes: bytes, content_type: str) -> dict:
     except Exception as e:
         return {"error": f"Could not decode image: {e}", "rooms": [], "walls": [], "fallback": True}
 
-    # --- Method 1: GPT-5.4 Grid + Wall-Snap (preferred) ---
+    # --- Method 1: OpenAI Vision Grid + Wall-Snap (preferred) ---
     if _get_openai_api_key():
-        print("Trying GPT-5.4 grid + wall-snap for floor plan analysis...")
+        print("Trying OpenAI Vision grid + wall-snap for floor plan analysis...")
         llm_result = await _openai_vision_analyze(image_bytes)
         
         if llm_result and llm_result.get("rooms"):
             # Wall-snapping is already done inside _openai_vision_analyze
             return llm_result
             
-        print("OpenAI Vision failed or returned no rooms, trying next method...")
+        print("OpenAI Vision failed or returned no rooms, falling back to OpenCV...")
 
-    # --- Method 2: DINO + SAM via Replicate ---
-    if not _get_replicate_token():
-        print("No REPLICATE_API_TOKEN — using OpenCV fallback for floor plan parsing")
-        return _opencv_fallback(image_bytes)
-
-    loop = asyncio.get_event_loop()
-
-    try:
-        import replicate
-
-        # Step 1: Grounding DINO to detect room regions
-        print(f"Running Grounding DINO on {img_w}x{img_h} floor plan...")
-        dino_output = await loop.run_in_executor(
-            None,
-            lambda: replicate.run(
-                GROUNDING_DINO_MODEL,
-                input={
-                    "image": data_uri,
-                    "query": ROOM_LABELS,
-                    "box_threshold": 0.15,
-                    "text_threshold": 0.15,
-                },
-            ),
-        )
-
-        if not dino_output or not isinstance(dino_output, list) or len(dino_output) == 0:
-            print("DINO found no rooms — falling back to OpenCV")
-            return _opencv_fallback(image_bytes)
-
-        print(f"DINO detected {len(dino_output)} regions")
-
-        # Collect all detections with their bboxes
-        detections = []
-        for item in dino_output:
-            box = item.get("box", [])
-            label = item.get("label", "room")
-            score = float(item.get("score", 0))
-            if len(box) == 4 and score > 0.1:
-                detections.append({"label": label, "bbox": box, "score": score})
-
-        if not detections:
-            print("No valid bboxes from DINO — falling back to OpenCV")
-            return _opencv_fallback(image_bytes)
-
-        # Step 2: SAM 3 segmentation on ALL detected regions
-        print(f"Running SAM 3 on {len(detections)} detected regions...")
-        all_bboxes = [d["bbox"] for d in detections]
-
-        try:
-            sam_output = await loop.run_in_executor(
-                None,
-                lambda: replicate.run(
-                    SAM3_MODEL,
-                    input={
-                        "image": data_uri,
-                        "input_boxes": json.dumps(all_bboxes),
-                    },
-                ),
-            )
-            print(f"SAM returned: {type(sam_output).__name__}, len={len(sam_output) if isinstance(sam_output, list) else 'N/A'}")
-        except Exception as sam_err:
-            print(f"SAM failed: {sam_err} — extracting polygons from bboxes")
-            sam_output = None
-
-        # Step 3: Extract polygon contours from SAM masks
-        rooms = []
-        for i, det in enumerate(detections):
-            polygon = []
-
-            # Try extracting polygon from SAM output
-            if sam_output and isinstance(sam_output, list) and i < len(sam_output):
-                mask_item = sam_output[i]
-                polygon = _mask_data_to_polygon(mask_item, img_w, img_h)
-
-            # Fallback: convert bbox to pixel-space polygon
-            if not polygon or len(polygon) < 3:
-                bx = det["bbox"]
-                x1 = int(bx[0] * img_w) if bx[0] <= 1 else int(bx[0])
-                y1 = int(bx[1] * img_h) if bx[1] <= 1 else int(bx[1])
-                x2 = int(bx[2] * img_w) if bx[2] <= 1 else int(bx[2])
-                y2 = int(bx[3] * img_h) if bx[3] <= 1 else int(bx[3])
-                polygon = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
-
-            rooms.append({
-                "label": det["label"],
-                "polygon": polygon,
-                "bbox": det["bbox"],
-                "confidence": det["score"],
-                "area_px": float(cv2.contourArea(np.array(polygon, dtype=np.int32))) if len(polygon) >= 3 else 0,
-            })
-
-        # Sort rooms by area descending
-        rooms.sort(key=lambda r: r["area_px"], reverse=True)
-
-        # Overall boundary: union of all room polygons
-        all_points = []
-        for r in rooms:
-            all_points.extend(r["polygon"])
-        if all_points:
-            pts = np.array(all_points, dtype=np.int32)
-            x, y, w, h = cv2.boundingRect(pts)
-            # Use convex hull as overall wall boundary
-            hull = cv2.convexHull(pts)
-            walls = [[int(p[0][0]), int(p[0][1])] for p in hull]
-        else:
-            x, y, w, h = 0, 0, img_w, img_h
-            walls = [[0, 0], [img_w, 0], [img_w, img_h], [0, img_h]]
-
-        return {
-            "rooms": rooms,
-            "walls": walls,
-            "image_width": img_w,
-            "image_height": img_h,
-            "boundary": {"x": int(x), "y": int(y), "w": int(w), "h": int(h)},
-            "method": "dino_sam",
-            "fallback": False,
-        }
-
-    except Exception as e:
-        print(f"DINO+SAM pipeline failed: {e} — falling back to OpenCV")
-        result = _opencv_fallback(image_bytes)
-        result["error"] = f"AI pipeline error: {e}. Used OpenCV fallback."
-        return result
+    # --- Method 2: OpenCV fallback — works offline ---
+    return _opencv_fallback(image_bytes)

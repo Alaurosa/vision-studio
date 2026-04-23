@@ -2,7 +2,7 @@ import express from 'express';
 import axios from 'axios';
 import FormData from 'form-data';
 import multer from 'multer';
-import { requireAuth } from '../middleware/auth.js';
+import { optionalAuth } from '../middleware/auth.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import { saveFileLocally } from '../services/fileStorage.js';
 
@@ -16,7 +16,7 @@ const FURNITURE_LABELS = [
 ];
 
 // POST /api/recognition/room-photo/:room_id
-router.post('/room-photo/:room_id', requireAuth, upload.single('file'), async (req, res) => {
+router.post('/room-photo/:room_id', optionalAuth, upload.single('file'), async (req, res) => {
   const { room_id } = req.params;
   const file = req.file;
   if (!file) return res.status(400).json({ error: 'No file provided' });
@@ -88,7 +88,7 @@ router.post('/room-photo/:room_id', requireAuth, upload.single('file'), async (r
 });
 
 // POST /api/recognition/click-segment
-router.post('/click-segment', requireAuth, async (req, res) => {
+router.post('/click-segment', optionalAuth, async (req, res) => {
   const { image_url, click_x, click_y } = req.body;
 
   try {

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { Stage, Layer, Image as KImage, Rect, Group, Text, Line, Circle } from 'react-konva';
-import useImage from 'use-image';
+import { Stage, Layer, Rect, Group, Text, Line, Circle } from 'react-konva';
 import { useLayoutStore } from '@/store/layoutStore';
 import { computeRotation, snapToGrid, inchesToFeet } from '@/utils/scale';
 import FurnitureItem from './FurnitureItem';
@@ -67,12 +66,6 @@ export default function RoomCanvas() {
     ? Math.min((size.w - margin * 2) / focusWidth, (size.h - margin * 2) / focusDepth)
     : 4;
   const pxPerInch = pxPerInchFit > 0 ? pxPerInchFit : 4;
-
-  const draftFloorPlanDataUrl = useLayoutStore((s) => s.draftFloorPlanDataUrl);
-  const [bgImage] = useImage(
-    room?.floor_plan_url || room?.room_photo_url || draftFloorPlanDataUrl || '',
-    'anonymous'
-  );
 
   const onWheel = (e) => {
     e.evt.preventDefault();
@@ -197,17 +190,8 @@ export default function RoomCanvas() {
           if (e.target === e.target.getStage()) clearSelection();
         }}
       >
-        {/* Background image */}
+        {/* Room floor */}
         <Layer listening={false}>
-          {bgImage && room?.width && (
-            <KImage
-              image={bgImage}
-              x={toCanvasX(0)} y={toCanvasY(0)}
-              width={roomPxW} height={roomPxH}
-              opacity={0.28}
-            />
-          )}
-          {/* Room floor */}
           {focusWidth > 0 && (
             <Rect
               x={roomOffsetX} y={roomOffsetY}

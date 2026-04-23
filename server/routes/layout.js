@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { optionalAuth } from '../middleware/auth.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import { buildLayoutJSON } from '../services/exportFormats.js';
 import { chat } from '../services/llmRouter.js';
@@ -8,13 +8,18 @@ import { resolveOverlaps, getEffectiveDims, validateLayout } from '../services/o
 const router = express.Router();
 
 // POST /api/layout/auto-place — Use LLM to compute optimal placement for all furniture
-router.post('/auto-place', requireAuth, async (req, res) => {
-  const { room_id } = req.body;
+router.post('/auto-place', optionalAuth, async (req, res) => {
+  const { room_id, room_context, placements_context } = req.body;
   const db = await useDb();
+  const isDraft = typeof room_id === 'string' && room_id.startsWith('draft-');
 
   try {
     let room, placements;
-    if (db) {
+
+    if (isDraft && room_context) {
+      room = room_context;
+      placements = placements_context || [];
+    } else if (db) {
       const [roomRes, placementsRes] = await Promise.all([
         supabaseAdmin.from('rooms').select('*').eq('id', room_id).eq('user_id', req.user.id).single(),
         supabaseAdmin.from('placements').select('*').eq('room_id', room_id),
@@ -100,15 +105,17 @@ Compute the optimal position and rotation for each item. Return ONLY a JSON arra
 
     const placed = resolveOverlaps(candidates, roomW, roomD);
 
-    // Save resolved positions
+    // Save resolved positions (skip DB writes for draft rooms)
     const updates = [];
     for (const c of placed) {
-      if (db) {
-        await supabaseAdmin.from('placements')
-          .update({ x_inches: c.x, y_inches: c.y, rotation: c.rotation, updated_at: new Date().toISOString() })
-          .eq('id', c.placement.id);
-      } else {
-        fallback.updatePlacement(c.placement.id, { x_inches: c.x, y_inches: c.y, rotation: c.rotation });
+      if (!isDraft) {
+        if (db) {
+          await supabaseAdmin.from('placements')
+            .update({ x_inches: c.x, y_inches: c.y, rotation: c.rotation, updated_at: new Date().toISOString() })
+            .eq('id', c.placement.id);
+        } else {
+          fallback.updatePlacement(c.placement.id, { x_inches: c.x, y_inches: c.y, rotation: c.rotation });
+        }
       }
       updates.push({ id: c.placement.id, name: c.placement.name, x_inches: c.x, y_inches: c.y, rotation: c.rotation });
     }
@@ -121,11 +128,15 @@ Compute the optimal position and rotation for each item. Return ONLY a JSON arra
 });
 
 // POST /api/layout/validate — validate current layout
-router.post('/validate', requireAuth, async (req, res) => {
-  const { room_id } = req.body;
+router.post('/validate', optionalAuth, async (req, res) => {
+  const { room_id, room_context, placements_context } = req.body;
+  const isDraftRoom = typeof room_id === 'string' && room_id.startsWith('draft-');
   let room, placements;
 
-  if (await useDb()) {
+  if (isDraftRoom && room_context) {
+    room = room_context;
+    placements = placements_context || [];
+  } else if (await useDb()) {
     const [roomRes, placementsRes] = await Promise.all([
       supabaseAdmin.from('rooms').select('*').eq('id', room_id).eq('user_id', req.user.id).single(),
       supabaseAdmin.from('placements').select('*').eq('room_id', room_id),

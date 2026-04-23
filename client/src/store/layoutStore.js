@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import api from '@/lib/api';
 import { getAABB, overlaps, withinRoom, validateAll } from '@/utils/collision';
-import { GRID_SNAP_INCHES, ROOM_ZONE_COLORS } from '@/utils/constants';
+import { GRID_SNAP_INCHES, getZoneColor } from '@/utils/constants';
 import { computeRotation } from '@/utils/scale';
 
 const snapToGrid = (value, gridSize) => Math.round(value / gridSize) * gridSize;
@@ -32,7 +32,7 @@ function normalizeZone(zone, index = 0) {
     polygon,
     width,
     depth,
-    color: zone?.color || ROOM_ZONE_COLORS[index % ROOM_ZONE_COLORS.length],
+    color: zone?.color || getZoneColor(index),
     confidence: zone?.confidence ?? null,
   };
 }

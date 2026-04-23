@@ -1,42 +1,10 @@
 export const DEFAULTS = {
-  roomHeightInches: 96,
-  wallThicknessInches: 4,
-  minClearanceInches: 24,
-  doorWidthInches: 32,
-  windowHeightInches: 48,
-  gridSnapInches: 6,
-  defaultUnit: 'inches',
-  defaultScale: 4.0,
-  colors: {
-    sofa: '#c8a97e',
-    loveseat: '#d4b48c',
-    bed: '#a8c4d4',
-    desk: '#d4c87a',
-    bookshelf: '#8c6444',
-    dining_table: '#b89870',
-    coffee_table: '#c9a96e',
-    dresser: '#b8a090',
-    nightstand: '#c4b0a0',
-    armchair: '#d0b888',
-    tv_stand: '#909090',
-    cabinet: '#a09080',
-    default: '#cccccc',
-  },
-  validation: {
-    allowOverlap: false,
-    allowOutOfBounds: false,
-    snapToGrid: true,
-    warnNarrowPath: true,
+  export: {
+    schemaVersion: '1.0',
   },
   llm: {
-    defaultModel: process.env.OPENAI_MODEL || 'gpt-4o',
-    fallbackModel: process.env.OPENAI_MODEL || 'gpt-4o',
+    model: 'gpt-5.4',
     maxTokens: 2048,
     temperature: 0.3,
   },
-  export: {
-    schemaVersion: '1.0',
-    defaultFormat: 'json',
-  },
 };
-

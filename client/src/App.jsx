@@ -4,7 +4,6 @@ import { HelmetProvider, Helmet } from 'react-helmet-async';
 import { Toaster } from 'react-hot-toast';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
-import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import ErrorBoundary from '@/components/ErrorBoundary';
 
 // Lazy-loaded pages for code-splitting
@@ -51,19 +50,11 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<Home />} />
                 <Route path="/login" element={<Login />} />
-                {/* Upload and Studio are accessible without auth (guest/draft mode) */}
+                {/* All features accessible without auth (guest/draft mode) */}
                 <Route path="/upload" element={<Upload />} />
                 <Route path="/studio" element={<Studio />} />
                 <Route path="/studio/:roomId" element={<Studio />} />
-                {/* Chat requires authentication */}
-                <Route
-                  path="/chat"
-                  element={
-                    <ProtectedRoute>
-                      <Chat />
-                    </ProtectedRoute>
-                  }
-                />
+                <Route path="/chat" element={<Chat />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>

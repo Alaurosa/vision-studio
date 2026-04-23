@@ -43,9 +43,7 @@ export default function AnalysisWorkflow({ file, roomName, isGuest = false, onCo
 
     const fd = new FormData();
     fd.append('file', file);
-    const req = api.post(`/api/rooms/${room.id}/upload-floorplan`, fd, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    const req = api.post(`/api/rooms/${room.id}/upload-floorplan`, fd);
 
     await advance(2);
     await advance(3);
@@ -74,9 +72,7 @@ export default function AnalysisWorkflow({ file, roomName, isGuest = false, onCo
 
     const fd = new FormData();
     fd.append('file', file);
-    const req = api.post('/api/public/parse-floorplan', fd, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    const req = api.post('/api/public/parse-floorplan', fd);
 
     await advance(1);
     await advance(2);

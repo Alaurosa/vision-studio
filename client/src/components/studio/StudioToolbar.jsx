@@ -29,14 +29,21 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
 
   const runExport = async (format) => {
     if (!room?.id) return;
-    if (draft) {
-      toast.error('Save to your account before exporting.');
-      return;
-    }
     setExporting(true);
     try {
-      const res = await api.post(`/api/export/${format}/${room.id}`, {}, { responseType: 'blob' });
-      const blob = res.data;
+      let blob;
+      if (draft) {
+        // Draft rooms: build export payload client-side and send to server
+        const payload = {
+          room_context: { id: room.id, name: room.name, width: room.width, depth: room.depth, height: room.height || 96, unit: room.unit || 'inches', walls: room.walls || [] },
+          placements_context: furniture.map(f => ({ id: f.id, name: f.name, category: f.category, provider: f.provider, provider_id: f.provider_id, width: f.width, depth: f.depth, height: f.height, x_inches: f.x_inches, y_inches: f.y_inches, rotation: f.rotation, color: f.color, custom: f.custom, model_url: f.model_url })),
+        };
+        const res = await api.post(`/api/export/${format}/draft`, payload, { responseType: 'blob' });
+        blob = res.data;
+      } else {
+        const res = await api.post(`/api/export/${format}/${room.id}`, {}, { responseType: 'blob' });
+        blob = res.data;
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -61,17 +68,40 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
   };
 
   const autoPlace = async () => {
-    if (!room?.id) return;
-    if (draft) {
-      toast.error('Auto-arrange requires a saved room. Save first.');
-      return;
-    }
+    if (!room?.id || furniture.length === 0) return;
     const toastId = toast.loading('Auto-arranging furniture…');
     try {
-      await api.post('/api/layout/auto-place', { room_id: room.id });
-      const { data } = await api.get(`/api/rooms/${room.id}`);
-      useLayoutStore.setState({ furniture: data.placements || [] });
-      toast.success('Auto-arranged successfully', { id: toastId });
+      if (draft) {
+        // Draft rooms: send room context + placements to the server
+        const { data } = await api.post('/api/layout/auto-place', {
+          room_id: room.id,
+          room_context: {
+            id: room.id, name: room.name, width: room.width, depth: room.depth,
+            height: room.height || 96, unit: room.unit || 'inches',
+          },
+          placements_context: furniture.map(f => ({
+            id: f.id, name: f.name, category: f.category, width: f.width,
+            depth: f.depth, height: f.height, x_inches: f.x_inches,
+            y_inches: f.y_inches, rotation: f.rotation,
+          })),
+        });
+        // Apply the returned positions to local state
+        const updates = data.placements || [];
+        for (const u of updates) {
+          const existing = furniture.find(f => f.id === u.id || f.name === u.name);
+          if (existing) {
+            useLayoutStore.getState().updateFurniture(existing.id, {
+              x_inches: u.x_inches, y_inches: u.y_inches, rotation: u.rotation,
+            });
+          }
+        }
+        toast.success('Auto-arranged successfully', { id: toastId });
+      } else {
+        await api.post('/api/layout/auto-place', { room_id: room.id });
+        const { data } = await api.get(`/api/rooms/${room.id}`);
+        useLayoutStore.setState({ furniture: data.placements || [] });
+        toast.success('Auto-arranged successfully', { id: toastId });
+      }
     } catch (e) {
       toast.error('Auto-arrange failed', { id: toastId });
     }
@@ -162,9 +192,9 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
       <ToolbarBtn onClick={() => setViewMode('2d')} active={viewMode === '2d'}>2D</ToolbarBtn>
       <ToolbarBtn onClick={() => setViewMode('3d')} active={viewMode === '3d'}>3D</ToolbarBtn>
       <div className="h-5 w-px bg-ink-900/15 shrink-0 hidden sm:block" />
-      <ToolbarBtn onClick={() => runExport('json')} disabled={exporting || draft} className="hidden sm:inline-flex">JSON</ToolbarBtn>
-      <ToolbarBtn onClick={() => runExport('svg')} disabled={exporting || draft} className="hidden sm:inline-flex">SVG</ToolbarBtn>
-      <ToolbarBtn onClick={() => runExport('dxf')} disabled={exporting || draft} className="hidden sm:inline-flex">DXF</ToolbarBtn>
+      <ToolbarBtn onClick={() => runExport('json')} disabled={exporting} className="hidden sm:inline-flex">JSON</ToolbarBtn>
+      <ToolbarBtn onClick={() => runExport('svg')} disabled={exporting} className="hidden sm:inline-flex">SVG</ToolbarBtn>
+      <ToolbarBtn onClick={() => runExport('dxf')} disabled={exporting} className="hidden sm:inline-flex">DXF</ToolbarBtn>
       <div className="h-5 w-px bg-ink-900/15 shrink-0" />
       <ToolbarBtn onClick={toggleChat} active={isChatOpen} className="hidden md:inline-flex">Chat</ToolbarBtn>
 

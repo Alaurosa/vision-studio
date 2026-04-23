@@ -129,6 +129,43 @@ export const LAYOUT_FUNCTIONS = [
       required: ['style'],
     },
   },
+  {
+    name: 'clear_room',
+    description: 'Remove ALL furniture from the room at once. Use when the user says "clear everything", "start over", "empty the room", "remove all furniture".',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'estimate_budget',
+    description: 'Calculate the total estimated cost of all furniture currently in the room. Use when the user asks "how much does this cost", "what\'s the total", "budget estimate", "price check".',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_room_summary',
+    description: 'Get a detailed summary of the current room state including dimensions, furniture count, layout quality, and coverage. Use this to reason about the room before making suggestions, or when the user asks "what\'s in my room", "describe the layout", "room overview".',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'design_advice',
+    description: 'Analyze the current layout and provide professional interior design advice. Use when the user asks "what should I change", "any suggestions", "how can I improve this", "design tips", "what\'s missing". This uses AI to evaluate the layout and suggest improvements.',
+    parameters: {
+      type: 'object',
+      properties: {
+        focus: { type: 'string', description: 'Optional focus area: flow, balance, lighting, storage, comfort, aesthetics' },
+      },
+    },
+  },
+  {
+    name: 'compare_items',
+    description: 'Compare two catalog items side by side showing dimensions, price, and fit for the room. Use when the user asks "which is better", "compare these", "should I get X or Y".',
+    parameters: {
+      type: 'object',
+      properties: {
+        item_a: { type: 'string', description: 'Name of the first item to compare' },
+        item_b: { type: 'string', description: 'Name of the second item to compare' },
+      },
+      required: ['item_a', 'item_b'],
+    },
+  },
 ];
 
 /**
@@ -455,6 +492,113 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
       return {
         success: true,
         message: `Noted your preferences — ${parts.join(', ')}. I'll keep these in mind for all suggestions.`,
+      };
+    }
+    case 'clear_room': {
+      if (placements.length === 0) return { success: true, message: 'Room is already empty.' };
+      const count = placements.length;
+      for (const p of placements) {
+        if (db) {
+          await supabaseAdmin.from('placements').delete().eq('id', p.id);
+        } else {
+          fallback.deletePlacement(p.id);
+        }
+      }
+      return { success: true, message: `Removed all ${count} items from the room.`, refresh: true };
+    }
+    case 'estimate_budget': {
+      if (placements.length === 0) return { success: true, message: 'Room is empty — no cost to estimate.' };
+      let total = 0;
+      const items = [];
+      for (const p of placements) {
+        let price = null;
+        if (p.catalog_id && db) {
+          const { data } = await supabaseAdmin.from('furniture_catalog').select('price_usd').eq('id', p.catalog_id).single();
+          price = data?.price_usd;
+        }
+        if (!price) {
+          const matches = fallback.searchCatalogByName(p.name);
+          price = matches[0]?.price_usd || null;
+        }
+        items.push({ name: p.name, price });
+        if (price) total += price;
+      }
+      const breakdown = items.map(i => `• ${i.name}: ${i.price ? '$' + i.price.toFixed(0) : 'price unknown'}`).join('\n');
+      return { success: true, message: `Budget estimate:\n${breakdown}\n\nTotal: $${total.toFixed(0)}`, total_usd: total };
+    }
+    case 'get_room_summary': {
+      const roomW = room?.width || 0;
+      const roomD = room?.depth || 0;
+      const areaFt = (roomW * roomD) / 144;
+      let furnitureArea = 0;
+      for (const p of placements) {
+        const { effW, effD } = getEffectiveDims(p, p.rotation || 0);
+        furnitureArea += effW * effD;
+      }
+      const coveragePct = roomW && roomD ? ((furnitureArea / (roomW * roomD)) * 100).toFixed(1) : 0;
+      const validation = validateLayout(placements, room);
+      const categories = {};
+      for (const p of placements) {
+        categories[p.category || 'other'] = (categories[p.category || 'other'] || 0) + 1;
+      }
+      const catSummary = Object.entries(categories).map(([k, v]) => `${v}× ${k}`).join(', ');
+      return {
+        success: true,
+        summary: {
+          room_name: room?.name || 'Unnamed',
+          dimensions: `${roomW}" × ${roomD}" (${areaFt.toFixed(0)} sq ft)`,
+          furniture_count: placements.length,
+          categories: catSummary || 'none',
+          floor_coverage: `${coveragePct}%`,
+          layout_valid: validation.valid,
+          issues: validation.errors,
+        },
+        message: `Room "${room?.name}": ${roomW}" × ${roomD}" (${areaFt.toFixed(0)} sq ft), ${placements.length} items (${catSummary || 'none'}), ${coveragePct}% floor coverage. ${validation.valid ? 'Layout is valid.' : `Issues: ${validation.errors.join('; ')}`}`,
+      };
+    }
+    case 'design_advice': {
+      if (!room?.width || !room?.depth) return { success: false, message: 'Room dimensions not set.' };
+      const advicePrompt = `You are a professional interior designer. Analyze this room and give 3-5 specific, actionable suggestions.
+
+Room: "${room.name}" — ${room.width}" wide × ${room.depth}" deep
+Current furniture (${placements.length} items):
+${placements.length > 0 ? placements.map(p => `  • ${p.name} (${p.category}) at (${p.x_inches}", ${p.y_inches}"), ${p.width}"W × ${p.depth}"D, rotation ${p.rotation}°`).join('\n') : '  (empty)'}
+${args.focus ? `Focus area: ${args.focus}` : ''}
+
+Give specific advice about what to add, remove, move, or change. Reference actual furniture positions and names. Be concise — bullet points only.`;
+
+      try {
+        const adviceRes = await chat({
+          messages: [{ role: 'user', content: advicePrompt }],
+          systemPrompt: 'You are a senior interior designer. Give practical, specific advice. Use bullet points. Be concise.',
+        });
+        return { success: true, message: adviceRes.text };
+      } catch (err) {
+        return { success: false, message: `Could not generate advice: ${err.message}` };
+      }
+    }
+    case 'compare_items': {
+      let itemA, itemB;
+      if (db) {
+        const { data: a } = await supabaseAdmin.from('furniture_catalog').select('*').ilike('name', `%${args.item_a}%`).limit(1);
+        const { data: b } = await supabaseAdmin.from('furniture_catalog').select('*').ilike('name', `%${args.item_b}%`).limit(1);
+        itemA = a?.[0]; itemB = b?.[0];
+      } else {
+        itemA = fallback.searchCatalogByName(args.item_a)[0];
+        itemB = fallback.searchCatalogByName(args.item_b)[0];
+      }
+      if (!itemA) return { success: false, message: `"${args.item_a}" not found in catalog.` };
+      if (!itemB) return { success: false, message: `"${args.item_b}" not found in catalog.` };
+      const fitsA = room?.width && room?.depth && itemA.width <= room.width && itemA.depth <= room.depth;
+      const fitsB = room?.width && room?.depth && itemB.width <= room.width && itemB.depth <= room.depth;
+      return {
+        success: true,
+        comparison: { a: itemA, b: itemB },
+        message: `**${itemA.name}** vs **${itemB.name}**\n` +
+          `• Size: ${itemA.width}"×${itemA.depth}"×${itemA.height}"  vs  ${itemB.width}"×${itemB.depth}"×${itemB.height}"\n` +
+          `• Price: $${itemA.price_usd || '?'}  vs  $${itemB.price_usd || '?'}\n` +
+          `• Provider: ${itemA.provider}  vs  ${itemB.provider}\n` +
+          `• Fits room: ${fitsA ? 'yes' : 'no'}  vs  ${fitsB ? 'yes' : 'no'}`,
       };
     }
     default:

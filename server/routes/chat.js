@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { optionalAuth } from '../middleware/auth.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import { chat } from '../services/llmRouter.js';
 import { LAYOUT_FUNCTIONS, executeFunction } from '../services/chatFunctions.js';
@@ -7,14 +7,20 @@ import { LAYOUT_FUNCTIONS, executeFunction } from '../services/chatFunctions.js'
 const router = express.Router();
 
 // POST /api/chat/message
-router.post('/message', requireAuth, async (req, res) => {
-  const { room_id, message } = req.body;
+router.post('/message', optionalAuth, async (req, res) => {
+  const { room_id, message, room_context } = req.body;
   const db = await useDb();
+  const isDraft = typeof room_id === 'string' && room_id.startsWith('draft-');
 
   try {
     let room, placements, history;
 
-    if (db) {
+    if (isDraft && room_context) {
+      // Draft rooms live client-side only — accept context from the request
+      room = room_context;
+      placements = room_context.placements || [];
+      history = [];
+    } else if (db) {
       const [roomRes, placementsRes, historyRes] = await Promise.all([
         supabaseAdmin.from('rooms').select('*').eq('id', room_id).eq('user_id', req.user.id).single(),
         supabaseAdmin.from('placements').select('*').eq('room_id', room_id),
@@ -50,6 +56,11 @@ CAPABILITIES:
 - Validate layouts for overlaps and clearance issues (validate_layout)
 - Furnish an entire room end-to-end: select + place + arrange (furnish_room)
 - Record user style/aesthetic preferences (set_style_preference)
+- Clear all furniture from the room (clear_room)
+- Estimate total budget for current furniture (estimate_budget)
+- Get a detailed room summary with coverage and validation (get_room_summary)
+- Provide professional design advice for the current layout (design_advice)
+- Compare two catalog items side by side (compare_items)
 
 ROOM CONTEXT:
 - Room: ${room?.name || 'Unnamed'} — ${room?.width || '?'}" wide × ${room?.depth || '?'}" deep × ${room?.height || 96}" tall
@@ -93,11 +104,13 @@ RESPONSE STYLE:
       { role: 'user', content: message },
     ];
 
-    // Save user message
-    if (db) {
-      await supabaseAdmin.from('chat_messages').insert({ room_id, role: 'user', content: message });
-    } else {
-      fallback.addChatMessage(room_id, { role: 'user', content: message });
+    // Save user message (skip for draft rooms — they're client-side only)
+    if (!isDraft) {
+      if (db) {
+        await supabaseAdmin.from('chat_messages').insert({ room_id, role: 'user', content: message });
+      } else {
+        fallback.addChatMessage(room_id, { role: 'user', content: message });
+      }
     }
 
     // --- Multi-turn tool execution loop ---
@@ -121,13 +134,15 @@ RESPONSE STYLE:
           fnName = toolCall.function?.name;
           args = JSON.parse(toolCall.function?.arguments || '{}');
 
-          // Re-fetch placements before each tool execution
-          if (db) {
-            const { data } = await supabaseAdmin.from('placements').select('*').eq('room_id', room_id);
-            placements = data || [];
-          } else {
-            const updatedRoom = fallback.getRoom(room_id, req.user.id);
-            placements = updatedRoom?.placements || [];
+          // Re-fetch placements before each tool execution (skip for draft rooms)
+          if (!isDraft) {
+            if (db) {
+              const { data } = await supabaseAdmin.from('placements').select('*').eq('room_id', room_id);
+              placements = data || [];
+            } else {
+              const updatedRoom = fallback.getRoom(room_id, req.user.id);
+              placements = updatedRoom?.placements || [];
+            }
           }
 
           result = await executeFunction(fnName, args, room_id, placements, room, db);
@@ -160,20 +175,22 @@ RESPONSE STYLE:
       finalText = summaryRes.text;
     }
 
-    // Save assistant response
-    if (db) {
-      await supabaseAdmin.from('chat_messages').insert({
-        room_id,
-        role: 'assistant',
-        content: finalText,
-        tool_calls: allActions.length > 0 ? allActions : null,
-      });
-    } else {
-      fallback.addChatMessage(room_id, {
-        role: 'assistant',
-        content: finalText,
-        tool_calls: allActions.length > 0 ? allActions : null,
-      });
+    // Save assistant response (skip for draft rooms)
+    if (!isDraft) {
+      if (db) {
+        await supabaseAdmin.from('chat_messages').insert({
+          room_id,
+          role: 'assistant',
+          content: finalText,
+          tool_calls: allActions.length > 0 ? allActions : null,
+        });
+      } else {
+        fallback.addChatMessage(room_id, {
+          role: 'assistant',
+          content: finalText,
+          tool_calls: allActions.length > 0 ? allActions : null,
+        });
+      }
     }
 
     res.json({ message: finalText, actions: allActions, refresh: allActions.some(a => a.result?.refresh) });

@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import FormData from 'form-data';
 import axios from 'axios';
-import { requireAuth } from '../middleware/auth.js';
+import { optionalAuth } from '../middleware/auth.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import { saveFileLocally } from '../services/fileStorage.js';
 
@@ -27,7 +27,7 @@ function normalizeZones(parseResult) {
 }
 
 // POST /api/rooms — create a new room
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', optionalAuth, async (req, res) => {
   const { name, unit, width, depth } = req.body;
   if (await useDb()) {
     const { data, error } = await supabaseAdmin
@@ -44,7 +44,7 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 // GET /api/rooms — list user rooms
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', optionalAuth, async (req, res) => {
   if (await useDb()) {
     const { data, error } = await supabaseAdmin
       .from('rooms')
@@ -58,7 +58,7 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // GET /api/rooms/:id
-router.get('/:id', requireAuth, async (req, res) => {
+router.get('/:id', optionalAuth, async (req, res) => {
   if (await useDb()) {
     const { data, error } = await supabaseAdmin
       .from('rooms')
@@ -79,7 +79,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 });
 
 // PUT /api/rooms/:id
-router.put('/:id', requireAuth, async (req, res) => {
+router.put('/:id', optionalAuth, async (req, res) => {
   const { name, width, depth, height, walls, scale_px_per_inch, unit, zones } = req.body;
   const updates = {};
   if (name !== undefined) updates.name = name;
@@ -127,7 +127,7 @@ router.put('/:id', requireAuth, async (req, res) => {
 });
 
 // DELETE /api/rooms/:id
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', optionalAuth, async (req, res) => {
   if (await useDb()) {
     const { error } = await supabaseAdmin
       .from('rooms')
@@ -142,7 +142,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
 });
 
 // POST /api/rooms/:id/upload-floorplan
-router.post('/:id/upload-floorplan', requireAuth, upload.single('file'), async (req, res) => {
+router.post('/:id/upload-floorplan', optionalAuth, upload.single('file'), async (req, res) => {
   const { id } = req.params;
   const file = req.file;
   if (!file) return res.status(400).json({ error: 'No file uploaded' });
@@ -263,7 +263,7 @@ router.post('/:id/upload-floorplan', requireAuth, upload.single('file'), async (
 });
 
 // POST /api/rooms/:id/calibrate
-router.post('/:id/calibrate', requireAuth, async (req, res) => {
+router.post('/:id/calibrate', optionalAuth, async (req, res) => {
   const { p1, p2, real_world_inches } = req.body;
   const dx = p2[0] - p1[0];
   const dy = p2[1] - p1[1];

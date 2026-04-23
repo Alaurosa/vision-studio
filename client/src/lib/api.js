@@ -7,9 +7,13 @@ const api = axios.create({
 
 // Attach Supabase JWT to every outgoing request (if signed in)
 api.interceptors.request.use(async (config) => {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  try {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+  } catch {
+    // Supabase not configured — skip auth header
+  }
   return config;
 });
 

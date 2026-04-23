@@ -43,6 +43,22 @@ export default function ChatPanel() {
       const { data } = await api.post('/api/chat/message', {
         room_id: room.id,
         message: text,
+        // For draft rooms, send room context since the server doesn't have it
+        ...(room.id?.startsWith?.('draft-') && {
+          room_context: {
+            id: room.id,
+            name: room.name,
+            width: room.width,
+            depth: room.depth,
+            height: room.height || 96,
+            unit: room.unit || 'inches',
+            placements: useLayoutStore.getState().furniture.map(f => ({
+              id: f.id, name: f.name, category: f.category, provider: f.provider,
+              width: f.width, depth: f.depth, height: f.height,
+              x_inches: f.x_inches, y_inches: f.y_inches, rotation: f.rotation,
+            })),
+          },
+        }),
       });
       addChatMessage({
         role: 'assistant',

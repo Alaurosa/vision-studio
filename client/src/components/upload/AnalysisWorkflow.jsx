@@ -14,8 +14,12 @@ const STEPS = [
 /**
  * AnalysisWorkflow runs the floor-plan upload + AI parse pipeline
  * and calls onComplete(room, parseResult, imageUrl) when finished.
+ *
+ * When `isGuest` is true it goes through the public, stateless parse endpoint
+ * and returns a client-only "draft" room object. Otherwise it uses the
+ * authenticated endpoint that creates a server-side room.
  */
-export default function AnalysisWorkflow({ file, roomName, onComplete, onError }) {
+export default function AnalysisWorkflow({ file, roomName, isGuest = false, onComplete, onError }) {
   const [step, setStep] = useState(0);
   const ranRef = useRef(false);
 
@@ -31,49 +35,85 @@ export default function AnalysisWorkflow({ file, roomName, onComplete, onError }
     setTimeout(r, 650);
   });
 
+  const runAuthed = async () => {
+    await advance(0);
+    const { data: room } = await api.post('/api/rooms', { name: roomName });
+
+    await advance(1);
+
+    const fd = new FormData();
+    fd.append('file', file);
+    const req = api.post(`/api/rooms/${room.id}/upload-floorplan`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+
+    await advance(2);
+    await advance(3);
+    await advance(4);
+
+    const { data } = await req;
+
+    await advance(5);
+
+    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+    let imageUrl = data?.floor_plan_url || '';
+    if (imageUrl.startsWith('/uploads/')) {
+      imageUrl = `${baseUrl}${imageUrl}`;
+    }
+    if (!imageUrl) {
+      imageUrl = URL.createObjectURL(file);
+    }
+
+    const parseResult = data?.parse_result || {};
+    await new Promise((r) => setTimeout(r, 400));
+    onComplete?.(room, parseResult, imageUrl);
+  };
+
+  const runGuest = async () => {
+    await advance(0);
+
+    const fd = new FormData();
+    fd.append('file', file);
+    const req = api.post('/api/public/parse-floorplan', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+
+    await advance(1);
+    await advance(2);
+    await advance(3);
+    await advance(4);
+
+    const { data } = await req;
+
+    await advance(5);
+
+    const parseResult = data?.parse_result || {};
+
+    // Guests don't have a server-side room; fabricate a minimal one the caller
+    // can turn into a draft after the user edits the zones.
+    const room = {
+      id: 'guest-pending', // caller will replace with a real draft id
+      name: roomName,
+      unit: 'inches',
+      width: data?.width || null,
+      depth: data?.depth || null,
+      scale_px_per_inch: parseResult.scale_px_per_inch || 1,
+    };
+
+    // Keep the image as a data URL so it survives refresh in the Studio.
+    const imageUrl = URL.createObjectURL(file);
+
+    await new Promise((r) => setTimeout(r, 400));
+    onComplete?.(room, parseResult, imageUrl);
+  };
+
   const run = async () => {
     try {
-      await advance(0);
-      // 1. Create room
-      const { data: room } = await api.post('/api/rooms', { name: roomName });
-
-      await advance(1);
-
-      // 2. Upload floorplan → server runs parser
-      const fd = new FormData();
-      fd.append('file', file);
-
-      // Kick off the request but animate steps in parallel while it resolves
-      const req = api.post(`/api/rooms/${room.id}/upload-floorplan`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-
-      await advance(2);
-      await advance(3);
-      await advance(4);
-
-      const { data } = await req;
-
-      await advance(5);
-
-      // 3. Build image URL for the room editor
-      // The server returns floor_plan_url which may be a Supabase URL or a local path
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-      let imageUrl = data?.floor_plan_url || '';
-      if (imageUrl.startsWith('/uploads/')) {
-        imageUrl = `${baseUrl}${imageUrl}`;
+      if (isGuest) {
+        await runGuest();
+      } else {
+        await runAuthed();
       }
-      // Fallback: use the local file preview URL
-      if (!imageUrl) {
-        imageUrl = URL.createObjectURL(file);
-      }
-
-      const parseResult = data?.parse_result || {};
-
-      await new Promise((r) => setTimeout(r, 400));
-
-      // Pass room, parseResult, and imageUrl to parent for the room editor
-      onComplete?.(room, parseResult, imageUrl);
     } catch (e) {
       console.error(e);
       onError?.(e?.response?.data?.error || e.message);

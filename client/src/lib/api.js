@@ -12,17 +12,17 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+// We intentionally DO NOT force a redirect on 401 anymore.
+// The app supports a guest/draft mode where many calls will legitimately 401,
+// and the store should handle those silently instead of bouncing the user.
 api.interceptors.response.use(
   (res) => res,
-  async (err) => {
-    if (err.response?.status === 401) {
-      await supabase.auth.signOut();
-      if (window.location.pathname !== '/login') {
-        window.location.assign('/login');
-      }
-    }
-    return Promise.reject(err);
-  }
+  (err) => Promise.reject(err)
 );
+
+export async function isAuthed() {
+  const { data } = await supabase.auth.getSession();
+  return !!data.session?.access_token;
+}
 
 export default api;

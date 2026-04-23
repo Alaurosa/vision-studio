@@ -1,9 +1,12 @@
 import './config/env.js';  // Must be first — loads .env before any other imports
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { errorHandler } from './middleware/errorHandler.js';
+import { log } from './services/logger.js';
 
 import authRoutes from './routes/auth.js';
 import roomRoutes from './routes/rooms.js';
@@ -17,19 +20,77 @@ import publicParseRoutes from './routes/publicParse.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const startTime = Date.now();
+
+// ---------- Security ----------
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  crossOriginEmbedderPolicy: false,
+  contentSecurityPolicy: false, // CSP handled by frontend
+}));
+
+// ---------- CORS ----------
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:4173')
+  .split(',')
+  .map(o => o.trim());
 
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:4173'],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
 }));
+
+// ---------- Rate limiting ----------
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests — please slow down.' },
+});
+app.use('/api/', apiLimiter);
+
+// Stricter rate limit for auth endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many auth attempts — try again later.' },
+});
+app.use('/api/auth', authLimiter);
+
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Serve locally-saved uploads when Supabase Storage is unavailable
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', service: 'vision-studio-server' }));
+// ---------- Request logging ----------
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    if (duration > 2000 || res.statusCode >= 400) {
+      log.warn(`${req.method} ${req.path} → ${res.statusCode} (${duration}ms)`);
+    }
+  });
+  next();
+});
+
+// ---------- Health & Status ----------
+app.get('/health', (req, res) => res.json({
+  status: 'ok',
+  service: 'vision-studio-server',
+  version: process.env.npm_package_version || '1.0.0',
+  uptime: Math.round((Date.now() - startTime) / 1000),
+  environment: process.env.NODE_ENV || 'development',
+}));
 
 // Image proxy — serves external product images with proper CORS for WebGL textures
 app.get('/api/proxy-image', async (req, res) => {
@@ -84,10 +145,12 @@ app.get('/api/status', async (req, res) => {
   res.json({
     database: allOk ? 'connected' : 'tables_missing',
     tables: results,
+    uptime: Math.round((Date.now() - startTime) / 1000),
     setup_hint: allOk ? null : `Run schema.sql in Supabase SQL Editor: https://supabase.com/dashboard/project/${ref}/sql`,
   });
 });
 
+// ---------- Routes ----------
 app.use('/api/auth', authRoutes);
 app.use('/api/public', publicParseRoutes);
 app.use('/api/rooms', roomRoutes);
@@ -100,4 +163,22 @@ app.use('/api/models', modelsRoutes);
 
 app.use(errorHandler);
 
-app.listen(PORT, () => console.log(`Vision Studio backend running on :${PORT}`));
+// ---------- Start ----------
+const server = app.listen(PORT, () => log.info(`Vision Studio backend running on :${PORT}`));
+
+// ---------- Graceful shutdown ----------
+function shutdown(signal) {
+  log.info(`Received ${signal} — shutting down gracefully…`);
+  server.close(() => {
+    log.info('HTTP server closed');
+    process.exit(0);
+  });
+  // Force exit after 10 seconds
+  setTimeout(() => {
+    log.warn('Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import toast from 'react-hot-toast';
 import { useLayoutStore } from '@/store/layoutStore';
 import { CATEGORY_COLORS } from '@/utils/constants';
 import api from '@/lib/api';
@@ -71,6 +72,7 @@ export default function CatalogPanel() {
       image_url: it.image_url || null,
       model_url: it.model_url || null,
     });
+    toast.success(`Added ${it.name}`);
   };
 
   const list = tab === 'recommended' ? recommendedItems : items;

@@ -7,6 +7,7 @@ const links = [
   { to: '/',        label: 'Home' },
   { to: '/upload',  label: 'Upload' },
   { to: '/studio',  label: 'Studio' },
+  { to: '/chat',    label: 'Chat' },
 ];
 
 export default function Navbar() {
@@ -34,14 +35,17 @@ export default function Navbar() {
   }, [pathname]);
 
   return (
-    <header
-      className={clsx(
-        'sticky top-0 z-40 transition-all duration-500',
-        scrolled || isStudio
-          ? 'bg-paper-50/90 backdrop-blur border-b border-ink-900/10'
-          : 'bg-transparent'
-      )}
-    >
+    <>
+      <a href="#main-content" className="skip-to-content">Skip to content</a>
+      <header
+        role="banner"
+        className={clsx(
+          'sticky top-0 z-40 transition-all duration-500',
+          scrolled || isStudio
+            ? 'bg-paper-50/90 backdrop-blur border-b border-ink-900/10'
+            : 'bg-transparent'
+        )}
+      >
       <div className="max-w-8xl mx-auto flex items-center justify-between px-6 md:px-10 h-16">
         <Link to="/" className="flex items-center gap-3 group">
           <div className="w-2.5 h-2.5 rounded-full bg-ink-900 group-hover:bg-sienna-500 transition" />
@@ -146,5 +150,6 @@ export default function Navbar() {
         </div>
       )}
     </header>
+    </>
   );
 }

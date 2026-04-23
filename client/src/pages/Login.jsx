@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
+import toast from 'react-hot-toast';
 import { useAuth } from '@/hooks/useAuth';
 
 export default function Login() {
@@ -24,6 +26,7 @@ export default function Login() {
 
     if (error) {
       setError(error.message);
+      toast.error(error.message);
       return;
     }
     // When email confirmation is disabled in Supabase, signUp returns a
@@ -43,7 +46,10 @@ export default function Login() {
   return (
     <div className="min-h-[70vh] flex items-center justify-center px-6">
       <div className="w-full max-w-sm">
-        <p className="eyebrow mb-4">Vision Studio</p>
+        <Helmet>
+        <title>{isSignIn ? 'Sign In' : 'Create Account'} — Vision Studio</title>
+      </Helmet>
+      <p className="eyebrow mb-4">Vision Studio</p>
         <h1 className="display-md mb-10">
           {isSignIn ? 'Sign in' : 'Create account'}
         </h1>

@@ -8,7 +8,7 @@
 
 ### Current Phase
 
-Full-stack implementation — monorepo with React client, Express server, and FastAPI Python AI microservice. Supabase for auth, database, and storage.
+Full-stack implementation — monorepo with React client, Express server, and FastAPI Python AI microservice. Supabase for auth, database, and storage. Production-hardened with code-splitting, error boundaries, rate limiting, Helmet security headers, and structured logging.
 
 ## Tech Stack
 
@@ -65,8 +65,8 @@ vision-studio/
 │   ├── .env.local.example        # Template for client env vars
 │   └── src/
 │       ├── main.jsx              # ReactDOM.createRoot + StrictMode
-│       ├── App.jsx               # Route shell for home/upload/studio with scroll-to-top on navigation
-│       ├── index.css             # Tailwind directives + base body styles
+│       ├── App.jsx               # Route shell with lazy-loaded pages, ErrorBoundary, HelmetProvider, Toaster
+│       ├── index.css             # Tailwind directives + editorial theme + a11y focus-visible + reduced-motion
 │       ├── lib/
 │       │   ├── supabaseClient.js # Supabase client singleton
 │       │   └── api.js            # Axios + JWT interceptor + cached auth token + 401 auto-signout
@@ -79,9 +79,13 @@ vision-studio/
 │       │   ├── scale.js          # px↔inches conversion, snap-to-grid, inchesToFeet formatter
 │       │   └── collision.js      # AABB detection, overlap check, room bounds
 │       ├── components/
+│       │   ├── ErrorBoundary.jsx      # React error boundary with polished fallback UI
+│       │   ├── ConfirmModal.jsx       # Animated confirmation modal (replaces window.confirm)
+│       │   ├── auth/
+│       │   │   └── ProtectedRoute.jsx # Auth gate with branded spinner
 │       │   ├── layout/
-│       │   │   ├── Navbar.jsx        # Top nav (Home/Upload/Studio), scroll-aware, mobile hamburger menu
-│       │   │   └── Footer.jsx        # Editorial footer (hidden in /studio)
+│       │   │   ├── Navbar.jsx        # Top nav (Home/Upload/Studio), scroll-aware, mobile hamburger, skip-to-content
+│       │   │   └── Footer.jsx        # Editorial footer with semantic HTML (hidden in /studio)
 │       │   ├── canvas/
 │       │   │   ├── RoomCanvas.jsx    # Konva Stage with zoom/pan, room-zone overlays, and free-angle rotation controls
 │       │   │   ├── FurnitureItem.jsx # Draggable/rotatable Konva Group with Transformer-based free rotation
@@ -98,23 +102,28 @@ vision-studio/
 │       │   ├── viewer/
 │       │   │   ├── RoomViewer3D.jsx  # React Three Fiber — floor/walls/GLB furniture + OrbitControls + Suspense loading
 │       │   │   └── SmartFurnitureModel.jsx # Loads model_url GLBs or backfills via Meshy from product images
-│       │   └── chatbot/
-│       │       └── ChatPanel.jsx     # Agentic chat, 5 quick actions, auto-refresh on mutate
+│       │   ├── chatbot/
+│       │   │   ├── ChatPanel.jsx     # Enhanced agentic chat sidebar — rich messages, style prompts, textarea input, auto-refresh
+│       │   │   ├── MessageBubble.jsx  # Rich message renderer — inline markdown, action result cards, assistant avatar
+│       │   │   └── StylePrompts.jsx   # Categorized style prompt suggestions — style chips, category tabs, animated prompts
 │       └── pages/
 │           ├── Home.jsx              # Editorial landing (Batako-inspired: hero, process, quote band, services, CTA, smooth staggered reveals)
+│           ├── Login.jsx             # Email/password auth with Helmet SEO
+│           ├── Chat.jsx              # Full-screen AI design assistant — room selector, style preferences, rich chat
 │           ├── Upload.jsx            # Drop-zone → AnalysisWorkflow → /studio/:roomId
-│           └── Studio.jsx            # Room dashboard (with delete) + responsive 3-panel editor (catalog drawer / canvas|3D / chat)
+│           ├── Studio.jsx            # Room dashboard (with styled delete confirm) + responsive 3-panel editor
+│           └── NotFound.jsx          # Polished 404 page with animated entry
 │
 ├── server/                       # Node.js + Express backend
 │   ├── package.json
-│   ├── index.js                  # Express entry, CORS, route mounting
+│   ├── index.js                  # Express entry: Helmet, CORS, rate-limit, structured logging, graceful shutdown
 │   ├── .env.example              # Template for server env vars
 │   ├── config/
 │   │   ├── env.js                # dotenv loader (must be imported first)
 │   │   └── defaults.js           # Hardcoded defaults, furniture bounds, colors
 │   ├── middleware/
 │   │   ├── auth.js               # Supabase JWT verification
-│   │   └── errorHandler.js       # Centralized error handling
+│   │   └── errorHandler.js       # Centralized error handling with structured logger
 │   ├── routes/
 │   │   ├── auth.js               # GET /api/auth/me
 │   │   ├── rooms.js              # CRUD + floor plan upload + calibrate
@@ -130,9 +139,10 @@ vision-studio/
 │   │   ├── fallbackStore.js      # In-memory store when Supabase unavailable
 │   │   ├── fileStorage.js        # Shared local file storage helper (saves to uploads/)
 │   │   ├── overlapResolver.js    # Shared overlap resolver + layout validator
-│   │   ├── chatFunctions.js      # Chat tool definitions (9 tools) + executeFunction()
+│   │   ├── chatFunctions.js      # Chat tool definitions (10 tools) + executeFunction()
 │   │   ├── llmRouter.js          # OpenAI Codex 5.3 chat completions + function calling
-│   │   └── exportFormats.js      # Build JSON, SVG, DXF export payloads (rotation-aware)
+│   │   ├── exportFormats.js      # Build JSON, SVG, DXF export payloads (rotation-aware)
+│   │   └── logger.js             # Structured logger with timestamps and log levels
 │   └── scripts/
 │       ├── setup.js              # Setup verification (env, DB, seed)
 │       └── seedFurniture.js      # Seed 22 IKEA + 5 Ashley catalog items
@@ -163,6 +173,8 @@ vision-studio/
 - `REPLICATE_API_TOKEN` (optional — for AI room photo detection)
 - `MESHY_API_KEY` (optional — for offline 3D model generation)
 - `PORT` (default: 3001), `PYTHON_SERVICE_URL` (default: `http://localhost:5001`)
+- `ALLOWED_ORIGINS` (comma-separated, default: `http://localhost:5173,http://localhost:4173`)
+- `LOG_LEVEL` (debug/info/warn/error, default: `info`)
 
 ### Python (`python/.env`)
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
@@ -209,7 +221,7 @@ Actions: `loadRoom`, `createRoom`, `saveRoomGeometry`, `updateRoom`, `addFurnitu
 | PUT | `/api/furniture/placements/:id` | Update placement position/rotation |
 | DELETE | `/api/furniture/placements/:id` | Remove placement |
 | POST | `/api/layout/auto-place` | LLM auto-place all furniture optimally |
-| POST | `/api/chat/message` | Agentic chat (LLM + 8 function tools) |
+| POST | `/api/chat/message` | Agentic chat (LLM + 10 function tools incl. style preferences) |
 | POST | `/api/models/generate` | Submit image-to-3D task via Meshy |
 | GET | `/api/models/status/:task_id` | Poll Meshy task progress |
 | GET | `/api/models/lookup` | Cache lookup by image URL |
@@ -232,10 +244,13 @@ All tables use RLS — users can only access their own data.
 
 ## Styling Conventions
 
-- Warm neutral theme: `bg-surface-50` (#f5f4f0), `text-stone-800`
-- Brand blue accent: `brand-500: #2563eb`, `brand-600: #1d4ed8`
-- Inter font family from Google Fonts
-- Cards: `bg-white rounded-xl shadow-sm border border-stone-200`
+- Warm neutral editorial theme: `bg-paper-50` (#faf7f1), `text-ink-900` (#100f0d)
+- Sienna accent: `sienna-500: #9c6a3f`
+- Fraunces serif display, Inter sans-serif body from Google Fonts
+- Cards: `.panel` → `bg-paper-100/70 border border-ink-900/10 backdrop-blur rounded-lg`
+- Buttons: `.btn-ink` (solid dark), `.btn-ghost` (outline), `.btn-sienna` (accent)
+- All buttons include `focus-visible:ring-2` for keyboard accessibility
+- `prefers-reduced-motion` is respected globally via CSS and Framer Motion
 - Tailwind utility classes only — no CSS modules
 
 ## Notable Behaviors
@@ -247,10 +262,18 @@ All tables use RLS — users can only access their own data.
 - The studio canvas supports room-focused editing: selecting a zone zooms the center pane to that room, constrains furniture placement to the selected room, and exposes draggable/resizable color-coded room boxes plus a bottom room inspector.
 - Client-side route changes reset the window scroll position to the top so navigation between Home, Upload, and Studio never preserves mid-page scroll offsets.
 - The homepage uses eased, staggered Framer Motion reveals with reduced-motion fallbacks so sections enter smoothly without abrupt jumps.
+- Toast notifications (`react-hot-toast`) are used throughout for all user-facing feedback (export success, validation results, add-to-room, etc.).
+- All pages have proper `<title>` and `<meta description>` via `react-helmet-async` for SEO.
+- A 404 page is shown for unknown routes instead of a silent redirect.
+- All destructive actions (room delete) use a styled `ConfirmModal` instead of `window.confirm`.
+- The server uses `helmet` for security headers, `express-rate-limit` for rate limiting (120 req/min general, 20/15min for auth), and graceful shutdown on SIGTERM.
+- Structured logging (`services/logger.js`) replaces raw `console.log/error` in server code.
+- The build uses manual Rollup chunks to split React, Konva, Three.js, Framer Motion, and Supabase into separate vendor bundles for optimal caching.
+- A skip-to-content link is rendered before the header for keyboard/screen-reader accessibility.
 
 ## Chatbot Function Calling
 
-The chat endpoint supports 9 layout manipulation functions via LLM tool use:
+The chat endpoint supports 10 layout manipulation functions via LLM tool use:
 - `move_furniture` — Move item to (x, y) position
 - `rotate_furniture` — Rotate to 0/90/180/270°
 - `suggest_furniture` — Query catalog by category, size, provider
@@ -260,6 +283,7 @@ The chat endpoint supports 9 layout manipulation functions via LLM tool use:
 - `arrange_room` — AI auto-arrange all furniture (uses nested LLM call)
 - `swap_furniture` — Replace one item with another from catalog
 - `furnish_room` — Autonomously select + place + arrange furniture for a room type
+- `set_style_preference` — Record user style/mood/palette preferences for context-aware suggestions
 
 ## Agent Guidelines
 

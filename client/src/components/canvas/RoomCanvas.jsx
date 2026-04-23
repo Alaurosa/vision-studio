@@ -68,7 +68,11 @@ export default function RoomCanvas() {
     : 4;
   const pxPerInch = pxPerInchFit > 0 ? pxPerInchFit : 4;
 
-  const [bgImage] = useImage(room?.floor_plan_url || room?.room_photo_url || '', 'anonymous');
+  const draftFloorPlanDataUrl = useLayoutStore((s) => s.draftFloorPlanDataUrl);
+  const [bgImage] = useImage(
+    room?.floor_plan_url || room?.room_photo_url || draftFloorPlanDataUrl || '',
+    'anonymous'
+  );
 
   const onWheel = (e) => {
     e.evt.preventDefault();

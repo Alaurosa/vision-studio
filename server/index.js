@@ -13,6 +13,7 @@ import chatRoutes from './routes/chat.js';
 import exportRoutes from './routes/export.js';
 import recognitionRoutes from './routes/recognition.js';
 import modelsRoutes from './routes/models.js';
+import publicParseRoutes from './routes/publicParse.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -88,6 +89,7 @@ app.get('/api/status', async (req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api/public', publicParseRoutes);
 app.use('/api/rooms', roomRoutes);
 app.use('/api/furniture', furnitureRoutes);
 app.use('/api/layout', layoutRoutes);

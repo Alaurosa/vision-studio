@@ -4,12 +4,6 @@ import { HelmetProvider, Helmet } from 'react-helmet-async';
 import { Toaster } from 'react-hot-toast';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
-<<<<<<< Updated upstream
-import Home from '@/pages/Home';
-import Upload from '@/pages/Upload';
-import Studio from '@/pages/Studio';
-import Login from '@/pages/Login';
-=======
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import ErrorBoundary from '@/components/ErrorBoundary';
 
@@ -31,7 +25,6 @@ function PageLoader() {
     </div>
   );
 }
->>>>>>> Stashed changes
 
 export default function App() {
   const { pathname } = useLocation();
@@ -41,22 +34,6 @@ export default function App() {
   }, [pathname]);
 
   return (
-<<<<<<< Updated upstream
-    <div className="min-h-screen flex flex-col bg-paper-50 text-ink-900">
-      <Navbar />
-      <main className="flex-1">
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/upload" element={<Upload />} />
-          <Route path="/studio" element={<Studio />} />
-          <Route path="/studio/:roomId" element={<Studio />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
-      <Footer />
-    </div>
-=======
     <HelmetProvider>
       <Helmet>
         <title>Vision Studio — AI-Powered Spatial Layout Engine</title>
@@ -74,30 +51,11 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<Home />} />
                 <Route path="/login" element={<Login />} />
-                <Route
-                  path="/upload"
-                  element={
-                    <ProtectedRoute>
-                      <Upload />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/studio"
-                  element={
-                    <ProtectedRoute>
-                      <Studio />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/studio/:roomId"
-                  element={
-                    <ProtectedRoute>
-                      <Studio />
-                    </ProtectedRoute>
-                  }
-                />
+                {/* Upload and Studio are accessible without auth (guest/draft mode) */}
+                <Route path="/upload" element={<Upload />} />
+                <Route path="/studio" element={<Studio />} />
+                <Route path="/studio/:roomId" element={<Studio />} />
+                {/* Chat requires authentication */}
                 <Route
                   path="/chat"
                   element={
@@ -137,6 +95,5 @@ export default function App() {
         }}
       />
     </HelmetProvider>
->>>>>>> Stashed changes
   );
 }

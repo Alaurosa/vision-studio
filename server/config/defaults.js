@@ -40,15 +40,3 @@ export const DEFAULTS = {
   },
 };
 
-export const FURNITURE_BOUNDS = {
-  sofa: { minW: 60, maxW: 120, minD: 30, maxD: 50 },
-  loveseat: { minW: 48, maxW: 72, minD: 28, maxD: 42 },
-  bed_twin: { minW: 36, maxW: 42, minD: 72, maxD: 80 },
-  bed_full: { minW: 52, maxW: 58, minD: 72, maxD: 80 },
-  bed_queen: { minW: 58, maxW: 64, minD: 78, maxD: 84 },
-  bed_king: { minW: 74, maxW: 80, minD: 78, maxD: 84 },
-  desk: { minW: 36, maxW: 72, minD: 20, maxD: 36 },
-  dining_table: { minW: 36, maxW: 96, minD: 30, maxD: 48 },
-  bookshelf: { minW: 24, maxW: 48, minD: 8, maxD: 16 },
-  dresser: { minW: 30, maxW: 60, minD: 16, maxD: 24 },
-};

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import { useLayoutStore } from '@/store/layoutStore';
+import { useAuth } from '@/hooks/useAuth';
 import api from '@/lib/api';
 import RoomCanvas from '@/components/canvas/RoomCanvas';
 import CatalogPanel from '@/components/catalog/CatalogPanel';
@@ -13,23 +13,33 @@ import ZoneBottomBar from '@/components/studio/ZoneBottomBar';
 import { ROOM_TEMPLATES } from '@/utils/constants';
 import { inchesToFeet } from '@/utils/scale';
 
+const isDraftId = (id) => typeof id === 'string' && id.startsWith('draft-');
+
 export default function Studio() {
   const { roomId } = useParams();
   const navigate = useNavigate();
-  const { room, loadRoom, viewMode, isChatOpen, createRoom } = useLayoutStore();
+  const { user, loading: authLoading } = useAuth();
+  const {
+    room, loadRoom, viewMode, isChatOpen, createRoom, createDraftRoom, clearDraft,
+  } = useLayoutStore();
   const [showSetup, setShowSetup] = useState(false);
   const [rooms, setRooms] = useState([]);
   const [loadingList, setLoadingList] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const draftRoom = useLayoutStore((s) => (isDraftId(s.room?.id) ? s.room : null));
 
   // Load the requested room, or show a dashboard/setup UI
   useEffect(() => {
     if (roomId) {
       loadRoom(roomId);
-    } else {
+    } else if (user) {
       fetchRooms();
+    } else {
+      setRooms([]);
+      setLoadingList(false);
     }
-  }, [roomId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, user]);
 
   const fetchRooms = async () => {
     setLoadingList(true);
@@ -47,8 +57,13 @@ export default function Studio() {
 
   const createAndEnter = async (payload) => {
     try {
-      const room = await createRoom(payload);
-      if (room?.id) navigate(`/studio/${room.id}`);
+      if (!user) {
+        const draft = createDraftRoom(payload);
+        navigate(`/studio/${draft.id}`);
+        return;
+      }
+      const newRoom = await createRoom(payload);
+      if (newRoom?.id) navigate(`/studio/${newRoom.id}`);
     } catch (e) {
       console.error(e);
     }
@@ -65,32 +80,56 @@ export default function Studio() {
     }
   };
 
-  // -------- No room selected → room dashboard --------
+  const discardDraft = () => {
+    if (!window.confirm('Discard your draft? This cannot be undone.')) return;
+    clearDraft();
+  };
+
+  // -------- No room selected → dashboard --------
   if (!roomId) {
+    const waitingForAuth = authLoading;
+    const guest = !user && !authLoading;
+
     return (
       <div className="max-w-8xl mx-auto px-6 md:px-10 py-20">
         <p className="eyebrow mb-4">Studio</p>
         <div className="flex flex-wrap items-end justify-between gap-6 mb-12">
-          <h1 className="display-lg max-w-3xl">Your rooms in progress.</h1>
+          <h1 className="display-lg max-w-3xl">
+            {guest ? 'Start designing in seconds.' : 'Your rooms in progress.'}
+          </h1>
           <button className="btn-ink" onClick={() => setShowSetup(true)}>+ New Room</button>
         </div>
 
-        {loadingList ? (
-          <div className="grid md:grid-cols-3 gap-6">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="panel p-8 animate-pulse">
-                <div className="h-3 w-20 bg-ink-300/30 rounded mb-6" />
-                <div className="h-6 w-32 bg-ink-300/30 rounded mb-3" />
-                <div className="h-3 w-24 bg-ink-300/30 rounded" />
+        {/* Guest: show any in-progress draft prominently */}
+        {guest && draftRoom && (
+          <div className="panel p-8 mb-10 border-ink-900 flex flex-wrap items-center justify-between gap-6">
+            <div>
+              <div className="eyebrow mb-2 text-sienna-600">Your draft</div>
+              <div className="display-md mb-2">{draftRoom.name}</div>
+              <div className="text-sm text-ink-500">
+                {draftRoom.width ? `${inchesToFeet(draftRoom.width)} × ${inchesToFeet(draftRoom.depth)}` : 'Unsized'} · not saved to any account
               </div>
-            ))}
+            </div>
+            <div className="flex gap-3">
+              <button className="btn-ink" onClick={() => openRoom(draftRoom.id)}>Continue editing →</button>
+              <button
+                onClick={discardDraft}
+                className="text-[11px] uppercase tracking-editorial text-ink-500 hover:text-ink-900 px-4"
+              >
+                Discard
+              </button>
+            </div>
           </div>
-        ) : rooms.length === 0 ? (
+        )}
+
+        {/* Guest: no draft yet → show templates + upload CTA */}
+        {guest && !draftRoom && (
           <div>
             <p className="text-ink-500 mb-8 max-w-lg leading-relaxed">
-              No rooms yet. Pick a template to get started, or create a custom room.
+              No sign-in required. Pick a template to start from scratch, or upload a floorplan to design your real space.
+              Save to your account whenever you're ready.
             </p>
-            <div className="grid md:grid-cols-3 gap-6">
+            <div className="grid md:grid-cols-3 gap-6 mb-12">
               {ROOM_TEMPLATES.map((t) => (
                 <button
                   key={t.id}
@@ -105,32 +144,79 @@ export default function Studio() {
                 </button>
               ))}
             </div>
+            <div className="panel p-8 flex flex-wrap items-center justify-between gap-6">
+              <div>
+                <div className="eyebrow mb-2 text-ink-500">Have a floorplan?</div>
+                <div className="display-md">Upload & auto-segment your rooms.</div>
+              </div>
+              <button className="btn-ink" onClick={() => navigate('/upload')}>Upload floorplan →</button>
+            </div>
           </div>
-        ) : (
-          <div className="grid md:grid-cols-3 gap-6">
-            {rooms.map((r) => (
-              <button
-                key={r.id}
-                onClick={() => openRoom(r.id)}
-                className="text-left panel p-8 hover:border-ink-900 transition group relative"
-              >
-                <div className="eyebrow mb-6 text-ink-500">
-                  {r.placements?.length || 0} items
+        )}
+
+        {/* Authed: existing "your rooms" flow */}
+        {!guest && !waitingForAuth && (
+          loadingList ? (
+            <div className="grid md:grid-cols-3 gap-6">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="panel p-8 animate-pulse">
+                  <div className="h-3 w-20 bg-ink-300/30 rounded mb-6" />
+                  <div className="h-6 w-32 bg-ink-300/30 rounded mb-3" />
+                  <div className="h-3 w-24 bg-ink-300/30 rounded" />
                 </div>
-                <div className="display-md mb-3">{r.name}</div>
-                <div className="text-sm text-ink-500">
-                  {r.width ? `${inchesToFeet(r.width)} × ${inchesToFeet(r.depth)}` : 'Unsized'}
-                </div>
+              ))}
+            </div>
+          ) : rooms.length === 0 ? (
+            <div>
+              <p className="text-ink-500 mb-8 max-w-lg leading-relaxed">
+                No rooms yet. Pick a template to get started, or create a custom room.
+              </p>
+              <div className="grid md:grid-cols-3 gap-6">
+                {ROOM_TEMPLATES.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => createAndEnter({ name: t.name, width: t.width, depth: t.depth, height: t.height })}
+                    className="text-left panel p-8 hover:border-ink-900 transition group"
+                  >
+                    <div className="eyebrow mb-6 text-ink-500">Template</div>
+                    <div className="display-md mb-3">{t.name}</div>
+                    <div className="text-sm text-ink-500">
+                      {inchesToFeet(t.width)} × {inchesToFeet(t.depth)}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="grid md:grid-cols-3 gap-6">
+              {rooms.map((r) => (
                 <button
-                  onClick={(e) => deleteRoom(r.id, e)}
-                  className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] uppercase tracking-editorial px-3 py-1.5 rounded-full border border-red-300 text-red-600 hover:bg-red-600 hover:text-white"
-                  aria-label={`Delete ${r.name}`}
+                  key={r.id}
+                  onClick={() => openRoom(r.id)}
+                  className="text-left panel p-8 hover:border-ink-900 transition group relative"
                 >
-                  Delete
+                  <div className="eyebrow mb-6 text-ink-500">
+                    {r.placements?.length || 0} items
+                  </div>
+                  <div className="display-md mb-3">{r.name}</div>
+                  <div className="text-sm text-ink-500">
+                    {r.width ? `${inchesToFeet(r.width)} × ${inchesToFeet(r.depth)}` : 'Unsized'}
+                  </div>
+                  <button
+                    onClick={(e) => deleteRoom(r.id, e)}
+                    className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] uppercase tracking-editorial px-3 py-1.5 rounded-full border border-red-300 text-red-600 hover:bg-red-600 hover:text-white"
+                    aria-label={`Delete ${r.name}`}
+                  >
+                    Delete
+                  </button>
                 </button>
-              </button>
-            ))}
-          </div>
+              ))}
+            </div>
+          )
+        )}
+
+        {waitingForAuth && (
+          <div className="text-ink-500 eyebrow">Loading…</div>
         )}
 
         {showSetup && (

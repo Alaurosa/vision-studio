@@ -1,22 +1,37 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useLayoutStore } from '@/store/layoutStore';
+import { useAuth } from '@/hooks/useAuth';
 import { inchesToFeet } from '@/utils/scale';
 import api from '@/lib/api';
+import LoginModal from '@/components/auth/LoginModal';
 
 export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
   const {
     room, viewMode, setViewMode, gridEnabled, toggleGrid,
     isChatOpen, toggleChat, undo, redo, validate, updateRoom,
     selectedId, furniture, rotateFurniture, removeFurniture,
+    saveDraftToAccount, isDraft,
   } = useLayoutStore();
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [exporting, setExporting] = useState(false);
   const [validationMsg, setValidationMsg] = useState(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState(null);
+  const [showLogin, setShowLogin] = useState(false);
   const selectedItem = furniture.find((item) => item.id === selectedId);
+
+  const draft = isDraft();
 
   const runExport = async (format) => {
     if (!room?.id) return;
+    if (draft) {
+      setValidationMsg('Save to your account before exporting.');
+      setTimeout(() => setValidationMsg(null), 4000);
+      return;
+    }
     setExporting(true);
     try {
       const res = await api.post(`/api/export/${format}/${room.id}`, {}, { responseType: 'blob' });
@@ -42,27 +57,78 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
 
   const autoPlace = async () => {
     if (!room?.id) return;
+    if (draft) {
+      setValidationMsg('Auto-arrange requires a saved room. Save first.');
+      setTimeout(() => setValidationMsg(null), 4000);
+      return;
+    }
     try {
       await api.post('/api/layout/auto-place', { room_id: room.id });
-      // reload furniture
       const { data } = await api.get(`/api/rooms/${room.id}`);
       useLayoutStore.setState({ furniture: data.placements || [] });
     } catch (e) { console.error(e); }
+  };
+
+  // Called either directly (if already signed in) or after the login modal finishes.
+  const pushDraftToServer = async () => {
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const serverRoom = await saveDraftToAccount();
+      setSaveMsg('Saved ✓');
+      setTimeout(() => setSaveMsg(null), 3000);
+      // Switch the URL to the now-real room id.
+      if (serverRoom?.id) navigate(`/studio/${serverRoom.id}`, { replace: true });
+    } catch (e) {
+      console.error('save draft', e);
+      setSaveMsg(e?.response?.data?.error || e.message || 'Save failed');
+      setTimeout(() => setSaveMsg(null), 5000);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onSaveClick = async () => {
+    if (!user) {
+      setShowLogin(true);
+      return;
+    }
+    await pushDraftToServer();
   };
 
   return (
     <div className="h-14 border-b border-ink-900/10 bg-paper-50 flex items-center px-4 md:px-6 gap-2 md:gap-4 overflow-x-auto">
       <Link to="/studio" className="eyebrow text-ink-500 hover:text-ink-900 shrink-0">← Rooms</Link>
       <div className="h-5 w-px bg-ink-900/15 shrink-0" />
-      <div className="font-display text-lg truncate max-w-xs">{room?.name || 'Untitled'}</div>
+      <div className="font-display text-lg truncate max-w-xs flex items-center gap-2">
+        {room?.name || 'Untitled'}
+        {draft && (
+          <span className="text-[9px] uppercase tracking-editorial px-2 py-0.5 rounded-full bg-sienna-500/10 text-sienna-700 border border-sienna-500/30 shrink-0">
+            Draft
+          </span>
+        )}
+      </div>
       <div className="text-xs text-ink-500 shrink-0">
         {room?.width ? `${inchesToFeet(room.width)} × ${inchesToFeet(room.depth)}` : ''}
       </div>
 
       <div className="flex-1 min-w-4" />
 
-      {validationMsg && (
-        <span className="text-[11px] uppercase tracking-editorial text-sienna-600 shrink-0 hidden lg:inline">{validationMsg}</span>
+      {(validationMsg || saveMsg) && (
+        <span className="text-[11px] uppercase tracking-editorial text-sienna-600 shrink-0 hidden lg:inline">
+          {saveMsg || validationMsg}
+        </span>
+      )}
+
+      {/* Save-to-account — only shown while editing a draft */}
+      {draft && (
+        <button
+          onClick={onSaveClick}
+          disabled={saving}
+          className="shrink-0 text-[10px] uppercase tracking-editorial px-4 py-1.5 rounded-full border bg-ink-900 text-paper-50 border-ink-900 hover:bg-ink-800 transition disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : user ? 'Save to account' : 'Sign in & save'}
+        </button>
       )}
 
       {/* Catalog toggle (visible on mobile) */}
@@ -85,9 +151,9 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
       <ToolbarBtn onClick={() => setViewMode('2d')} active={viewMode === '2d'}>2D</ToolbarBtn>
       <ToolbarBtn onClick={() => setViewMode('3d')} active={viewMode === '3d'}>3D</ToolbarBtn>
       <div className="h-5 w-px bg-ink-900/15 shrink-0 hidden sm:block" />
-      <ToolbarBtn onClick={() => runExport('json')} disabled={exporting} className="hidden sm:inline-flex">JSON</ToolbarBtn>
-      <ToolbarBtn onClick={() => runExport('svg')} disabled={exporting} className="hidden sm:inline-flex">SVG</ToolbarBtn>
-      <ToolbarBtn onClick={() => runExport('dxf')} disabled={exporting} className="hidden sm:inline-flex">DXF</ToolbarBtn>
+      <ToolbarBtn onClick={() => runExport('json')} disabled={exporting || draft} className="hidden sm:inline-flex">JSON</ToolbarBtn>
+      <ToolbarBtn onClick={() => runExport('svg')} disabled={exporting || draft} className="hidden sm:inline-flex">SVG</ToolbarBtn>
+      <ToolbarBtn onClick={() => runExport('dxf')} disabled={exporting || draft} className="hidden sm:inline-flex">DXF</ToolbarBtn>
       <div className="h-5 w-px bg-ink-900/15 shrink-0" />
       <ToolbarBtn onClick={toggleChat} active={isChatOpen} className="hidden md:inline-flex">Chat</ToolbarBtn>
 
@@ -107,6 +173,18 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
           </div>
         )}
       </div>
+
+      {showLogin && (
+        <LoginModal
+          title="Sign in to save your draft"
+          message="We'll attach this room, its zones, and all furniture to your account."
+          onClose={() => setShowLogin(false)}
+          onAuthed={async () => {
+            setShowLogin(false);
+            await pushDraftToServer();
+          }}
+        />
+      )}
     </div>
   );
 }

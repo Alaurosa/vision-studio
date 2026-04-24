@@ -95,9 +95,6 @@ export const useLayoutStore = create(
       isChatOpen: true,
       undoStack: [],
       redoStack: [],
-      // Draft-mode state (persisted to localStorage for guest users)
-      draftFloorPlanDataUrl: null,
-      draftScalePxPerInch: null,
 
       // ---------- room ----------
       loadRoom: async (roomId) => {
@@ -156,8 +153,6 @@ export const useLayoutStore = create(
           chatHistory: [],
           undoStack: [],
           redoStack: [],
-          draftFloorPlanDataUrl: payload.floorPlanDataUrl || null,
-          draftScalePxPerInch: payload.scale_px_per_inch || null,
         });
         return room;
       },
@@ -172,8 +167,6 @@ export const useLayoutStore = create(
           chatHistory: [],
           undoStack: [],
           redoStack: [],
-          draftFloorPlanDataUrl: null,
-          draftScalePxPerInch: null,
         });
       },
 
@@ -444,13 +437,11 @@ export const useLayoutStore = create(
             furniture: data.placements || savedPlacements,
             zones: fallbackZones.length ? fallbackZones : zones,
             activeZoneId: (fallbackZones[0] || zones[0])?.id || null,
-            draftFloorPlanDataUrl: null,
           });
         } catch (e) {
           set({
             room: serverRoom,
             furniture: savedPlacements,
-            draftFloorPlanDataUrl: null,
           });
         }
 
@@ -499,8 +490,6 @@ export const useLayoutStore = create(
           furniture: state.furniture,
           zones: state.zones,
           activeZoneId: state.activeZoneId,
-          draftFloorPlanDataUrl: state.draftFloorPlanDataUrl,
-          draftScalePxPerInch: state.draftScalePxPerInch,
           viewMode: state.viewMode,
           gridEnabled: state.gridEnabled,
           isChatOpen: state.isChatOpen,

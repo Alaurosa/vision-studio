@@ -3,6 +3,7 @@ import { optionalAuth } from '../middleware/auth.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import { buildLayoutJSON } from '../services/exportFormats.js';
 import { chat } from '../services/llmRouter.js';
+import { log } from '../services/logger.js';
 import { resolveOverlaps, getEffectiveDims, validateLayout } from '../services/overlapResolver.js';
 
 const router = express.Router();
@@ -122,7 +123,7 @@ Compute the optimal position and rotation for each item. Return ONLY a JSON arra
 
     res.json({ message: `Auto-placed ${updates.length} items.`, placements: updates });
   } catch (err) {
-    console.error('Auto-place error:', err.message);
+    log.error('Auto-place error', { error: err.message });
     res.status(500).json({ error: err.message });
   }
 });

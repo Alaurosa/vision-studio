@@ -93,7 +93,6 @@ vision-studio/
 │       │   ├── ErrorBoundary.jsx      # React class error boundary with polished fallback UI
 │       │   ├── ConfirmModal.jsx       # Animated confirmation modal with Framer Motion (replaces window.confirm)
 │       │   ├── auth/
-│       │   │   ├── ProtectedRoute.jsx # Auth gate with branded spinner, redirects to /login
 │       │   │   └── LoginModal.jsx     # Inline sign-in/sign-up modal for draft→account save flow
 │       │   ├── layout/
 │       │   │   ├── Navbar.jsx         # Top nav (Home/Upload/Studio/Chat), scroll-aware blur, mobile hamburger, skip-to-content
@@ -153,6 +152,7 @@ vision-studio/
 │   │   ├── fallbackStore.js      # In-memory store when Supabase unavailable (27 embedded catalog items)
 │   │   ├── fileStorage.js        # Shared local file storage helper (saves to uploads/)
 │   │   ├── overlapResolver.js    # Shared overlap resolver (greedy spiral + linear scan) + layout validator
+│   │   ├── normalizeZones.js    # Shared zone normalization (boundary-relative coordinates)
 │   │   ├── chatFunctions.js      # 15 chat tool definitions + executeFunction() dispatch
 │   │   ├── llmRouter.js          # OpenAI chat completions wrapper (hardcoded gpt-5.4)
 │   │   ├── exportFormats.js      # Build JSON, SVG, DXF export payloads (rotation-aware, wall-format agnostic)
@@ -166,13 +166,12 @@ vision-studio/
 │
 ├── python/                       # FastAPI AI microservice
 │   ├── requirements.txt          # fastapi, uvicorn, opencv, numpy, Pillow, replicate, openai, pdf2image
-│   ├── app.py                    # Endpoints: /health, /parse-floorplan, /detect-objects, /segment-room, /estimate-scale
+│   ├── app.py                    # Endpoints: /health, /parse-floorplan, /detect-objects, /segment-room
 │   ├── .env.example              # Template for python env vars
 │   └── services/
 │       ├── __init__.py
 │       ├── floorplan_parser.py   # OpenAI Vision (gpt-5.4 → gpt-4o fallback) room zoning + OpenCV wall-snap + OpenCV fallback + PDF support
-│       ├── object_recognition.py # Grounding DINO + SAM 3 via Replicate
-│       └── scale_estimator.py    # Manual calibration stub
+│       └── object_recognition.py # Grounding DINO + SAM 3 via Replicate
 │
 └── docs/                         # Sprint documentation (PDFs)
 ```
@@ -319,7 +318,6 @@ Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furn
 | POST | `/parse-floorplan` | Floor plan image/PDF → room detection + wall segmentation |
 | POST | `/detect-objects` | Image/URL → Grounding DINO object detection |
 | POST | `/segment-room` | Image URL + bboxes → SAM segmentation masks |
-| POST | `/estimate-scale` | Image URL → scale estimation (stub) |
 
 ## Database Tables (Supabase)
 

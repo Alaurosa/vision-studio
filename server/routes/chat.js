@@ -3,6 +3,7 @@ import { optionalAuth } from '../middleware/auth.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import { chat } from '../services/llmRouter.js';
 import { LAYOUT_FUNCTIONS, executeFunction } from '../services/chatFunctions.js';
+import { log } from '../services/logger.js';
 
 const router = express.Router();
 
@@ -195,7 +196,7 @@ RESPONSE STYLE:
 
     res.json({ message: finalText, actions: allActions, refresh: allActions.some(a => a.result?.refresh) });
   } catch (err) {
-    console.error('Chat error:', err.message);
+    log.error('Chat error', { error: err.message });
     res.status(500).json({ error: err.message });
   }
 });

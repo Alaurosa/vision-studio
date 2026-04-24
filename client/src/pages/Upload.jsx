@@ -9,17 +9,6 @@ import { useLayoutStore } from '@/store/layoutStore';
 import AnalysisWorkflow from '@/components/upload/AnalysisWorkflow';
 import RoomEditor from '@/components/upload/RoomEditor';
 
-// Turn a File/Blob into a data URL so we can stash it in localStorage
-// (so the floorplan survives a refresh while in draft mode).
-async function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
 export default function Upload() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -101,14 +90,12 @@ export default function Upload() {
     // --- Guest path: build a draft room entirely client-side, then enter studio.
     if (isGuest) {
       try {
-        const dataUrl = await fileToDataUrl(file);
         const draft = createDraftRoom({
           name: roomName || 'Untitled draft',
           width: Math.round(roomWidth),
           depth: Math.round(roomDepth),
           scale_px_per_inch: scale,
           zones: normalizedZones,
-          floorPlanDataUrl: dataUrl,
         });
         navigate(`/studio/${draft.id}`);
       } catch (err) {

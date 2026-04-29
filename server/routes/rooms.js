@@ -10,11 +10,14 @@ import { normalizeZones } from '../services/normalizeZones.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const hasDbUserId = (userId) => typeof userId === 'string' && UUID_RE.test(userId);
 
 // POST /api/rooms — create a new room
 router.post('/', optionalAuth, async (req, res) => {
   const { name, unit, width, depth } = req.body;
-  if (await useDb()) {
+  const dbEnabled = (await useDb()) && hasDbUserId(req.user?.id);
+  if (dbEnabled) {
     const { data, error } = await supabaseAdmin
       .from('rooms')
       .insert({ user_id: req.user.id, name: name || 'My Room', unit: unit || 'inches', width: width || null, depth: depth || null })
@@ -30,7 +33,8 @@ router.post('/', optionalAuth, async (req, res) => {
 
 // GET /api/rooms — list user rooms
 router.get('/', optionalAuth, async (req, res) => {
-  if (await useDb()) {
+  const dbEnabled = (await useDb()) && hasDbUserId(req.user?.id);
+  if (dbEnabled) {
     const { data, error } = await supabaseAdmin
       .from('rooms')
       .select('*, placements(*)')
@@ -44,7 +48,8 @@ router.get('/', optionalAuth, async (req, res) => {
 
 // GET /api/rooms/:id
 router.get('/:id', optionalAuth, async (req, res) => {
-  if (await useDb()) {
+  const dbEnabled = (await useDb()) && hasDbUserId(req.user?.id);
+  if (dbEnabled) {
     const { data, error } = await supabaseAdmin
       .from('rooms')
       .select('*, placements(*)')
@@ -76,7 +81,8 @@ router.put('/:id', optionalAuth, async (req, res) => {
   if (unit !== undefined) updates.unit = unit;
   if (zones !== undefined) updates.zones = zones;
 
-  if (await useDb()) {
+  const dbEnabled = (await useDb()) && hasDbUserId(req.user?.id);
+  if (dbEnabled) {
     updates.updated_at = new Date().toISOString();
     let { data, error } = await supabaseAdmin
       .from('rooms')
@@ -113,7 +119,8 @@ router.put('/:id', optionalAuth, async (req, res) => {
 
 // DELETE /api/rooms/:id
 router.delete('/:id', optionalAuth, async (req, res) => {
-  if (await useDb()) {
+  const dbEnabled = (await useDb()) && hasDbUserId(req.user?.id);
+  if (dbEnabled) {
     const { error } = await supabaseAdmin
       .from('rooms')
       .delete()
@@ -223,7 +230,8 @@ router.post('/:id/upload-floorplan', optionalAuth, upload.single('file'), async 
       };
     }
 
-    if (await useDb()) {
+    const dbEnabled = (await useDb()) && hasDbUserId(req.user?.id);
+    if (dbEnabled) {
       roomUpdates.updated_at = new Date().toISOString();
       await supabaseAdmin
         .from('rooms')
@@ -255,7 +263,8 @@ router.post('/:id/calibrate', optionalAuth, async (req, res) => {
   const pixel_dist = Math.sqrt(dx * dx + dy * dy);
   const scale_px_per_inch = pixel_dist / real_world_inches;
 
-  if (await useDb()) {
+  const dbEnabled = (await useDb()) && hasDbUserId(req.user?.id);
+  if (dbEnabled) {
     const { data, error } = await supabaseAdmin
       .from('rooms')
       .update({ scale_px_per_inch, updated_at: new Date().toISOString() })

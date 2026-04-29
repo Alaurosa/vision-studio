@@ -125,8 +125,15 @@ export default function Home() {
             loading="eager"
             decoding="async"
           />
-          <div className="absolute inset-0 bg-gradient-to-r from-black/78 via-black/55 to-black/35" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/25" />
+          {/* Readability: left→right darken→light + subtle top/bottom vignette; darker on small screens */}
+          <div
+            className="absolute inset-0 bg-[linear-gradient(to_right,rgba(0,0,0,0.52),rgba(0,0,0,0.16))] md:bg-[linear-gradient(to_right,rgba(0,0,0,0.42),rgba(0,0,0,0.10))]"
+            aria-hidden
+          />
+          <div
+            className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0.22),transparent_32%,transparent_68%,rgba(0,0,0,0.18))] max-md:bg-[linear-gradient(to_bottom,rgba(0,0,0,0.28),transparent_30%,transparent_70%,rgba(0,0,0,0.24))]"
+            aria-hidden
+          />
         </div>
 
         <motion.div
@@ -138,19 +145,19 @@ export default function Home() {
           <div className="max-w-3xl text-left">
             <motion.p
               variants={heroItemVariants}
-              className="mb-5 text-[11px] font-semibold uppercase tracking-[0.38em] text-white/65"
+              className="mb-5 text-[11px] font-semibold uppercase tracking-[0.44em] text-[rgba(255,255,255,0.78)]"
             >
               VISION STUDIO · SPATIAL DESIGN ENGINE
             </motion.p>
             <motion.h1
               variants={heroItemVariants}
-              className="font-display text-[clamp(2.25rem,5.5vw,4rem)] font-medium leading-[1.06] tracking-[-0.035em] text-white"
+              className="font-display text-[clamp(2.25rem,5.5vw,4rem)] font-medium leading-[1.06] tracking-[-0.035em] text-[#F8F6F1] [text-shadow:0_2px_12px_rgba(0,0,0,0.28)]"
             >
               Design the rooms you actually live in.
             </motion.h1>
             <motion.p
               variants={heroItemVariants}
-              className="mt-6 max-w-xl text-base leading-relaxed text-white/78 md:text-lg"
+              className="mt-6 max-w-xl text-base leading-[1.72] text-[rgba(255,255,255,0.90)] md:text-lg md:leading-[1.75]"
             >
               Upload a floorplan or room photo. Describe your vision. Vision Studio turns ideas into
               editable layouts, intelligent recommendations, and immersive previews.
@@ -165,7 +172,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={scrollToShowcase}
-                className="inline-flex items-center justify-center rounded-full border border-white/30 bg-white/10 px-8 py-3 text-sm font-semibold text-white backdrop-blur-sm transition hover:border-white/45 hover:bg-white/15 active:scale-[0.98]"
+                className="inline-flex items-center justify-center rounded-full border border-white/45 bg-white/12 px-8 py-3 text-sm font-semibold text-[rgba(255,255,255,0.96)] backdrop-blur-md transition hover:border-white/55 hover:bg-white/18 active:scale-[0.98]"
               >
                 Explore Studio
               </button>
@@ -313,6 +320,18 @@ export default function Home() {
               <ImageCard image={lp('circular-courtyard.jpg')} title="Spatial Composition Test" />
             </div>
           </div>
+
+          <p className="mt-12 max-w-4xl border-t border-white/[0.09] pt-8 font-medium tracking-[0.04em] text-[11px] text-white/45 md:mt-14 md:text-xs md:tracking-[0.06em]">
+            Featured imagery by{' '}
+            <a
+              href="https://issuu.com/lucasvargas89"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-white/[0.72] underline decoration-white/20 underline-offset-[5px] transition duration-200 hover:text-white/95 hover:decoration-white/40"
+            >
+              Lucas Vargas
+            </a>
+          </p>
         </div>
       </section>
 

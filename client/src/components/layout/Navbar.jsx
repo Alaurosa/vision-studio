@@ -7,6 +7,7 @@ const navLinks = [
   { to: '/', label: 'Home' },
   { to: '/upload', label: 'Upload' },
   { to: '/studio', label: 'Studio' },
+  { to: '/chat', label: 'Chat' },
 ];
 
 export default function Navbar() {
@@ -111,7 +112,11 @@ export default function Navbar() {
   );
 
   return (
-    <header className={shell}>
+    <>
+      <a href="#main-content" className="skip-to-content">
+        Skip to content
+      </a>
+      <header className={shell} role="banner">
       <div className="mx-auto grid h-16 max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-3 px-6 md:gap-6 lg:px-8">
         <div className="flex min-w-0 items-center justify-self-start">
           <Link to="/" className="flex items-center gap-2.5 transition-opacity hover:opacity-90">
@@ -240,5 +245,6 @@ export default function Navbar() {
         </div>
       )}
     </header>
+    </>
   );
 }

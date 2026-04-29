@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { optionalAuth } from '../middleware/auth.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import { buildLayoutJSON, buildDXF, buildSVG } from '../services/exportFormats.js';
 
@@ -20,8 +20,39 @@ async function getRoomAndPlacements(roomId, userId) {
   return { room, placements };
 }
 
+// Draft export routes — accept room + placements from request body
+router.post('/json/draft', async (req, res) => {
+  const { room_context, placements_context } = req.body;
+  if (!room_context) return res.status(400).json({ error: 'Missing room_context' });
+  const layout = buildLayoutJSON(room_context, placements_context || []);
+  const safeName = (room_context.name || 'room').replace(/[^a-zA-Z0-9]/g, '_');
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="${safeName}_layout.json"`);
+  res.json(layout);
+});
+
+router.post('/dxf/draft', async (req, res) => {
+  const { room_context, placements_context } = req.body;
+  if (!room_context) return res.status(400).json({ error: 'Missing room_context' });
+  const dxf = buildDXF(room_context, placements_context || []);
+  const safeName = (room_context.name || 'room').replace(/[^a-zA-Z0-9]/g, '_');
+  res.setHeader('Content-Type', 'application/dxf');
+  res.setHeader('Content-Disposition', `attachment; filename="${safeName}.dxf"`);
+  res.send(dxf);
+});
+
+router.post('/svg/draft', async (req, res) => {
+  const { room_context, placements_context } = req.body;
+  if (!room_context) return res.status(400).json({ error: 'Missing room_context' });
+  const svg = buildSVG(room_context, placements_context || []);
+  const safeName = (room_context.name || 'room').replace(/[^a-zA-Z0-9]/g, '_');
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Content-Disposition', `attachment; filename="${safeName}.svg"`);
+  res.send(svg);
+});
+
 // POST /api/export/json/:room_id
-router.post('/json/:room_id', requireAuth, async (req, res) => {
+router.post('/json/:room_id', optionalAuth, async (req, res) => {
   try {
     const { room, placements } = await getRoomAndPlacements(req.params.room_id, req.user.id);
     const layout = buildLayoutJSON(room, placements);
@@ -42,7 +73,7 @@ router.post('/json/:room_id', requireAuth, async (req, res) => {
 });
 
 // POST /api/export/dxf/:room_id
-router.post('/dxf/:room_id', requireAuth, async (req, res) => {
+router.post('/dxf/:room_id', optionalAuth, async (req, res) => {
   try {
     const { room, placements } = await getRoomAndPlacements(req.params.room_id, req.user.id);
     const dxfString = buildDXF(room, placements);
@@ -56,7 +87,7 @@ router.post('/dxf/:room_id', requireAuth, async (req, res) => {
 });
 
 // POST /api/export/svg/:room_id
-router.post('/svg/:room_id', requireAuth, async (req, res) => {
+router.post('/svg/:room_id', optionalAuth, async (req, res) => {
   try {
     const { room, placements } = await getRoomAndPlacements(req.params.room_id, req.user.id);
     const svg = buildSVG(room, placements);
@@ -70,7 +101,7 @@ router.post('/svg/:room_id', requireAuth, async (req, res) => {
 });
 
 // GET /api/export/latest/:room_id
-router.get('/latest/:room_id', requireAuth, async (req, res) => {
+router.get('/latest/:room_id', optionalAuth, async (req, res) => {
   if (await useDb()) {
     const { data, error } = await supabaseAdmin
       .from('layout_exports')

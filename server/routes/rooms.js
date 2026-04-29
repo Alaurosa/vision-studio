@@ -2,32 +2,17 @@ import express from 'express';
 import multer from 'multer';
 import FormData from 'form-data';
 import axios from 'axios';
-import { requireAuth } from '../middleware/auth.js';
+import { optionalAuth } from '../middleware/auth.js';
+import { log } from '../services/logger.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import { saveFileLocally } from '../services/fileStorage.js';
+import { normalizeZones } from '../services/normalizeZones.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
-function normalizeZones(parseResult) {
-  const boundary = parseResult?.boundary || { x: 0, y: 0 };
-  return (parseResult?.rooms || []).map((room, index) => ({
-    id: room.id || `zone-${index}`,
-    name: room.label || `Room ${index + 1}`,
-    polygon: (room.polygon || []).map(([x, y]) => [x - boundary.x, y - boundary.y]),
-    bbox: Array.isArray(room.bbox) && room.bbox.length === 4
-      ? [room.bbox[0] - boundary.x, room.bbox[1] - boundary.y, room.bbox[2] - boundary.x, room.bbox[3] - boundary.y]
-      : room.bbox,
-    width: room.width || (room.bbox?.[2] != null ? room.bbox[2] - room.bbox[0] : null),
-    depth: room.depth || (room.bbox?.[3] != null ? room.bbox[3] - room.bbox[1] : null),
-    confidence: room.confidence || null,
-    width_inches: room.width_inches || null,
-    depth_inches: room.depth_inches || null,
-  }));
-}
-
 // POST /api/rooms — create a new room
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', optionalAuth, async (req, res) => {
   const { name, unit, width, depth } = req.body;
   if (await useDb()) {
     const { data, error } = await supabaseAdmin
@@ -44,7 +29,7 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 // GET /api/rooms — list user rooms
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', optionalAuth, async (req, res) => {
   if (await useDb()) {
     const { data, error } = await supabaseAdmin
       .from('rooms')
@@ -58,7 +43,7 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // GET /api/rooms/:id
-router.get('/:id', requireAuth, async (req, res) => {
+router.get('/:id', optionalAuth, async (req, res) => {
   if (await useDb()) {
     const { data, error } = await supabaseAdmin
       .from('rooms')
@@ -79,7 +64,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 });
 
 // PUT /api/rooms/:id
-router.put('/:id', requireAuth, async (req, res) => {
+router.put('/:id', optionalAuth, async (req, res) => {
   const { name, width, depth, height, walls, scale_px_per_inch, unit, zones } = req.body;
   const updates = {};
   if (name !== undefined) updates.name = name;
@@ -127,7 +112,7 @@ router.put('/:id', requireAuth, async (req, res) => {
 });
 
 // DELETE /api/rooms/:id
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', optionalAuth, async (req, res) => {
   if (await useDb()) {
     const { error } = await supabaseAdmin
       .from('rooms')
@@ -142,7 +127,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
 });
 
 // POST /api/rooms/:id/upload-floorplan
-router.post('/:id/upload-floorplan', requireAuth, upload.single('file'), async (req, res) => {
+router.post('/:id/upload-floorplan', optionalAuth, upload.single('file'), async (req, res) => {
   const { id } = req.params;
   const file = req.file;
   if (!file) return res.status(400).json({ error: 'No file uploaded' });
@@ -161,7 +146,7 @@ router.post('/:id/upload-floorplan', requireAuth, upload.single('file'), async (
         publicUrl = urlRes.data.publicUrl;
       }
     } catch (storageErr) {
-      console.warn('Storage upload failed (non-fatal):', storageErr.message);
+      log.warn('Storage upload failed (non-fatal)', { error: storageErr.message });
     }
 
     // Fallback: save locally if Supabase Storage didn't work
@@ -183,7 +168,7 @@ router.post('/:id/upload-floorplan', requireAuth, upload.single('file'), async (
       );
       parseResult = pythonRes.data;
     } catch (pyErr) {
-      console.warn('Python service unavailable:', pyErr.message);
+      log.warn('Python service unavailable', { error: pyErr.message });
     }
 
     // 3. Save URL + parsed data to room
@@ -257,13 +242,13 @@ router.post('/:id/upload-floorplan', requireAuth, upload.single('file'), async (
       },
     });
   } catch (err) {
-    console.error('Floor plan upload error:', err.message);
+    log.error('Floor plan upload error', { error: err.message });
     res.status(500).json({ error: err.message });
   }
 });
 
 // POST /api/rooms/:id/calibrate
-router.post('/:id/calibrate', requireAuth, async (req, res) => {
+router.post('/:id/calibrate', optionalAuth, async (req, res) => {
   const { p1, p2, real_world_inches } = req.body;
   const dx = p2[0] - p1[0];
   const dy = p2[1] - p1[1];

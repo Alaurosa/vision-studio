@@ -20,8 +20,6 @@ export const CATEGORY_COLORS = {
   default:      '#a89370',
 };
 
-export const ROOM_ZONE_COLORS = ['#2563eb', '#22c55e', '#a855f7', '#f59e0b', '#14b8a6', '#f43f5e'];
-
 export const CATEGORY_LABELS = {
   sofa: 'Sofa', loveseat: 'Loveseat', bed: 'Bed', desk: 'Desk',
   bookshelf: 'Bookshelf', dining_table: 'Dining Table',
@@ -35,6 +33,25 @@ export const ROOM_TEMPLATES = [
   { id: 'studio',     name: 'Studio',      width: 240, depth: 180, height: 96 },
   { id: 'office',     name: 'Home Office', width: 120, depth: 108, height: 96 },
   { id: 'dining',     name: 'Dining Room', width: 168, depth: 144, height: 96 },
+];
+
+export const ROOM_ZONE_COLORS = [
+  '#c58d45',
+  '#4f8f6b',
+  '#4273b7',
+  '#9858a6',
+  '#b35c42',
+  '#5f7d4f',
+  '#c06b8f',
+  '#7b6cc7',
+  '#2e8b8b',
+  '#d4764e',
+  '#6a8e3f',
+  '#a0522d',
+  '#5b7fa5',
+  '#c44569',
+  '#8b6914',
+  '#3d7a68',
 ];
 
 export const DEMO_PROJECTS = [
@@ -87,3 +104,15 @@ export const DEMO_PROJECTS = [
     ]
   }
 ];
+
+/** Generate a random saturated color for zones beyond the preset palette. */
+export function randomZoneColor() {
+  const h = Math.floor(Math.random() * 360);
+  return `hsl(${h}, 55%, 45%)`;
+}
+
+/** Get a zone color by index — uses presets first, then generates random ones. */
+export function getZoneColor(index) {
+  if (index < ROOM_ZONE_COLORS.length) return ROOM_ZONE_COLORS[index];
+  return randomZoneColor();
+}

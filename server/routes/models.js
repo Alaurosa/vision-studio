@@ -1,6 +1,7 @@
 import express from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { optionalAuth } from '../middleware/auth.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
+import { log } from '../services/logger.js';
 import axios from 'axios';
 
 const router = express.Router();
@@ -17,7 +18,7 @@ const modelCache = new Map();
  * Starts async 3D model generation from a product image.
  * Returns immediately with { status: 'pending', task_id } or { status: 'ready', glb_url }
  */
-router.post('/generate', requireAuth, async (req, res) => {
+router.post('/generate', optionalAuth, async (req, res) => {
   const { image_url, catalog_id, name } = req.body;
 
   if (!image_url) {
@@ -66,13 +67,13 @@ router.post('/generate', requireAuth, async (req, res) => {
 
     // Start background polling
     pollTask(taskId, image_url, catalog_id).catch(err => {
-      console.error('Model poll error:', err.message);
+      log.error('Model poll error', { error: err.message });
       modelCache.set(image_url, { status: 'failed', error: err.message });
     });
 
     res.json({ status: 'pending', task_id: taskId });
   } catch (err) {
-    console.error('Meshy submit error:', err.response?.data || err.message);
+    log.error('Meshy submit error', { error: err.message });
     res.status(500).json({ status: 'failed', error: err.response?.data?.message || err.message });
   }
 });
@@ -81,7 +82,7 @@ router.post('/generate', requireAuth, async (req, res) => {
  * GET /api/models/status/:task_id
  * Poll the status of a 3D model generation task.
  */
-router.get('/status/:task_id', requireAuth, async (req, res) => {
+router.get('/status/:task_id', optionalAuth, async (req, res) => {
   if (!process.env.MESHY_API_KEY) {
     return res.json({ status: 'unavailable' });
   }
@@ -111,7 +112,7 @@ router.get('/status/:task_id', requireAuth, async (req, res) => {
  * GET /api/models/lookup?image_url=...
  * Quick lookup of a cached model by image URL.
  */
-router.get('/lookup', requireAuth, async (req, res) => {
+router.get('/lookup', optionalAuth, async (req, res) => {
   const { image_url } = req.query;
   if (!image_url) return res.json({ status: 'unknown' });
 
@@ -139,7 +140,7 @@ async function pollTask(taskId, imageUrl, catalogId) {
         // Save to catalog if we have a catalog_id
         if (catalogId) {
           try {
-            const db = await fallback.checkDbAvailable(supabaseAdmin);
+            const db = await useDb();
             if (db) {
               await supabaseAdmin.from('furniture_catalog')
                 .update({ model_url: glbUrl })
@@ -154,7 +155,7 @@ async function pollTask(taskId, imageUrl, catalogId) {
         return;
       }
     } catch (err) {
-      console.error('Poll error:', err.message);
+      log.error('Poll error', { error: err.message });
     }
   }
   modelCache.set(imageUrl, { status: 'failed', error: 'Timed out', taskId });

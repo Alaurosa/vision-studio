@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { motion, useReducedMotion } from 'framer-motion';
 
 /** Local Lucas portfolio assets (encode path for folder name with space) */
@@ -112,6 +113,13 @@ export default function Home() {
 
   return (
     <div className="bg-vs-warm text-vs-charcoal">
+      <Helmet>
+        <title>Vision Studio — AI-Powered Spatial Layout Engine</title>
+        <meta
+          name="description"
+          content="Upload a floorplan, let AI detect rooms and dimensions, then design layouts with real IKEA and Ashley furniture. Export to JSON, SVG, or DXF."
+        />
+      </Helmet>
       {/* Hero */}
       <section
         id="hero"
@@ -135,7 +143,6 @@ export default function Home() {
             aria-hidden
           />
         </div>
-
         <motion.div
           initial="hidden"
           animate="show"

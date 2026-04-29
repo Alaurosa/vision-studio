@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { optionalAuth } from '../middleware/auth.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 
 const router = express.Router();
@@ -54,7 +54,7 @@ router.get('/categories', async (req, res) => {
 });
 
 // POST /api/furniture/placements — add furniture to a room
-router.post('/placements', requireAuth, async (req, res) => {
+router.post('/placements', optionalAuth, async (req, res) => {
   const {
     room_id,
     catalog_id,
@@ -110,7 +110,7 @@ router.post('/placements', requireAuth, async (req, res) => {
 });
 
 // PUT /api/furniture/placements/:id
-router.put('/placements/:id', requireAuth, async (req, res) => {
+router.put('/placements/:id', optionalAuth, async (req, res) => {
   const allowed = ['x_inches', 'y_inches', 'rotation', 'width', 'depth', 'height', 'color', 'name', 'zone_id', 'model_url', 'image_url'];
   const updates = Object.fromEntries(Object.entries(req.body).filter(([k]) => allowed.includes(k)));
 
@@ -150,7 +150,7 @@ router.put('/placements/:id', requireAuth, async (req, res) => {
 });
 
 // DELETE /api/furniture/placements/:id
-router.delete('/placements/:id', requireAuth, async (req, res) => {
+router.delete('/placements/:id', optionalAuth, async (req, res) => {
   if (await useDb()) {
     // Verify ownership before deleting
     const { data: placement } = await supabaseAdmin

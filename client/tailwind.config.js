@@ -5,6 +5,25 @@ export default {
   theme: {
     extend: {
       colors: {
+        /** Editorial UI (Studio, Chat, loaders) */
+        ink: {
+          300: '#c4beb6',
+          400: '#9b938a',
+          500: '#6f6860',
+          600: '#4a4540',
+          700: '#2e2b28',
+          900: '#100f0d',
+        },
+        paper: {
+          50: '#faf7f1',
+          100: '#f0ebe3',
+        },
+        sienna: {
+          400: '#c4896a',
+          500: '#9c6a3f',
+          600: '#7d5433',
+          700: '#5c3e26',
+        },
         vs: {
           light: '#edf6fa',
           soft: '#abbdd5',
@@ -91,6 +110,9 @@ export default {
       },
       backdropBlur: {
         xs: '2px',
+      },
+      letterSpacing: {
+        editorial: '0.22em',
       },
     },
   },

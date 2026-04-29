@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { Stage, Layer, Image as KImage, Rect, Group, Text, Line, Circle } from 'react-konva';
-import useImage from 'use-image';
+import { Stage, Layer, Rect, Group, Text, Line, Circle } from 'react-konva';
 import { useLayoutStore } from '@/store/layoutStore';
 import { computeRotation, snapToGrid, inchesToFeet } from '@/utils/scale';
 import FurnitureItem from './FurnitureItem';
@@ -68,8 +67,6 @@ export default function RoomCanvas() {
     : 4;
   const pxPerInch = pxPerInchFit > 0 ? pxPerInchFit : 4;
 
-  const [bgImage] = useImage(room?.floor_plan_url || room?.room_photo_url || '', 'anonymous');
-
   const onWheel = (e) => {
     e.evt.preventDefault();
     const stage = stageRef.current;
@@ -91,7 +88,29 @@ export default function RoomCanvas() {
   };
 
   const onKeyDown = useCallback((e) => {
-    const { selectedId, furniture, removeFurniture, updateFurniture, clearSelection } = useLayoutStore.getState();
+    const state = useLayoutStore.getState();
+    const { selectedId, furniture, removeFurniture, updateFurniture, clearSelection, undo, redo } = state;
+
+    // Undo / Redo — works everywhere
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      undo();
+      return;
+    }
+    if (mod && (e.key === 'Z' || (e.key === 'z' && e.shiftKey))) {
+      e.preventDefault();
+      redo();
+      return;
+    }
+
+    // Escape deselects
+    if (e.key === 'Escape') {
+      clearSelection();
+      return;
+    }
+
+    // Below shortcuts require a selection
     if (!selectedId) return;
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
@@ -102,8 +121,6 @@ export default function RoomCanvas() {
         const patch = computeRotation(item, (item.rotation || 0) + 15);
         updateFurniture(item.id, patch);
       }
-    } else if (e.key === 'Escape') {
-      clearSelection();
     }
   }, []);
 
@@ -173,17 +190,8 @@ export default function RoomCanvas() {
           if (e.target === e.target.getStage()) clearSelection();
         }}
       >
-        {/* Background image */}
+        {/* Room floor */}
         <Layer listening={false}>
-          {bgImage && room?.width && (
-            <KImage
-              image={bgImage}
-              x={toCanvasX(0)} y={toCanvasY(0)}
-              width={roomPxW} height={roomPxH}
-              opacity={0.28}
-            />
-          )}
-          {/* Room floor */}
           {focusWidth > 0 && (
             <Rect
               x={roomOffsetX} y={roomOffsetY}

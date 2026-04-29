@@ -7,8 +7,10 @@ import { GRID_SNAP_INCHES } from '@/utils/constants';
 
 export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selected, onSelect, onChange, room, allItems, onInvalidPlacement, placementBounds = null, viewOriginX = 0, viewOriginY = 0 }) {
   const [dragState, setDragState] = useState({ isDragging: false, snapX: null, snapY: null });
+  const [hovered, setHovered] = useState(false);
   const groupRef = useRef(null);
   const transformerRef = useRef(null);
+  const [opacity, setOpacity] = useState(item._animDelay != null ? 0 : 1);
   const color = item.color || CATEGORY_COLORS[item.category] || CATEGORY_COLORS.default;
   const rot = normalizeRotation(item.rotation || 0);
   const w = item.width * pxPerInch;
@@ -24,6 +26,19 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
     transformerRef.current.nodes([groupRef.current]);
     transformerRef.current.getLayer()?.batchDraw();
   }, [selected, w, d]);
+
+  const [mounted, setMounted] = useState(item._animDelay == null);
+
+  // Staggered fade-in animation on mount
+  useEffect(() => {
+    if (mounted) return;
+    const delay = item._animDelay || 0;
+    const timer = setTimeout(() => {
+      setOpacity(1);
+      setMounted(true);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, []);
 
   const revertNode = () => {
     const node = groupRef.current;
@@ -156,6 +171,7 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
         offsetX={w / 2}
         offsetY={d / 2}
         rotation={rot}
+        opacity={opacity}
         draggable
         onDragStart={handleDragStart}
         onDragMove={handleDragMove}

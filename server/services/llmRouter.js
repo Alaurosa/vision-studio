@@ -6,7 +6,7 @@ const openai = process.env.OPENAI_API_KEY
 
 /**
  * Send a chat completion request with optional function calling.
- * Uses OpenAI Codex 5.3 — best accuracy and tool-use support.
+ * Uses GPT-5.4 for best accuracy and tool-use support.
  *
  * Returns: { text, tool_calls, raw_message }
  *   raw_message: the full OpenAI message object (needed for multi-turn tool loops)
@@ -21,7 +21,7 @@ export async function chat({ messages, systemPrompt, tools = [] }) {
   }
 
   const res = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'gpt-4o',
+    model: 'gpt-5.4',
     temperature: 0.3,
     max_completion_tokens: 2048,
     messages: [{ role: 'system', content: systemPrompt }, ...messages],

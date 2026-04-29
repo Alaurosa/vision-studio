@@ -1,59 +1,58 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { useLayoutStore } from '@/store/layoutStore';
+import { useAuth } from '@/hooks/useAuth';
 import { inchesToFeet } from '@/utils/scale';
 import api from '@/lib/api';
+import LoginModal from '@/components/auth/LoginModal';
 
-// Simple tooltip component
-const TooltipButton = ({ children, tooltip, ...props }) => {
-  const [showTooltip, setShowTooltip] = useState(false);
+const isDraftId = (id) => typeof id === 'string' && id.startsWith('draft-');
 
-  return (
-    <div className="relative">
-      <button
-        {...props}
-        onMouseEnter={() => setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
-      >
-        {children}
-      </button>
-      {showTooltip && tooltip && (
-        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-surface-900 text-surface-100 text-xs rounded shadow-lg whitespace-nowrap z-50">
-          {tooltip}
-          <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-surface-900"></div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
+export default function StudioToolbar({ onToggleCatalog, catalogOpen, chatFullscreen, onToggleChatFullscreen }) {
   const {
     room, viewMode, setViewMode, gridEnabled, toggleGrid,
-    isChatOpen, toggleChat, undo, redo, validate, updateRoom,
+    isChatOpen, toggleChat, undo, redo, validate,
     selectedId, furniture, rotateFurniture, removeFurniture,
-    saveProject, getSavedProjects,
+    saveDraftToAccount,
   } = useLayoutStore();
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [exporting, setExporting] = useState(false);
-  const [validationMsg, setValidationMsg] = useState(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [showLoadMenu, setShowLoadMenu] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState(null);
+  const [showLogin, setShowLogin] = useState(false);
   const selectedItem = furniture.find((item) => item.id === selectedId);
+
+  const draft = isDraftId(room?.id);
 
   const runExport = async (format) => {
     if (!room?.id) return;
     setExporting(true);
     try {
-      const res = await api.post(`/api/export/${format}/${room.id}`, {}, { responseType: 'blob' });
-      const blob = res.data;
+      let blob;
+      if (draft) {
+        // Draft rooms: build export payload client-side and send to server
+        const payload = {
+          room_context: { id: room.id, name: room.name, width: room.width, depth: room.depth, height: room.height || 96, unit: room.unit || 'inches', walls: room.walls || [] },
+          placements_context: furniture.map(f => ({ id: f.id, name: f.name, category: f.category, provider: f.provider, provider_id: f.provider_id, width: f.width, depth: f.depth, height: f.height, x_inches: f.x_inches, y_inches: f.y_inches, rotation: f.rotation, color: f.color, custom: f.custom, model_url: f.model_url })),
+        };
+        const res = await api.post(`/api/export/${format}/draft`, payload, { responseType: 'blob' });
+        blob = res.data;
+      } else {
+        const res = await api.post(`/api/export/${format}/${room.id}`, {}, { responseType: 'blob' });
+        blob = res.data;
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `${(room.name || 'layout').replace(/\s+/g, '_')}.${format}`;
       a.click();
       URL.revokeObjectURL(url);
+      toast.success(`Exported ${format.toUpperCase()} successfully`);
     } catch (e) {
-      console.error(e);
+      toast.error(`Export failed — ${e?.response?.data?.error || e.message}`);
     } finally {
       setExporting(false);
     }
@@ -61,145 +60,194 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
 
   const doValidate = () => {
     const { valid, errors } = validate();
-    setValidationMsg(valid ? 'Layout looks clean — no overlaps or overflow.' : errors.slice(0, 4).join(' · '));
-    setTimeout(() => setValidationMsg(null), 5000);
+    if (valid) {
+      toast.success('Layout looks clean — no overlaps or overflow.');
+    } else {
+      toast.error(errors.slice(0, 3).join(' · '));
+    }
   };
 
   const autoPlace = async () => {
-    if (!room?.id) return;
+    if (!room?.id || furniture.length === 0) return;
+    const toastId = toast.loading('Auto-arranging furniture…');
     try {
-      await api.post('/api/layout/auto-place', { room_id: room.id });
-      // reload furniture
-      const { data } = await api.get(`/api/rooms/${room.id}`);
-      useLayoutStore.setState({ furniture: data.placements || [] });
-    } catch (e) { console.error(e); }
+      if (draft) {
+        // Draft rooms: send room context + placements to the server
+        const { data } = await api.post('/api/layout/auto-place', {
+          room_id: room.id,
+          room_context: {
+            id: room.id, name: room.name, width: room.width, depth: room.depth,
+            height: room.height || 96, unit: room.unit || 'inches',
+          },
+          placements_context: furniture.map(f => ({
+            id: f.id, name: f.name, category: f.category, width: f.width,
+            depth: f.depth, height: f.height, x_inches: f.x_inches,
+            y_inches: f.y_inches, rotation: f.rotation,
+          })),
+        });
+        // Apply the returned positions to local state
+        const updates = data.placements || [];
+        for (const u of updates) {
+          const existing = furniture.find(f => f.id === u.id || f.name === u.name);
+          if (existing) {
+            useLayoutStore.getState().updateFurniture(existing.id, {
+              x_inches: u.x_inches, y_inches: u.y_inches, rotation: u.rotation,
+            });
+          }
+        }
+        toast.success('Auto-arranged successfully', { id: toastId });
+      } else {
+        await api.post('/api/layout/auto-place', { room_id: room.id });
+        const { data } = await api.get(`/api/rooms/${room.id}`);
+        useLayoutStore.setState({ furniture: data.placements || [] });
+        toast.success('Auto-arranged successfully', { id: toastId });
+      }
+    } catch (e) {
+      toast.error('Auto-arrange failed', { id: toastId });
+    }
+  };
+
+  // Called either directly (if already signed in) or after the login modal finishes.
+  const pushDraftToServer = async () => {
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const serverRoom = await saveDraftToAccount();
+      setSaveMsg('Saved ✓');
+      toast.success('Room saved to your account!');
+      setTimeout(() => setSaveMsg(null), 3000);
+      // Switch the URL to the now-real room id.
+      if (serverRoom?.id) navigate(`/studio/${serverRoom.id}`, { replace: true });
+    } catch (e) {
+      console.error('save draft', e);
+      const msg = e?.response?.data?.error || e.message || 'Save failed';
+      setSaveMsg(msg);
+      toast.error(msg);
+      setTimeout(() => setSaveMsg(null), 5000);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onSaveClick = async () => {
+    if (!user) {
+      setShowLogin(true);
+      return;
+    }
+    await pushDraftToServer();
   };
 
   return (
-    <div className="h-14 border-b border-surface-700 bg-surface-800 flex items-center px-4 md:px-6 gap-4 overflow-x-auto shadow-lg">
-      {/* Navigation */}
-      <div className="flex items-center gap-2 shrink-0">
-        <Link to="/studio" className="text-surface-400 hover:text-surface-200 transition-colors text-sm">← Rooms</Link>
-        <div className="h-4 w-px bg-surface-600" />
+    <div className="h-14 border-b border-ink-900/10 bg-paper-50 flex items-center px-4 md:px-6 gap-2 md:gap-4 overflow-x-auto">
+      <Link to="/studio" className="eyebrow text-ink-500 hover:text-ink-900 shrink-0">← Rooms</Link>
+      <div className="h-5 w-px bg-ink-900/15 shrink-0" />
+      <div className="font-display text-lg truncate max-w-xs flex items-center gap-2">
+        {room?.name || 'Untitled'}
+        {draft && (
+          <span className="text-[9px] uppercase tracking-editorial px-2 py-0.5 rounded-full bg-sienna-500/10 text-sienna-700 border border-sienna-500/30 shrink-0">
+            Draft
+          </span>
+        )}
       </div>
-
-      {/* Room Info */}
-      <div className="flex items-center gap-3 shrink-0">
-        <div className="font-display text-lg text-surface-100 truncate max-w-xs">{room?.name || 'Untitled'}</div>
-        <div className="text-xs text-surface-400">
-          {room?.width ? `${inchesToFeet(room.width)} × ${inchesToFeet(room.depth)}` : ''}
-        </div>
+      <div className="text-xs text-ink-500 shrink-0">
+        {room?.width ? `${inchesToFeet(room.width)} × ${inchesToFeet(room.depth)}` : ''}
       </div>
 
       <div className="flex-1 min-w-4" />
 
-      {/* History Controls */}
-      <div className="flex items-center gap-1 shrink-0">
-        <ToolbarBtn onClick={undo}>↶</ToolbarBtn>
-        <ToolbarBtn onClick={redo}>↷</ToolbarBtn>
-      </div>
+      {(saveMsg) && (
+        <span className="text-[11px] uppercase tracking-editorial text-sienna-600 shrink-0 hidden lg:inline">
+          {saveMsg}
+        </span>
+      )}
 
-      <div className="h-6 w-px bg-surface-600 shrink-0" />
+      {/* Save-to-account — only shown while editing a draft */}
+      {draft && (
+        <button
+          onClick={onSaveClick}
+          disabled={saving}
+          className="shrink-0 text-[10px] uppercase tracking-editorial px-4 py-1.5 rounded-full border bg-ink-900 text-paper-50 border-ink-900 hover:bg-ink-800 transition disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : user ? 'Save to account' : 'Sign in & save'}
+        </button>
+      )}
 
-      {/* View Controls */}
-      <div className="flex items-center gap-1 shrink-0">
-        <TooltipButton tooltip="2D Layout View" onClick={() => setViewMode('2d')} active={viewMode === '2d'}>2D</TooltipButton>
-        <TooltipButton tooltip="3D Walkthrough" onClick={() => setViewMode('3d')} active={viewMode === '3d'}>3D</TooltipButton>
-        <TooltipButton tooltip="Toggle Snap Grid" onClick={toggleGrid} active={gridEnabled}>Grid</TooltipButton>
-      </div>
+      {/* Catalog toggle (visible on mobile) */}
+      <ToolbarBtn onClick={onToggleCatalog} active={catalogOpen} className="md:hidden">Catalog</ToolbarBtn>
 
-      <div className="h-6 w-px bg-surface-600 shrink-0" />
-
-      {/* Tools */}
-      <div className="flex items-center gap-1 shrink-0">
-        <TooltipButton tooltip="Validate Layout" onClick={doValidate}>✓</TooltipButton>
-        <TooltipButton tooltip="Auto-arrange Furniture" onClick={autoPlace}>⟲</TooltipButton>
-      </div>
-
-      {/* Selected Item Controls */}
+      <ToolbarBtn onClick={undo}>Undo</ToolbarBtn>
+      <ToolbarBtn onClick={redo}>Redo</ToolbarBtn>
+      <ToolbarBtn onClick={toggleGrid} active={gridEnabled}>Grid</ToolbarBtn>
+      <ToolbarBtn onClick={doValidate} className="hidden sm:inline-flex">Validate</ToolbarBtn>
+      <ToolbarBtn onClick={autoPlace} className="hidden sm:inline-flex">Auto-Arrange</ToolbarBtn>
       {selectedId && (
         <>
-          <div className="h-6 w-px bg-surface-600 shrink-0" />
-          <div className="flex items-center gap-1 shrink-0">
-            <TooltipButton tooltip="Rotate Left 15°" onClick={() => rotateFurniture(selectedId, (selectedItem?.rotation || 0) - 15)}>↺</TooltipButton>
-            <TooltipButton tooltip="Rotate Right 15°" onClick={() => rotateFurniture(selectedId, (selectedItem?.rotation || 0) + 15)}>↻</TooltipButton>
-            <TooltipButton tooltip="Delete Item" onClick={() => removeFurniture(selectedId)}>🗑</TooltipButton>
-          </div>
+          <div className="h-5 w-px bg-ink-900/15 shrink-0" />
+          <ToolbarBtn onClick={() => rotateFurniture(selectedId, (selectedItem?.rotation || 0) - 15)}>Rotate -</ToolbarBtn>
+          <ToolbarBtn onClick={() => rotateFurniture(selectedId, (selectedItem?.rotation || 0) + 15)}>Rotate +</ToolbarBtn>
+          <ToolbarBtn onClick={() => removeFurniture(selectedId)}>Delete</ToolbarBtn>
         </>
       )}
-
-      <div className="h-6 w-px bg-surface-600 shrink-0" />
-
-      {/* Save/Load */}
-      <div className="flex items-center gap-1 shrink-0">
-        <TooltipButton tooltip="Save Project" onClick={saveProject}>💾</TooltipButton>
-        <TooltipButton tooltip="Load Project" onClick={() => setShowLoadMenu(!showLoadMenu)}>📁</TooltipButton>
-      </div>
-
-      <div className="h-6 w-px bg-surface-600 shrink-0" />
-
-      {/* Export */}
-      <div className="flex items-center gap-1 shrink-0">
-        <TooltipButton tooltip="Export as JSON" onClick={() => runExport('json')} disabled={exporting}>JSON</TooltipButton>
-        <TooltipButton tooltip="Export as SVG" onClick={() => runExport('svg')} disabled={exporting}>SVG</TooltipButton>
-        <TooltipButton tooltip="Export as DXF" onClick={() => runExport('dxf')} disabled={exporting}>DXF</TooltipButton>
-      </div>
-
-      {/* Validation Message */}
-      {validationMsg && (
-        <div className="text-xs text-blue-400 bg-blue-900/20 px-3 py-1 rounded shrink-0">
-          {validationMsg}
-        </div>
+      <div className="h-5 w-px bg-ink-900/15 shrink-0" />
+      <ToolbarBtn onClick={() => setViewMode('2d')} active={viewMode === '2d'}>2D</ToolbarBtn>
+      <ToolbarBtn onClick={() => setViewMode('3d')} active={viewMode === '3d'}>3D</ToolbarBtn>
+      <div className="h-5 w-px bg-ink-900/15 shrink-0 hidden sm:block" />
+      <ToolbarBtn onClick={() => runExport('json')} disabled={exporting} className="hidden sm:inline-flex">JSON</ToolbarBtn>
+      <ToolbarBtn onClick={() => runExport('svg')} disabled={exporting} className="hidden sm:inline-flex">SVG</ToolbarBtn>
+      <ToolbarBtn onClick={() => runExport('dxf')} disabled={exporting} className="hidden sm:inline-flex">DXF</ToolbarBtn>
+      <div className="h-5 w-px bg-ink-900/15 shrink-0" />
+      <ToolbarBtn onClick={toggleChat} active={isChatOpen && !chatFullscreen} className="hidden md:inline-flex">Chat</ToolbarBtn>
+      {onToggleChatFullscreen && (
+        <ToolbarBtn onClick={onToggleChatFullscreen} active={chatFullscreen} className="hidden md:inline-flex">
+          {chatFullscreen ? 'Editor' : 'AI Full'}
+        </ToolbarBtn>
       )}
 
-      {/* Load Menu */}
-      {showLoadMenu && (
-        <div className="absolute top-full right-0 mt-2 bg-surface-800 border border-surface-600 rounded-lg shadow-xl z-50 min-w-64">
-          <div className="p-3 border-b border-surface-600">
-            <div className="text-sm font-medium text-surface-200">Load Project</div>
+      {/* Keyboard shortcuts */}
+      <div className="relative shrink-0">
+        <ToolbarBtn onClick={() => setShowShortcuts(!showShortcuts)} className="hidden md:inline-flex">?</ToolbarBtn>
+        {showShortcuts && (
+          <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-ink-900/10 shadow-lg rounded-lg p-4 z-50">
+            <div className="eyebrow mb-3">Keyboard Shortcuts</div>
+            <ul className="text-xs text-ink-700 space-y-2">
+              <li className="flex justify-between"><span>Undo</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">⌘Z</kbd></li>
+              <li className="flex justify-between"><span>Redo</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">⌘⇧Z</kbd></li>
+              <li className="flex justify-between"><span>Rotate selected</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">R</kbd></li>
+              <li className="flex justify-between"><span>Delete selected</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">Del</kbd></li>
+              <li className="flex justify-between"><span>Deselect</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">Esc</kbd></li>
+              <li className="flex justify-between"><span>Zoom</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">Scroll</kbd></li>
+              <li className="flex justify-between"><span>Pan canvas</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">Drag bg</kbd></li>
+            </ul>
           </div>
-          <div className="max-h-64 overflow-y-auto">
-            {getSavedProjects().length === 0 ? (
-              <div className="p-4 text-center text-surface-500 text-sm">
-                No saved projects yet
-              </div>
-            ) : (
-              getSavedProjects().map((project) => (
-                <button
-                  key={project.id}
-                  onClick={() => {
-                    // Load project and navigate
-                    window.location.href = `/studio/${project.id}`;
-                    setShowLoadMenu(false);
-                  }}
-                  className="w-full text-left px-4 py-3 hover:bg-surface-700 border-b border-surface-700/50 last:border-b-0"
-                >
-                  <div className="text-sm text-surface-200 font-medium">{project.name}</div>
-                  <div className="text-xs text-surface-500">
-                    {project.furniture?.length || 0} items • {new Date(project.timestamp).toLocaleDateString()}
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
+        )}
+      </div>
+
+      {showLogin && (
+        <LoginModal
+          title="Sign in to save your draft"
+          message="We'll attach this room, its zones, and all furniture to your account."
+          onClose={() => setShowLogin(false)}
+          onAuthed={async () => {
+            setShowLogin(false);
+            await pushDraftToServer();
+          }}
+        />
       )}
     </div>
   );
 }
 
-function ToolbarBtn({ active, children, tooltip, className = '', ...props }) {
+function ToolbarBtn({ active, children, className = '', ...props }) {
   return (
-    <TooltipButton
+    <button
       {...props}
-      tooltip={tooltip}
-      className={`shrink-0 text-xs px-3 py-1.5 rounded transition-colors font-medium ${
-        active
-          ? 'bg-blue-600 text-surface-50 shadow-sm'
-          : 'text-surface-300 hover:text-surface-100 hover:bg-surface-700'
-      } disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      className={`shrink-0 text-[10px] uppercase tracking-editorial px-3 py-1.5 rounded-full border transition
+        ${active
+          ? 'bg-ink-900 text-paper-50 border-ink-900'
+          : 'border-ink-900/20 text-ink-700 hover:border-ink-900 hover:text-ink-900'}
+        disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
     >
       {children}
-    </TooltipButton>
+    </button>
   );
 }

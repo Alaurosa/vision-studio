@@ -1,12 +1,20 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
+import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
+import { useLayoutStore } from '@/store/layoutStore';
 import AnalysisWorkflow from '@/components/upload/AnalysisWorkflow';
 import RoomEditor from '@/components/upload/RoomEditor';
 
 export default function Upload() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isGuest = !user;
+  const createDraftRoom = useLayoutStore((s) => s.createDraftRoom);
+
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [roomName, setRoomName] = useState('');
@@ -14,7 +22,8 @@ export default function Upload() {
   const [error, setError] = useState(null);
 
   // Post-analysis state for the room editor
-  const [editorData, setEditorData] = useState(null); // { room, imageUrl, parseResult }
+  // { room, imageUrl, parseResult }
+  const [editorData, setEditorData] = useState(null);
 
   const inputRef = useRef(null);
 
@@ -46,37 +55,58 @@ export default function Upload() {
 
   const onAnalysisError = (msg) => {
     setAnalyzing(false);
-    setError(msg || 'Analysis failed. Please try again.');
+    const message = msg || 'Analysis failed. Please try again.';
+    setError(message);
+    toast.error(message);
   };
 
   const onEditorConfirm = async (finalZones) => {
-    if (!editorData?.room?.id) return;
-    try {
-      const scale = editorData.parseResult?.scale_px_per_inch || 1;
-      let roomWidth = 240;
-      let roomDepth = 180;
-      let normalizedZones = finalZones;
+    if (!editorData?.room) return;
 
-      if (finalZones.length > 0) {
-        const minX = Math.min(...finalZones.map(z => z.bbox[0]));
-        const minY = Math.min(...finalZones.map(z => z.bbox[1]));
-        const maxX = Math.max(...finalZones.map(z => z.bbox[2]));
-        const maxY = Math.max(...finalZones.map(z => z.bbox[3]));
+    const scale = editorData.parseResult?.scale_px_per_inch || 1;
+    let roomWidth = 240;
+    let roomDepth = 180;
+    let normalizedZones = finalZones;
 
-        // Normalize zones to start at (0,0) so the Studio origin matches the top-left room
-        normalizedZones = finalZones.map(z => ({
-          ...z,
-          bbox: [z.bbox[0] - minX, z.bbox[1] - minY, z.bbox[2] - minX, z.bbox[3] - minY],
-          polygon: z.polygon.map(([x, y]) => [x - minX, y - minY]),
-        }));
+    if (finalZones.length > 0) {
+      const minX = Math.min(...finalZones.map(z => z.bbox[0]));
+      const minY = Math.min(...finalZones.map(z => z.bbox[1]));
+      const maxX = Math.max(...finalZones.map(z => z.bbox[2]));
+      const maxY = Math.max(...finalZones.map(z => z.bbox[3]));
 
-        roomWidth = (maxX - minX) / scale;
-        roomDepth = (maxY - minY) / scale;
-      } else if (editorData.parseResult?.boundary) {
-        roomWidth = editorData.parseResult.boundary.w / scale;
-        roomDepth = editorData.parseResult.boundary.h / scale;
+      normalizedZones = finalZones.map(z => ({
+        ...z,
+        bbox: [z.bbox[0] - minX, z.bbox[1] - minY, z.bbox[2] - minX, z.bbox[3] - minY],
+        polygon: z.polygon.map(([x, y]) => [x - minX, y - minY]),
+      }));
+
+      roomWidth = (maxX - minX) / scale;
+      roomDepth = (maxY - minY) / scale;
+    } else if (editorData.parseResult?.boundary) {
+      roomWidth = editorData.parseResult.boundary.w / scale;
+      roomDepth = editorData.parseResult.boundary.h / scale;
+    }
+
+    // --- Guest path: build a draft room entirely client-side, then enter studio.
+    if (isGuest) {
+      try {
+        const draft = createDraftRoom({
+          name: roomName || 'Untitled draft',
+          width: Math.round(roomWidth),
+          depth: Math.round(roomDepth),
+          scale_px_per_inch: scale,
+          zones: normalizedZones,
+        });
+        navigate(`/studio/${draft.id}`);
+      } catch (err) {
+        console.error('Failed to create draft room:', err);
+        setError('Could not build your draft room. Please try again.');
       }
+      return;
+    }
 
+    // --- Authed path: the server already owns the room; just save zones.
+    try {
       await api.put(`/api/rooms/${editorData.room.id}`, {
         zones: normalizedZones,
         width: Math.round(roomWidth),
@@ -85,7 +115,6 @@ export default function Upload() {
       navigate(`/studio/${editorData.room.id}`);
     } catch (err) {
       console.error('Failed to save rooms:', err);
-      // Navigate anyway – the room exists, zones just weren't saved
       navigate(`/studio/${editorData.room.id}`);
     }
   };
@@ -96,6 +125,10 @@ export default function Upload() {
 
   return (
     <div className="relative">
+      <Helmet>
+        <title>Upload Floorplan — Vision Studio</title>
+        <meta name="description" content="Upload a PNG, JPEG, or PDF floorplan. Our AI vision pipeline detects walls, segments rooms, and measures dimensions automatically." />
+      </Helmet>
       <section className="max-w-8xl mx-auto px-6 md:px-10 pt-20 pb-10">
         <p className="eyebrow mb-6">Step 01 — Intake</p>
         <h1 className="display-lg max-w-4xl">
@@ -106,6 +139,13 @@ export default function Upload() {
           walls, segments sub-rooms, and measures dimensions — so you can walk
           straight into the Studio with a real, to-scale canvas.
         </p>
+        {isGuest && (
+          <p className="text-ink-500 text-sm mt-4 max-w-2xl">
+            You're designing as a guest — no sign-in needed. When you're happy
+            with your layout, hit <span className="font-medium text-ink-900">Save to account</span> in
+            the Studio to keep it forever.
+          </p>
+        )}
       </section>
 
       <section className="max-w-8xl mx-auto px-6 md:px-10 pb-24">
@@ -202,6 +242,7 @@ export default function Upload() {
             <AnalysisWorkflow
               file={file}
               roomName={roomName || 'Untitled room'}
+              isGuest={isGuest}
               onComplete={onAnalysisComplete}
               onError={onAnalysisError}
             />

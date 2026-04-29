@@ -1,40 +1,64 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
+import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { useLayoutStore } from '@/store/layoutStore';
-
-const QUICK_ACTIONS = [
-  { label: 'Make Modern', prompt: 'Transform this room into a modern, minimalist design with clean lines and contemporary furniture' },
-  { label: 'Add Storage', prompt: 'Add practical storage solutions like bookshelves, cabinets, and organizers to maximize space' },
-  { label: 'Luxury Upgrade', prompt: 'Upgrade to luxury furniture with premium materials, elegant proportions, and sophisticated styling' },
-  { label: 'Better Flow', prompt: 'Rearrange furniture to improve traffic flow and create better pathways through the room' },
-  { label: 'Minimalist Theme', prompt: 'Simplify the design with fewer pieces, neutral colors, and clean, uncluttered aesthetics' },
-  { label: 'Cozy Reading', prompt: 'Create a comfortable reading nook with armchair, side table, and good lighting' },
-  { label: 'Entertainment Hub', prompt: 'Design around a TV/media center with comfortable seating and optimal viewing angles' },
-  { label: 'Workspace Setup', prompt: 'Set up an ergonomic home office with desk, chair, storage, and proper lighting' }
-];
+import MessageBubble from './MessageBubble';
+import StylePrompts from './StylePrompts';
 
 export default function ChatPanel() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const scrollRef = useRef(null);
+  const textareaRef = useRef(null);
   const {
-    room, chatHistory, addChatMessage, setRecommendedItems, loadRoom,
+    room, chatHistory, addChatMessage, clearChat,
+    setRecommendedItems, loadRoom,
   } = useLayoutStore();
 
+  // Auto-scroll to bottom
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [chatHistory]);
+    if (scrollRef.current) {
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+      });
+    }
+  }, [chatHistory, sending]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+    }
+  }, [input]);
 
   const send = async (msg) => {
-    if (!room?.id || !msg.trim()) return;
-    addChatMessage({ role: 'user', content: msg });
+    const text = typeof msg === 'string' ? msg : input;
+    if (!room?.id || !text.trim()) return;
+    addChatMessage({ role: 'user', content: text });
     setInput('');
     setSending(true);
     try {
       const { data } = await api.post('/api/chat/message', {
         room_id: room.id,
-        message: msg,
+        message: text,
+        // For draft rooms, send room context since the server doesn't have it
+        ...(room.id?.startsWith?.('draft-') && {
+          room_context: {
+            id: room.id,
+            name: room.name,
+            width: room.width,
+            depth: room.depth,
+            height: room.height || 96,
+            unit: room.unit || 'inches',
+            placements: useLayoutStore.getState().furniture.map(f => ({
+              id: f.id, name: f.name, category: f.category, provider: f.provider,
+              width: f.width, depth: f.depth, height: f.height,
+              x_inches: f.x_inches, y_inches: f.y_inches, rotation: f.rotation,
+            })),
+          },
+        }),
       });
       addChatMessage({
         role: 'assistant',
@@ -42,114 +66,273 @@ export default function ChatPanel() {
         actions: data.actions || [],
       });
 
-      // Pick up any suggestions from suggest_furniture or furnish_room into the sidebar
+      // Pick up catalog suggestions
       const suggestions = (data.actions || [])
         .filter((a) => ['suggest_furniture', 'furnish_room'].includes(a.function))
         .flatMap((a) => a.result?.suggestions || []);
       if (suggestions.length) setRecommendedItems(suggestions);
 
-      // If the agent mutated layout, refresh from server
-      const mutates = ['move_furniture', 'rotate_furniture', 'add_furniture',
-        'remove_furniture', 'arrange_room', 'swap_furniture', 'furnish_room'];
-      const didMutate = (data.actions || []).some((a) => mutates.includes(a.function));
-      if (didMutate) await loadRoom(room.id);
+      // Apply mutations to the room
+      const mutatingTools = ['move_furniture', 'rotate_furniture', 'add_furniture',
+        'remove_furniture', 'arrange_room', 'swap_furniture', 'furnish_room', 'clear_room'];
+      const didMutate = (data.actions || []).some((a) => mutatingTools.includes(a.function) && a.result?.success);
+
+      if (didMutate) {
+        const isDraft = room.id?.startsWith?.('draft-');
+        if (isDraft) {
+          // Draft rooms: apply mutations locally from action results
+          const store = useLayoutStore.getState();
+          for (const action of (data.actions || [])) {
+            const r = action.result;
+            if (!r?.success) continue;
+            switch (action.function) {
+              case 'add_furniture': {
+                const added = r.added_item;
+                if (added) {
+                  store.addFurniture({
+                    name: added.name, category: added.category, provider: added.provider,
+                    width: added.width, depth: added.depth, height: added.height,
+                    x_inches: added.x_inches || 12, y_inches: added.y_inches || 12,
+                    rotation: added.rotation || 0, color: added.color || '#d4a27a',
+                    image_url: added.image_url, model_url: added.model_url,
+                    _animDelay: 300,
+                  });
+                }
+                break;
+              }
+              case 'move_furniture':
+              case 'rotate_furniture': {
+                // Find the item by name and update it
+                const name = action.args?.furniture_name?.toLowerCase();
+                if (name) {
+                  const match = store.furniture.find(f => f.name?.toLowerCase().includes(name));
+                  if (match) {
+                    const patch = {};
+                    if (action.args.x_inches != null) patch.x_inches = action.args.x_inches;
+                    if (action.args.y_inches != null) patch.y_inches = action.args.y_inches;
+                    if (action.args.rotation != null) patch.rotation = action.args.rotation;
+                    store.updateFurniture(match.id, patch);
+                  }
+                }
+                break;
+              }
+              case 'remove_furniture': {
+                const name = action.args?.furniture_name?.toLowerCase();
+                if (name) {
+                  const match = store.furniture.find(f => f.name?.toLowerCase().includes(name));
+                  if (match) store.removeFurniture(match.id);
+                }
+                break;
+              }
+              case 'clear_room':
+                // Remove all furniture
+                for (const f of [...store.furniture]) store.removeFurniture(f.id);
+                break;
+              case 'swap_furniture': {
+                const removedName = r.removed_name?.toLowerCase();
+                if (removedName) {
+                  const match = store.furniture.find(f => f.name?.toLowerCase().includes(removedName));
+                  if (match) store.removeFurniture(match.id);
+                }
+                const added = r.added_item;
+                if (added) {
+                  store.addFurniture({
+                    name: added.name, category: added.category, provider: added.provider,
+                    width: added.width, depth: added.depth, height: added.height,
+                    x_inches: added.x_inches || 12, y_inches: added.y_inches || 12,
+                    rotation: added.rotation || 0, color: added.color || '#d4a27a',
+                    image_url: added.image_url, model_url: added.model_url,
+                    _animDelay: 300,
+                  });
+                }
+                break;
+              }
+              case 'furnish_room': {
+                const items = r.suggestions || [];
+                items.forEach((item, idx) => {
+                  store.addFurniture({
+                    name: item.name, category: item.category, provider: item.provider,
+                    width: item.width, depth: item.depth, height: item.height,
+                    x_inches: 12, y_inches: 12, rotation: 0, color: '#d4a27a',
+                    image_url: item.image_url, model_url: item.model_url,
+                    _animDelay: 400 + idx * 500,
+                  });
+                });
+                break;
+              }
+            }
+          }
+          // For furnish_room / arrange_room, re-fetch arranged positions
+          const hasArrange = (data.actions || []).some(a =>
+            ['arrange_room', 'furnish_room'].includes(a.function) && a.result?.success);
+          if (hasArrange) {
+            // The server arranged in the fallback store; we need to get those positions
+            // Send a follow-up auto-place request with current state
+            try {
+              const currentFurniture = useLayoutStore.getState().furniture;
+              if (currentFurniture.length > 0) {
+                const { data: arranged } = await api.post('/api/layout/auto-place', {
+                  room_id: room.id,
+                  room_context: { id: room.id, name: room.name, width: room.width, depth: room.depth },
+                  placements_context: currentFurniture.map(f => ({
+                    id: f.id, name: f.name, category: f.category, width: f.width,
+                    depth: f.depth, height: f.height, x_inches: f.x_inches,
+                    y_inches: f.y_inches, rotation: f.rotation,
+                  })),
+                });
+                for (const u of (arranged.placements || [])) {
+                  const match = useLayoutStore.getState().furniture.find(f => f.name === u.name);
+                  if (match) {
+                    useLayoutStore.getState().updateFurniture(match.id, {
+                      x_inches: u.x_inches, y_inches: u.y_inches, rotation: u.rotation,
+                    });
+                  }
+                }
+              }
+            } catch { /* auto-arrange is best-effort */ }
+          }
+        } else {
+          // Server-side rooms: just reload from DB
+          await loadRoom(room.id);
+        }
+      }
     } catch (e) {
-      addChatMessage({ role: 'assistant', content: `Error: ${e?.response?.data?.error || e.message}` });
+      addChatMessage({
+        role: 'assistant',
+        content: `Something went wrong: ${e?.response?.data?.error || e.message}`,
+      });
     } finally {
       setSending(false);
     }
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      send(input);
+    }
+    // Plain Enter without shift sends, Shift+Enter adds newline
+    if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      send(input);
+    }
+  };
+
+  const handleClear = () => {
+    clearChat();
+    toast.success('Conversation cleared');
+  };
+
+  const charCount = input.length;
+  const hasMessages = chatHistory.length > 0;
+
   return (
     <>
-      <div className="p-5 border-b border-surface-700">
-        <div className="eyebrow text-surface-300 mb-2">Command Assistant</div>
-        <div className="font-display text-lg text-surface-100">Transform your space</div>
-        <p className="text-xs text-surface-400 mt-2 leading-relaxed">
-          Tell me what you want to change — I'll suggest furniture, rearrange pieces, and optimize your layout.
+      {/* Header */}
+      <div className="p-5 border-b border-ink-900/10">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-sienna-400 to-sienna-600 grid place-items-center shadow-sm">
+              <span className="text-xs text-paper-50 font-bold">V</span>
+            </div>
+            <div>
+              <div className="font-display text-base leading-tight">Studio Assistant</div>
+              <div className="text-[10px] uppercase tracking-editorial text-ink-500 mt-0.5">
+                {sending ? 'Thinking…' : 'Online'}
+              </div>
+            </div>
+          </div>
+          {hasMessages && (
+            <button
+              onClick={handleClear}
+              className="text-[10px] uppercase tracking-editorial text-ink-500 hover:text-ink-900 transition px-2 py-1 rounded hover:bg-ink-900/5"
+              title="Clear conversation"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-ink-500 leading-relaxed mt-2">
+          Describe your room goals, style preferences, or ask to move, add, and arrange furniture — all by chatting.
         </p>
       </div>
 
+      {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-4">
-        {chatHistory.length === 0 && (
-          <div className="space-y-3">
-            <div className="eyebrow text-surface-400 mb-3">Quick Commands</div>
-            <div className="grid grid-cols-1 gap-2">
-              {QUICK_ACTIONS.map((action) => (
-                <button
-                  key={action.label}
-                  onClick={() => send(action.prompt)}
-                  className="w-full text-left text-sm border border-surface-600 bg-surface-700 hover:bg-blue-600 hover:border-blue-600 text-surface-200 hover:text-white px-4 py-3 rounded-lg transition-all duration-200 hover:shadow-lg"
-                >
-                  <div className="font-medium">{action.label}</div>
-                  <div className="text-xs opacity-75 mt-1">{action.prompt.slice(0, 60)}...</div>
-                </button>
-              ))}
-            </div>
-            <div className="text-xs text-surface-500 text-center mt-4">
-              Or type your own command below
-            </div>
-          </div>
+        {!hasMessages && (
+          <StylePrompts onSend={send} compact />
         )}
         <AnimatePresence initial={false}>
-          {chatHistory.map((m) => (
-            <motion.div
+          {chatHistory.map((m, i) => (
+            <MessageBubble
               key={m.id}
-              initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-              className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}
-            >
-              <div
-                className={`max-w-[85%] px-4 py-3 rounded-lg text-sm leading-relaxed whitespace-pre-wrap ${
-                  m.role === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-surface-700 text-surface-100 border border-surface-600'
-                }`}
-              >
-                {m.content}
-                {!!m.actions?.length && (
-                  <div className="mt-2 text-[10px] uppercase tracking-editorial opacity-70 text-surface-400">
-                    {m.actions.length} action{m.actions.length > 1 ? 's' : ''} taken
-                  </div>
-                )}
-              </div>
-            </motion.div>
+              message={m}
+              isLast={i === chatHistory.length - 1}
+            />
           ))}
         </AnimatePresence>
+
+        {/* Typing indicator */}
         {sending && (
           <div className="flex justify-start">
-            <div className="bg-surface-700 border border-surface-600 px-4 py-3 rounded-lg text-sm text-surface-300 flex items-center gap-1.5">
-              <div className="flex gap-1">
-                <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDuration: '0.6s' }} />
-                <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDuration: '0.6s', animationDelay: '0.15s' }} />
-                <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDuration: '0.6s', animationDelay: '0.3s' }} />
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 rounded-full bg-gradient-to-br from-sienna-400 to-sienna-600 grid place-items-center shrink-0">
+                <span className="text-[10px] text-paper-50 font-bold">V</span>
               </div>
-              <span>Working...</span>
+              <div className="bg-paper-100 border border-ink-900/10 px-4 py-3 rounded-2xl rounded-bl-md flex items-center gap-1.5">
+                <span className="typing-dot" style={{ animationDelay: '0ms' }} />
+                <span className="typing-dot" style={{ animationDelay: '150ms' }} />
+                <span className="typing-dot" style={{ animationDelay: '300ms' }} />
+              </div>
             </div>
           </div>
         )}
       </div>
 
-      <form
-        onSubmit={(e) => { e.preventDefault(); send(input); }}
-        className="p-4 border-t border-surface-700 bg-surface-800"
-      >
-        <div className="flex items-center gap-2">
-          <input
-            className="input-field flex-1 bg-surface-700 border border-surface-600 text-surface-100 placeholder-surface-400 focus:ring-blue-500"
-            placeholder={room ? 'Type a command (e.g., "add a dining table")…' : 'Select a room first'}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            disabled={!room || sending}
-          />
+      {/* Input area */}
+      <div className="border-t border-ink-900/10 bg-paper-50 p-4">
+        <div className="flex items-end gap-2">
+          <div className="flex-1 relative">
+            <textarea
+              ref={textareaRef}
+              className="w-full bg-paper-100 border border-ink-900/10 rounded-xl px-4 py-3 pr-12 text-sm text-ink-900 placeholder:text-ink-400 resize-none focus:outline-none focus:border-ink-900/30 focus:ring-1 focus:ring-ink-900/10 transition min-h-[44px] max-h-[120px]"
+              placeholder={room ? 'Describe your room goals…' : 'Select a room first'}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={!room || sending}
+              rows={1}
+              id="chat-input"
+            />
+            {charCount > 0 && (
+              <span className="absolute right-3 bottom-2 text-[10px] text-ink-400">
+                {charCount}
+              </span>
+            )}
+          </div>
           <button
-            type="submit"
+            type="button"
+            onClick={() => send(input)}
             disabled={!input.trim() || !room || sending}
-            className="btn-ink text-[10px] px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="shrink-0 w-11 h-11 rounded-xl bg-ink-900 text-paper-50 grid place-items-center transition hover:bg-ink-700 disabled:opacity-30 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-sienna-500"
+            aria-label="Send message"
+            id="chat-send-button"
           >
-            {sending ? '...' : 'Send'}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
           </button>
         </div>
-      </form>
+        <div className="flex items-center justify-between mt-2 px-1">
+          <span className="text-[10px] text-ink-400">
+            {room ? `Room: ${room.name}` : 'No room selected'}
+          </span>
+          <span className="text-[10px] text-ink-400 hidden sm:inline">
+            Enter to send · Shift+Enter for new line
+          </span>
+        </div>
+      </div>
     </>
   );
 }

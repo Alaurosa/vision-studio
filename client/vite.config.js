@@ -19,4 +19,19 @@ export default defineConfig({
       '/uploads': { target: 'http://localhost:3001', changeOrigin: true },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Split vendor libraries into separate chunks for better caching
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-konva': ['konva', 'react-konva'],
+          'vendor-three': ['three', '@react-three/fiber', '@react-three/drei'],
+          'vendor-motion': ['framer-motion'],
+          'vendor-supabase': ['@supabase/supabase-js'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 600,
+  },
 });

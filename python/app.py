@@ -10,7 +10,6 @@ load_dotenv()                                                  # python/.env (ov
 
 from services.floorplan_parser import parse_floorplan
 from services.object_recognition import detect_objects, segment_room
-from services.scale_estimator import estimate_scale_from_image
 
 app = FastAPI(title="Vision Studio AI Service", version="1.0.0")
 
@@ -61,10 +60,4 @@ async def segment_room_endpoint(
 
     bbox_list = json.loads(bboxes)
     result = await segment_room(image_url, bbox_list)
-    return result
-
-
-@app.post("/estimate-scale")
-async def estimate_scale_endpoint(image_url: str = Form(...)):
-    result = await estimate_scale_from_image(image_url)
     return result

@@ -339,6 +339,7 @@ All tables use Row Level Security — users can only access their own data. The 
 
 - Warm neutral editorial theme: `bg-paper-50` (#faf7f1), `text-ink-900` (#100f0d)
 - Sienna accent: `sienna-500: #9c6a3f`
+- Shared `surface-*` palette is harmonized to the same warm editorial family as Home/Hero so Studio/Chat/Auth pages match the brand tone
 - Fraunces serif display (`font-display`), Inter sans-serif body (`font-sans`) from Google Fonts
 - Cards: `.panel` → `bg-paper-100/70 border border-ink-900/10 backdrop-blur rounded-lg`
 - Buttons: `.btn-ink` (solid dark), `.btn-ghost` (outline), `.btn-sienna` (accent)

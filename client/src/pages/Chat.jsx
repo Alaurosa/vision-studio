@@ -193,21 +193,21 @@ export default function Chat() {
         <meta name="description" content="Chat with Vision Studio's AI to get furniture recommendations, layout optimization, and design advice." />
       </Helmet>
 
-      <div className="h-[calc(100vh-4rem)] flex bg-paper-50">
+      <div className="h-[calc(100vh-4rem)] flex bg-[#f6f3ee] text-[#171717]">
         {/* Editor panel — only visible when minimized */}
         <AnimatePresence>
           {minimized && room && (
             <motion.div initial={{ width: 0, opacity: 0 }} animate={{ width: '55%', opacity: 1 }} exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }} className="border-r border-ink-900/10 overflow-hidden">
+              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }} className="overflow-hidden border-r border-[rgba(0,0,0,0.08)]">
               <div className="h-full flex flex-col">
-                <div className="h-12 border-b border-ink-900/10 flex items-center px-4 gap-3 shrink-0 bg-paper-50">
+                <div className="h-12 border-b border-[rgba(0,0,0,0.08)] flex items-center px-4 gap-3 shrink-0 bg-[#eef4f7]">
                   <span className="eyebrow text-ink-500">{room.name}</span>
                   <div className="flex-1" />
                   <button onClick={() => navigate(`/studio/${room.id}`)} className="text-[10px] uppercase tracking-editorial text-ink-500 hover:text-ink-900 transition">
                     Open Studio →
                   </button>
                 </div>
-                <div className="flex-1 bg-paper-100 grid place-items-center">
+                <div className="flex-1 bg-[#f8f8f6] grid place-items-center">
                   <div className="text-center p-8">
                     <div className="text-6xl mb-4 opacity-20">📐</div>
                     <p className="text-ink-500 text-sm">Room: {room.width ? `${Math.round(room.width/12)}' × ${Math.round(room.depth/12)}'` : 'Unsized'}</p>
@@ -225,14 +225,15 @@ export default function Chat() {
         {/* Chat panel */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Header */}
-          <div className="h-14 border-b border-ink-900/10 flex items-center justify-between px-6 bg-paper-50 shrink-0">
+          <div className="h-14 border-b border-[rgba(0,0,0,0.08)] flex items-center justify-between px-6 bg-[#eef4f7] shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-sienna-400 to-sienna-600 grid place-items-center shadow-sm">
                 <span className="text-sm text-paper-50 font-bold">V</span>
               </div>
               <div>
-                <div className="font-display text-base leading-tight">AI Design Assistant</div>
-                <div className="text-[10px] uppercase tracking-editorial text-ink-500 flex items-center gap-1.5">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.3em] text-vs-accent mb-0.5">Design Conversation</div>
+                <div className="font-display text-base leading-tight text-[#171717]">Design Assistant</div>
+                <div className="text-[10px] uppercase tracking-editorial text-[#5b5b5b] flex items-center gap-1.5">
                   <span className={`w-1.5 h-1.5 rounded-full ${sending ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
                   {sending ? 'Thinking…' : room ? room.name : 'No room selected'}
                 </div>
@@ -242,20 +243,20 @@ export default function Chat() {
               {/* Room selector */}
               {(rooms.length > 0 || room) && (
                 <select value={selectedRoomId || room?.id || ''} onChange={(e) => { setSelectedRoomId(e.target.value); clearChat(); }}
-                  className="text-[11px] bg-paper-100 border border-ink-900/10 rounded-lg px-3 py-1.5 text-ink-900 focus:outline-none max-w-[160px]">
+                  className="text-[11px] bg-[#f8f8f6] border border-[rgba(0,0,0,0.08)] rounded-lg px-3 py-1.5 text-[#171717] focus:outline-none max-w-[160px]">
                   {room?.id?.startsWith('draft-') && <option value={room.id}>{room.name} (draft)</option>}
                   {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
               )}
               {room && (
                 <button onClick={() => setMinimized(!minimized)}
-                  className="text-[10px] uppercase tracking-editorial px-3 py-1.5 rounded-full border border-ink-900/15 text-ink-600 hover:border-ink-900 hover:text-ink-900 transition hidden md:inline-flex">
+                  className="text-[10px] uppercase tracking-editorial px-3 py-1.5 rounded-full border border-[rgba(0,0,0,0.08)] text-[#5b5b5b] hover:border-[#004aad]/45 hover:text-[#171717] transition hidden md:inline-flex">
                   {minimized ? 'Full Chat' : 'Show Editor'}
                 </button>
               )}
               {hasMessages && (
                 <button onClick={() => { clearChat(); toast.success('Cleared'); }}
-                  className="text-[10px] uppercase tracking-editorial text-ink-500 hover:text-ink-900 transition px-2 py-1.5 rounded hover:bg-ink-900/5">
+                  className="text-[10px] uppercase tracking-editorial text-[#5b5b5b] hover:text-[#171717] transition px-2 py-1.5 rounded hover:bg-[#eef4f7]">
                   Clear
                 </button>
               )}
@@ -271,9 +272,10 @@ export default function Chat() {
                   <div className="w-14 h-14 mx-auto mb-5 rounded-2xl bg-gradient-to-br from-sienna-400 to-sienna-600 grid place-items-center shadow-lg">
                     <span className="text-xl text-paper-50 font-display">V</span>
                   </div>
-                  <h2 className="display-md mb-2">How can I help design your space?</h2>
-                  <p className="text-ink-500 max-w-md mx-auto text-sm mb-8">
-                    I can furnish rooms, recommend furniture, arrange layouts, estimate budgets, and give design advice.
+                  <h2 className="display-md mb-2">Describe the room you want to shape.</h2>
+                  <p className="text-[#2d2d2d] max-w-2xl mx-auto text-sm mb-8 leading-relaxed">
+                    Ask for layout changes, furniture suggestions, style direction, budget-aware options, or
+                    spatial feedback tied to the selected room.
                   </p>
 
                   {/* Style chips */}
@@ -282,7 +284,7 @@ export default function Chat() {
                     <div className="flex flex-wrap justify-center gap-2">
                       {STYLE_CHIPS.map(s => (
                         <button key={s} onClick={() => send(`I prefer a ${s.toLowerCase()} style. Keep this in mind for all suggestions.`)}
-                          className="text-[10px] uppercase tracking-editorial rounded-full px-3.5 py-1.5 border border-ink-900/12 text-ink-600 hover:border-sienna-500 hover:text-sienna-600 hover:bg-sienna-500/5 transition">
+                          className="text-[10px] uppercase tracking-editorial rounded-full px-3.5 py-1.5 border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] text-[#5b5b5b] hover:border-[#004aad]/45 hover:text-[#171717] hover:bg-[#eef4f7] transition">
                           {s}
                         </button>
                       ))}
@@ -293,9 +295,9 @@ export default function Chat() {
                   <div className={`grid gap-2.5 ${minimized ? 'grid-cols-2' : 'grid-cols-2 md:grid-cols-4'}`}>
                     {QUICK_PROMPTS.map(p => (
                       <button key={p.text} onClick={() => send(p.text)}
-                        className="text-left p-3.5 rounded-xl border border-ink-900/8 hover:border-ink-900/25 hover:shadow-sm transition-all group">
+                        className="text-left p-3.5 rounded-xl border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] hover:bg-[#eef4f7] hover:border-[#004aad]/35 hover:shadow-sm transition-all group">
                         <span className="text-base mb-1.5 block">{p.icon}</span>
-                        <span className="text-xs text-ink-600 group-hover:text-ink-900 transition leading-snug">{p.text}</span>
+                        <span className="text-xs text-[#5b5b5b] group-hover:text-[#171717] transition leading-snug">{p.text}</span>
                       </button>
                     ))}
                   </div>
@@ -313,7 +315,7 @@ export default function Chat() {
                   <div className="w-6 h-6 rounded-full bg-gradient-to-br from-sienna-400 to-sienna-600 grid place-items-center shrink-0">
                     <span className="text-[9px] text-paper-50 font-bold">V</span>
                   </div>
-                  <div className="bg-paper-100 border border-ink-900/10 px-4 py-3 rounded-2xl rounded-bl-md flex items-center gap-1.5">
+                  <div className="bg-[#f8f8f6] border border-[rgba(0,0,0,0.08)] px-4 py-3 rounded-2xl rounded-bl-md flex items-center gap-1.5">
                     <span className="typing-dot" style={{ animationDelay: '0ms' }} />
                     <span className="typing-dot" style={{ animationDelay: '150ms' }} />
                     <span className="typing-dot" style={{ animationDelay: '300ms' }} />
@@ -324,12 +326,12 @@ export default function Chat() {
           </div>
 
           {/* Input area */}
-          <div className="border-t border-ink-900/10 bg-paper-50 shrink-0">
+          <div className="border-t border-[rgba(0,0,0,0.08)] bg-[#eef4f7] shrink-0">
             <div className={`mx-auto px-6 py-4 ${minimized ? 'max-w-2xl' : 'max-w-3xl'}`}>
               <div className="flex items-end gap-3">
                 <div className="flex-1 relative">
                   <textarea ref={textareaRef}
-                    className="w-full bg-paper-100 border border-ink-900/10 rounded-2xl px-5 py-3.5 pr-14 text-sm text-ink-900 placeholder:text-ink-400 resize-none focus:outline-none focus:border-ink-900/25 focus:ring-2 focus:ring-ink-900/5 transition min-h-[52px] max-h-[160px]"
+                    className="w-full bg-[#f8f8f6] border border-[rgba(0,0,0,0.08)] rounded-2xl px-5 py-3.5 pr-14 text-sm text-[#171717] placeholder:text-[#5b5b5b] resize-none focus:outline-none focus:border-[#004aad]/45 focus:ring-2 focus:ring-[#004aad]/15 transition min-h-[52px] max-h-[160px]"
                     placeholder={room ? 'Describe your room goals, ask for furniture, or request a layout change…' : 'Select a room to start…'}
                     value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
                     disabled={!room || sending} rows={1} />

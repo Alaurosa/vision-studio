@@ -309,14 +309,17 @@ export default function Studio() {
         <Helmet>
           <title>Studio — Vision Studio</title>
         </Helmet>
-        <div className="max-w-8xl mx-auto px-6 md:px-10 py-20">
-          <p className="eyebrow mb-4">Studio</p>
+        <div className="mx-auto max-w-7xl bg-[#f6f3ee] px-6 py-20 text-[#171717] md:px-8">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-vs-accent mb-4">Studio</p>
           <div className="flex flex-wrap items-end justify-between gap-6 mb-12">
             <h1 className="display-lg max-w-3xl">
               {guest ? 'Start designing in seconds.' : 'Your rooms in progress.'}
             </h1>
             <button className="btn-ink" onClick={() => setShowSetup(true)}>+ New Room</button>
           </div>
+          <p className="mb-10 max-w-3xl text-sm leading-relaxed text-[#2d2d2d]">
+            Open a room study, continue refining a layout, or begin a new spatial concept.
+          </p>
 
           {/* Guest: show any in-progress draft prominently */}
           {guest && draftRoom && (
@@ -343,7 +346,7 @@ export default function Studio() {
           {/* Guest: no draft yet → show templates + upload CTA */}
           {guest && !draftRoom && (
             <div>
-              <p className="text-ink-500 mb-8 max-w-lg leading-relaxed">
+              <p className="mb-8 max-w-lg leading-relaxed text-[#5b5b5b]">
                 No sign-in required. Pick a template to start from scratch, or upload a floorplan to design your real space.
                 Save to your account whenever you're ready.
               </p>
@@ -352,13 +355,14 @@ export default function Studio() {
                   <button
                     key={t.id}
                     onClick={() => createAndEnter({ name: t.name, width: t.width, depth: t.depth, height: t.height })}
-                    className="text-left panel p-8 hover:border-ink-900 transition group"
+                    className="group text-left rounded-[20px] border border-[rgba(0,0,0,0.08)] bg-[#eef4f7] p-8 shadow-[0_14px_34px_rgba(4,12,46,0.05)] transition hover:bg-[#f8f8f6] hover:border-[#004aad]/35"
                   >
-                    <div className="eyebrow mb-6 text-ink-500">Template</div>
-                    <div className="display-md mb-3">{t.name}</div>
-                    <div className="text-sm text-ink-500">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.26em] text-vs-accent mb-6">Template</div>
+                    <div className="display-md mb-3 text-[#171717]">{t.name}</div>
+                    <div className="text-sm text-[#5b5b5b]">
                       {inchesToFeet(t.width)} × {inchesToFeet(t.depth)}
                     </div>
+                    <div className="mt-5 text-[11px] font-semibold uppercase tracking-[0.2em] text-vs-dark/58">Open study</div>
                   </button>
                 ))}
               </div>
@@ -395,19 +399,20 @@ export default function Studio() {
                     Pick a template below to get started, or create a custom room with your own dimensions.
                   </p>
                 </div>
-                <p className="eyebrow mb-4">Quick Start Templates</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-vs-accent mb-4">Quick Start Templates</p>
                 <div className="grid md:grid-cols-3 gap-6">
                   {ROOM_TEMPLATES.map((t) => (
                     <button
                       key={t.id}
                       onClick={() => createAndEnter({ name: t.name, width: t.width, depth: t.depth, height: t.height })}
-                      className="text-left panel p-8 hover:border-ink-900 transition group"
+                      className="group text-left rounded-[20px] border border-[rgba(0,0,0,0.08)] bg-[#eef4f7] p-8 shadow-[0_14px_34px_rgba(4,12,46,0.05)] transition hover:bg-[#f8f8f6] hover:border-[#004aad]/35"
                     >
-                      <div className="eyebrow mb-6 text-ink-500">Template</div>
-                      <div className="display-md mb-3">{t.name}</div>
-                      <div className="text-sm text-ink-500">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.26em] text-vs-accent mb-6">Template</div>
+                      <div className="display-md mb-3 text-[#171717]">{t.name}</div>
+                      <div className="text-sm text-[#5b5b5b]">
                         {inchesToFeet(t.width)} × {inchesToFeet(t.depth)}
                       </div>
+                      <div className="mt-5 text-[11px] font-semibold uppercase tracking-[0.2em] text-vs-dark/58">Open study</div>
                     </button>
                   ))}
                 </div>
@@ -418,14 +423,17 @@ export default function Studio() {
                   <button
                     key={r.id}
                     onClick={() => openRoom(r.id)}
-                    className="text-left panel p-8 hover:border-ink-900 transition group relative"
+                    className="group relative text-left rounded-[22px] border border-[rgba(0,0,0,0.08)] bg-[#eef4f7] p-8 shadow-[0_16px_34px_rgba(4,12,46,0.06)] transition hover:bg-[#f8f8f6] hover:border-[#004aad]/35"
                   >
-                    <div className="eyebrow mb-6 text-ink-500">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.24em] mb-6 text-vs-dark/62">
                       {r.placements?.length || 0} item{(r.placements?.length || 0) !== 1 ? 's' : ''}
                     </div>
-                    <div className="display-md mb-3">{r.name}</div>
-                    <div className="text-sm text-ink-500">
+                    <div className="display-md mb-3 text-[#171717]">{r.name}</div>
+                    <div className="text-sm text-[#5b5b5b]">
                       {r.width ? `${inchesToFeet(r.width)} × ${inchesToFeet(r.depth)}` : 'Unsized'}
+                    </div>
+                    <div className="mt-6 text-[11px] font-semibold uppercase tracking-[0.2em] text-vs-accent/90">
+                      Open study
                     </div>
                     <button
                       onClick={(e) => {
@@ -445,6 +453,11 @@ export default function Studio() {
 
           {waitingForAuth && (
             <div className="text-ink-500 eyebrow">Loading…</div>
+          )}
+          {!waitingForAuth && (
+            <p className="mt-14 text-xs uppercase tracking-[0.2em] text-vs-dark/52">
+              Each room stores layout geometry, furniture placement, and design context.
+            </p>
           )}
 
           {showSetup && (
@@ -485,14 +498,14 @@ export default function Studio() {
       <Helmet>
         <title>{room.name || 'Untitled'} — Vision Studio</title>
       </Helmet>
-      <div className="h-[calc(100vh-4rem)] flex flex-col bg-paper-100">
+      <div className="h-[calc(100vh-4rem)] flex flex-col bg-[#f6f3ee]">
         <StudioToolbar onToggleCatalog={() => setCatalogOpen(!catalogOpen)} catalogOpen={catalogOpen}
           chatFullscreen={chatFullscreen} onToggleChatFullscreen={() => setChatFullscreen(f => !f)} />
         <div className="flex-1 flex overflow-hidden relative">
 
           {/* Fullscreen chat overlay — shown by default, hides when AI places furniture */}
           {chatFullscreen && (
-            <div className="absolute inset-0 z-30 bg-paper-50 flex flex-col">
+            <div className="absolute inset-0 z-30 bg-[#f6f3ee] flex flex-col">
               <FullscreenChat room={room} onMinimize={() => setChatFullscreen(false)} />
             </div>
           )}
@@ -501,7 +514,7 @@ export default function Studio() {
           <aside className={`
             ${catalogOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
             fixed md:relative z-20 md:z-auto inset-y-0 left-0
-            w-[320px] border-r border-ink-900/10 bg-paper-50 overflow-y-auto
+            w-[320px] border-r border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] overflow-y-auto
             transition-transform duration-300 md:transition-none
             top-[calc(4rem+3.5rem)] md:top-0 h-[calc(100vh-4rem-3.5rem)] md:h-auto
           `}>
@@ -531,7 +544,7 @@ export default function Studio() {
             {isChatOpen && !chatFullscreen && (
               <motion.aside initial={{ width: 0, opacity: 0 }} animate={{ width: 360, opacity: 1 }}
                 exit={{ width: 0, opacity: 0 }} transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-                className="hidden md:flex border-l border-ink-900/10 bg-paper-50 overflow-hidden flex-col">
+                className="hidden md:flex border-l border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] overflow-hidden flex-col">
                 <ChatPanel />
               </motion.aside>
             )}
@@ -543,7 +556,7 @@ export default function Studio() {
           {isChatOpen && !chatFullscreen && (
             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-              className="md:hidden fixed inset-x-0 bottom-0 top-16 z-40 bg-paper-50 flex flex-col border-t border-ink-900/10">
+              className="md:hidden fixed inset-x-0 bottom-0 top-16 z-40 bg-[#f8f8f6] flex flex-col border-t border-[rgba(0,0,0,0.08)]">
               <ChatPanel />
             </motion.div>
           )}

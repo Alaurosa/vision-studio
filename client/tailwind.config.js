@@ -33,18 +33,18 @@ export default {
           accent: '#004aad',
           warm: '#f8f8f6',
         },
-        // Neutral surface palette (dark mode primary)
+        // Neutral surface palette aligned to home/hero editorial theme
         surface: {
-          900: '#0a0a0a',  // Modal backdrops, deepest
-          800: '#121212',  // Main background
-          700: '#1a1a1a',  // Secondary panels, cards
-          600: '#242424',  // Tertiary, hover states
-          500: '#333333',  // Interactive hover, borders
-          400: '#505050',  // Disabled text
-          300: '#787878',  // Secondary text
-          200: '#a0a0a0',  // Tertiary text, muted
-          100: '#d4d4d4',  // Primary text (light)
-          50:  '#ffffff',  // White, highest contrast
+          900: '#e6edf3',  // Deepest surface tint (still light)
+          800: '#f7f5f1',  // Main background
+          700: '#f0ece5',  // Secondary panels/cards
+          600: '#ddd5c9',  // Borders and dividers
+          500: '#c9beaf',  // Interactive hover, subtle strokes
+          400: '#8a7f73',  // Muted text
+          300: '#6d6358',  // Secondary text
+          200: '#4d463e',  // High-contrast body text
+          100: '#100f0d',  // Primary text
+          50: '#0a0908',   // Strongest text
         },
         // Brand blue (Vision Studio signature)
         blue: {

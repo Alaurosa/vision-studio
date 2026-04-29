@@ -225,7 +225,7 @@ export default function Studio() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const {
-    room, loadRoom, viewMode, isChatOpen, createRoom, createDraftRoom, clearDraft,
+    room, loadRoom, viewMode, isChatOpen, createRoom, createDraftRoom, clearDraft, clearChat,
   } = useLayoutStore();
   const [showSetup, setShowSetup] = useState(false);
   const [rooms, setRooms] = useState([]);
@@ -240,6 +240,8 @@ export default function Studio() {
   // Load the requested room, or show a dashboard/setup UI
   useEffect(() => {
     if (roomId) {
+      // Room-scoped chat: reset visible thread when switching rooms
+      clearChat();
       loadRoom(roomId);
     } else if (user) {
       fetchRooms();

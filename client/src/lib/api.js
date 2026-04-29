@@ -5,8 +5,14 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001',
 });
 
-// Attach Supabase JWT to every outgoing request (if signed in)
+// Attach auth token to every outgoing request
 api.interceptors.request.use(async (config) => {
+  // Check for fallback test session first
+  const testToken = localStorage.getItem('vs_test_session');
+  if (testToken) {
+    config.headers.Authorization = `Bearer ${testToken}`;
+    return config;
+  }
   try {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;

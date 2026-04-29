@@ -22,14 +22,21 @@ const supabase = (supabaseUrl && supabaseKey)
   : null;
 
 export async function requireAuth(req, res, next) {
-  if (!supabase) {
-    return res.status(401).json({ error: 'Supabase is not configured on the server.' });
-  }
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Missing auth token' });
   }
   const token = authHeader.split(' ')[1];
+
+  // Fallback test account
+  if (token === TEST_TOKEN) {
+    req.user = TEST_USER;
+    return next();
+  }
+
+  if (!supabase) {
+    return res.status(401).json({ error: 'Supabase is not configured on the server.' });
+  }
 
   try {
     const { data, error } = await supabase.auth.getUser(token);
@@ -47,17 +54,30 @@ export async function requireAuth(req, res, next) {
  * Like requireAuth but allows unauthenticated requests through with a guest user.
  * Sets req.user to a guest stub if no valid token is provided.
  */
+const TEST_TOKEN = 'vs-test-token-001';
+const TEST_USER = { id: 'test-user-001', email: 'test@visionstudio.dev' };
+
 export async function optionalAuth(req, res, next) {
   const authHeader = req.headers.authorization;
-  if (supabase && authHeader?.startsWith('Bearer ')) {
-    try {
-      const token = authHeader.split(' ')[1];
-      const { data, error } = await supabase.auth.getUser(token);
-      if (!error && data.user) {
-        req.user = data.user;
-        return next();
-      }
-    } catch { /* fall through to guest */ }
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+
+    // Fallback test account
+    if (token === TEST_TOKEN) {
+      req.user = TEST_USER;
+      return next();
+    }
+
+    // Supabase auth
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.auth.getUser(token);
+        if (!error && data.user) {
+          req.user = data.user;
+          return next();
+        }
+      } catch { /* fall through to guest */ }
+    }
   }
   // Guest fallback
   req.user = { id: 'guest', email: 'guest' };

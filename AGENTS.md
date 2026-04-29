@@ -8,7 +8,7 @@
 
 ### Current Phase
 
-Full-stack implementation — monorepo with React client, Express server, and FastAPI Python AI microservice. Supabase for auth, database, and storage. Production-hardened with code-splitting, error boundaries, rate limiting, Helmet security headers, and structured logging.
+Full-stack implementation — monorepo with React client, Express server, and FastAPI Python AI microservice. Supabase (hosted/public project) for auth, database, and storage. Production-hardened with code-splitting, error boundaries, rate limiting, Helmet security headers, and structured logging.
 
 ## Tech Stack
 
@@ -181,9 +181,8 @@ vision-studio/
 All three services read from the root `.env` file.
 
 ### Client (`client/.env.local`)
-- `VITE_SUPABASE_URL` — Supabase project URL
-- `VITE_SUPABASE_ANON_KEY` — Supabase anon key (legacy alias)
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — preferred public Supabase client vars
+- `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` — legacy aliases still accepted by client code
 - `VITE_API_URL` — Backend URL (default: `http://localhost:3001`)
 
 ### Server (`root/.env`)
@@ -197,6 +196,11 @@ All three services read from the root `.env` file.
 - `NODE_ENV` (development/production)
 - `ALLOWED_ORIGINS` (comma-separated, default: `http://localhost:5173,http://localhost:4173`)
 - `LOG_LEVEL` (debug/info/warn/error, default: `info`)
+
+Current hosted DB status (expected baseline):
+- Tables present: `providers`, `furniture_catalog`, `rooms`, `placements`, `layout_exports`, `chat_messages`
+- Catalog seed: 27 items
+- Providers seed: 4
 
 ### Python (`python/.env`)
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`

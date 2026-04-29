@@ -13,7 +13,7 @@ export default function Footer() {
           </p>
         </div>
         <div className="mb-10 md:mb-0">
-          <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.35em] text-vs-accent">Explore</div>
+          <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.35em] text-vs-accent">Product</div>
           <ul className="space-y-3 text-sm text-vs-dark/90">
             <li>
               <Link to="/" className="transition hover:text-vs-accent">
@@ -22,28 +22,40 @@ export default function Footer() {
             </li>
             <li>
               <Link to="/upload" className="transition hover:text-vs-accent">
-                Upload Floorplan
+                Upload
               </Link>
             </li>
             <li>
               <Link to="/studio" className="transition hover:text-vs-accent">
-                Design Studio
+                Studio
+              </Link>
+            </li>
+            <li>
+              <Link to="/chat" className="transition hover:text-vs-accent">
+                Chat
               </Link>
             </li>
           </ul>
         </div>
         <div className="mb-10 md:mb-0">
+          <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.35em] text-vs-accent">Company</div>
+          <ul className="space-y-3 text-sm text-vs-dark/90">
+            <li>About</li>
+            <li>Vision Studio</li>
+          </ul>
+        </div>
+        <div className="mb-10 md:mb-0">
           <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.35em] text-vs-accent">Built With</div>
           <ul className="space-y-3 text-sm text-vs-dark/90">
-            <li>OpenAI Vision + Agents</li>
-            <li>Grounding DINO · SAM</li>
-            <li>Konva · Three.js</li>
+            <li>AI Vision</li>
+            <li>Spatial Models</li>
+            <li>3D Engine</li>
           </ul>
         </div>
         <div>
-          <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.35em] text-vs-accent">UC Santa Cruz</div>
+          <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.35em] text-vs-accent">Credits</div>
           <p className="text-sm leading-relaxed text-vs-dark/90">
-            CSE 115A — Capstone 2026
+            Built at UC Santa Cruz
             <br />
             William Liu · Ethan Cao · Sriya Katreddi · Ashley Kim
           </p>
@@ -51,7 +63,7 @@ export default function Footer() {
       </div>
       <div className="border-t border-vs-soft/30">
         <div className="mx-auto flex max-w-8xl flex-wrap items-center justify-between gap-3 px-6 py-6 text-xs text-vs-dark/55 md:px-10">
-          <span>© {new Date().getFullYear()} Vision Studio</span>
+          <span>© Vision Studio</span>
           <span className="uppercase tracking-[0.28em]">Designed for dreamers</span>
         </div>
       </div>

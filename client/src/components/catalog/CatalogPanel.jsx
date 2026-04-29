@@ -78,17 +78,17 @@ export default function CatalogPanel() {
   const list = tab === 'recommended' ? recommendedItems : items;
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="p-6 border-b border-ink-900/10">
+    <div className="flex flex-col h-full bg-surface-800">
+      <div className="p-6 border-b border-surface-700 bg-surface-800">
         <div className="flex gap-4 mb-4 text-[11px] uppercase tracking-editorial">
           <button
-            className={tab === 'catalog' ? 'text-ink-900 border-b border-ink-900 pb-1' : 'text-ink-500'}
+            className={tab === 'catalog' ? 'text-surface-100 border-b border-blue-400 pb-1' : 'text-surface-400'}
             onClick={() => setTab('catalog')}
           >
             Catalog
           </button>
           <button
-            className={tab === 'recommended' ? 'text-ink-900 border-b border-ink-900 pb-1' : 'text-ink-500'}
+            className={tab === 'recommended' ? 'text-surface-100 border-b border-blue-400 pb-1' : 'text-surface-400'}
             onClick={() => setTab('recommended')}
           >
             Recommended {recommendedItems.length > 0 && `(${recommendedItems.length})`}
@@ -98,7 +98,7 @@ export default function CatalogPanel() {
         {tab === 'catalog' && (
           <>
             <input
-              className="input-field mb-4"
+              className="w-full border border-surface-600 rounded px-3 py-2 text-sm bg-surface-700 text-surface-100 placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Search furniture…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -107,7 +107,7 @@ export default function CatalogPanel() {
               <button
                 onClick={() => setCategory('')}
                 className={`text-[10px] uppercase tracking-editorial rounded-full px-3 py-1 border transition ${
-                  category === '' ? 'bg-ink-900 text-paper-50 border-ink-900' : 'border-ink-900/15 text-ink-700 hover:border-ink-900'
+                  category === '' ? 'bg-blue-600 text-surface-50 border-blue-600' : 'border-surface-600 text-surface-300 hover:border-surface-400 hover:text-surface-200'
                 }`}
               >All</button>
               {categories.map((c) => (
@@ -115,7 +115,7 @@ export default function CatalogPanel() {
                   key={c}
                   onClick={() => setCategory(c)}
                   className={`text-[10px] uppercase tracking-editorial rounded-full px-3 py-1 border transition ${
-                    category === c ? 'bg-ink-900 text-paper-50 border-ink-900' : 'border-ink-900/15 text-ink-700 hover:border-ink-900'
+                    category === c ? 'bg-blue-600 text-surface-50 border-blue-600' : 'border-surface-600 text-surface-300 hover:border-surface-400 hover:text-surface-200'
                   }`}
                 >{c.replace(/_/g, ' ')}</button>
               ))}
@@ -123,9 +123,19 @@ export default function CatalogPanel() {
           </>
         )}
         {tab === 'recommended' && recommendedItems.length === 0 && (
-          <p className="text-xs text-ink-500 leading-relaxed">
-            Ask the Studio assistant to suggest furniture. It will populate this panel with curated picks you can add in one click.
-          </p>
+          <div className="text-center py-12 px-4">
+            <div className="text-4xl mb-4">💡</div>
+            <div className="text-sm font-medium text-surface-300 mb-2">AI-Powered Suggestions</div>
+            <p className="text-xs text-surface-500 leading-relaxed mb-4">
+              Ask the Studio assistant to suggest furniture. It will populate this panel with curated picks you can add in one click.
+            </p>
+            <button
+              onClick={() => onOpenChat?.()}
+              className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+            >
+              Open AI Assistant
+            </button>
+          </div>
         )}
       </div>
 
@@ -133,11 +143,11 @@ export default function CatalogPanel() {
         {loading && tab === 'catalog' && (
           <div className="space-y-2">
             {[1, 2, 3].map(i => (
-              <div key={i} className="border border-ink-900/10 bg-paper-50 p-4 animate-pulse">
-                <div className="aspect-[4/3] mb-3 bg-paper-200 rounded" />
-                <div className="h-4 w-3/4 bg-paper-300 rounded mb-2" />
-                <div className="h-3 w-1/2 bg-paper-200 rounded mb-3" />
-                <div className="h-8 w-full bg-paper-200 rounded-full" />
+              <div key={i} className="border border-surface-600 bg-surface-700 p-4 animate-pulse">
+                <div className="aspect-[4/3] mb-3 bg-surface-600 rounded" />
+                <div className="h-4 w-3/4 bg-surface-600 rounded mb-2" />
+                <div className="h-3 w-1/2 bg-surface-600 rounded mb-3" />
+                <div className="h-8 w-full bg-surface-600 rounded-full" />
               </div>
             ))}
           </div>
@@ -145,10 +155,10 @@ export default function CatalogPanel() {
         {list.map((it) => (
           <div
             key={it.id || it.catalog_id || it.name}
-            className="border border-ink-900/10 bg-paper-50 hover:border-ink-900 transition group"
+            className="border border-surface-600 bg-surface-700 hover:border-surface-500 transition group"
           >
             {it.image_url && (
-              <div className="aspect-[4/3] overflow-hidden bg-paper-200">
+              <div className="aspect-[4/3] overflow-hidden bg-surface-600">
                 <img
                   src={it.image_url}
                   alt={it.name}
@@ -159,18 +169,18 @@ export default function CatalogPanel() {
             )}
             <div className="p-4">
               <div className="flex justify-between gap-3 mb-1">
-                <div className="text-sm font-medium text-ink-900 truncate">{it.name}</div>
+                <div className="text-sm font-medium text-surface-100 truncate">{it.name}</div>
                 {it.price_usd != null && (
-                  <div className="text-xs text-ink-500 shrink-0">${Number(it.price_usd).toFixed(0)}</div>
+                  <div className="text-xs text-surface-400 shrink-0">${Number(it.price_usd).toFixed(0)}</div>
                 )}
               </div>
-              <div className="text-[11px] uppercase tracking-editorial text-ink-500 mb-3">
+              <div className="text-[11px] uppercase tracking-editorial text-surface-400 mb-3">
                 {it.provider || 'Catalog'} · {it.width}"W × {it.depth}"D
               </div>
               <button
                 onClick={() => onAdd(it)}
                 disabled={!room}
-                className="w-full text-[10px] uppercase tracking-editorial py-2 border border-ink-900/20 rounded-full hover:bg-ink-900 hover:text-paper-50 transition disabled:opacity-40"
+                className="w-full text-[10px] uppercase tracking-editorial py-2 border border-surface-600 rounded-full hover:bg-blue-600 hover:text-surface-50 hover:border-blue-600 transition disabled:opacity-40"
               >
                 + Add to Room
               </button>
@@ -178,7 +188,7 @@ export default function CatalogPanel() {
           </div>
         ))}
         {!loading && list.length === 0 && tab === 'catalog' && (
-          <div className="text-ink-500 eyebrow py-10 text-center">No items found</div>
+          <div className="text-surface-500 text-xs py-10 text-center font-medium">No items found</div>
         )}
       </div>
     </div>

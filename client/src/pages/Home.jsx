@@ -5,41 +5,79 @@ import { motion, useReducedMotion } from 'framer-motion';
 const lp = (file) =>
   `/images/${encodeURIComponent('lucas portfolio')}/${encodeURIComponent(file)}`;
 
-const timeline = [
+const workflow = [
   {
     step: '01',
-    title: 'Upload your plan',
-    text: 'Floor plan or room photo in—geometry, scale, and zones aligned so the canvas matches reality.',
+    title: 'Upload',
+    text: 'Upload a room photo, sketch, or floorplan.',
   },
   {
     step: '02',
-    title: 'Describe the vision',
-    text: 'Residential refresh, studio workflow, or hospitality tone. Your brief becomes the program.',
+    title: 'Describe',
+    text: 'Tell Vision Studio your style, budget, goals, and room purpose.',
   },
   {
     step: '03',
-    title: 'Edit the layout',
-    text: 'Place furniture, tune circulation, and stay dimensionally honest while you iterate.',
+    title: 'Generate',
+    text: 'Receive intelligent layouts and furniture suggestions.',
   },
   {
     step: '04',
-    title: 'Preview in 3D',
-    text: 'Walk the space before you commit—materiality, proportion, and flow in one review.',
+    title: 'Edit',
+    text: 'Move pieces, resize, refine spacing, materials, and walls.',
+  },
+  {
+    step: '05',
+    title: 'Preview',
+    text: 'Walk through the room in immersive 3D.',
+  },
+  {
+    step: '06',
+    title: 'Export',
+    text: 'Share with clients, family, contractors, or save concepts.',
   },
 ];
 
-const productNotes = [
+const differencePoints = [
+  'Understands room geometry',
+  'Built for editable layouts',
+  'Furniture with real dimensions',
+  'Real circulation logic',
+  'Human taste + AI speed',
+  'Designed for iteration, not one-click novelty',
+];
+
+const audiences = [
   {
-    label: 'Spatial intelligence',
-    text: 'AI-assisted layout and catalog intelligence built for architecture-minded decisions—not generic prompts.',
+    title: 'Homeowners',
+    text: 'See your future room before spending money.',
   },
   {
-    label: 'Material & furniture bridge',
-    text: 'Connect real dimensions to furnishings and finishes so software stays grounded in buildable detail.',
+    title: 'Interior Designers',
+    text: 'Create client-ready concepts faster.',
   },
   {
-    label: 'Who it serves',
-    text: 'Homeowners refining a room, designers steering clients, and architects sketching possibilities faster.',
+    title: 'Architects',
+    text: 'Rapid spatial studies and furniture planning.',
+  },
+  {
+    title: 'Developers',
+    text: 'Stage and visualize units instantly.',
+  },
+];
+
+const whyVisionStudio = [
+  {
+    label: 'AI-powered room intelligence',
+    text: 'Upload a floorplan or room photo and receive spatially aware recommendations.',
+  },
+  {
+    label: 'Editable design workflow',
+    text: 'Refine layouts, furniture, walls, and spacing in a studio-grade interface.',
+  },
+  {
+    label: 'Conversion-ready outputs',
+    text: 'Preview in 3D and export concepts for clients, family, and builders.',
   },
 ];
 
@@ -74,7 +112,7 @@ export default function Home() {
 
   return (
     <div className="bg-vs-warm text-vs-charcoal">
-      {/* Hero — full viewport, image-led, logo only in navbar */}
+      {/* Hero */}
       <section
         id="hero"
         className="relative -mt-16 min-h-[100svh] overflow-hidden bg-vs-midnight pt-16"
@@ -95,40 +133,41 @@ export default function Home() {
           initial="hidden"
           animate="show"
           variants={heroVariants}
-          className="relative z-10 mx-auto flex min-h-[100svh] max-w-7xl flex-col justify-end px-6 pb-20 pt-10 md:px-8 md:pb-28 lg:pb-32"
+          className="relative z-10 mx-auto flex min-h-[100svh] max-w-7xl flex-col justify-center px-6 py-[72px] md:px-8 md:py-[120px]"
         >
           <div className="max-w-3xl text-left">
             <motion.p
               variants={heroItemVariants}
               className="mb-5 text-[11px] font-semibold uppercase tracking-[0.38em] text-white/65"
             >
-              Vision Studio
+              VISION STUDIO · SPATIAL DESIGN ENGINE
             </motion.p>
             <motion.h1
               variants={heroItemVariants}
               className="font-display text-[clamp(2.25rem,5.5vw,4rem)] font-medium leading-[1.06] tracking-[-0.035em] text-white"
             >
-              Design spaces that read like architecture.
+              Design the rooms you actually live in.
             </motion.h1>
             <motion.p
               variants={heroItemVariants}
               className="mt-6 max-w-xl text-base leading-relaxed text-white/78 md:text-lg"
             >
-              Upload a plan, shape the layout, refine materials, and preview the room in immersive 3D.
+              Upload a floorplan or room photo. Describe your vision. Vision Studio turns ideas into
+              editable layouts, intelligent recommendations, and immersive previews.
             </motion.p>
             <motion.div variants={heroItemVariants} className="mt-10 flex flex-wrap gap-3">
               <Link
                 to="/upload"
                 className="inline-flex items-center justify-center rounded-full bg-vs-accent px-8 py-3 text-sm font-semibold text-white shadow-lg shadow-black/25 transition hover:brightness-110 active:scale-[0.98]"
               >
-                Start with a plan
+                Start Designing
               </Link>
               <button
                 type="button"
                 onClick={scrollToShowcase}
                 className="inline-flex items-center justify-center rounded-full border border-white/30 bg-white/10 px-8 py-3 text-sm font-semibold text-white backdrop-blur-sm transition hover:border-white/45 hover:bg-white/15 active:scale-[0.98]"
               >
-                Explore projects
+                Explore Studio
               </button>
             </motion.div>
           </div>
@@ -137,10 +176,51 @@ export default function Home() {
 
       <div className="h-px w-full bg-gradient-to-r from-transparent via-vs-soft/50 to-transparent" />
 
-      {/* Process */}
+      {/* Why Vision Studio Works */}
       <section className="border-b border-vs-soft/30 bg-vs-light">
-        <div className="mx-auto max-w-7xl px-6 py-24 md:px-8 md:py-32">
-          <div className="grid gap-14 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.1fr)] lg:items-start">
+        <div className="mx-auto max-w-7xl px-6 py-[72px] md:px-8 md:py-[120px]">
+          <motion.div
+            initial="hidden"
+            whileInView="show"
+            viewport={{ once: true }}
+            variants={sectionReveal}
+            className="mb-12"
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-[0.38em] text-vs-accent">
+              Value
+            </p>
+            <h2 className="mt-4 font-display text-3xl font-medium tracking-[-0.03em] text-vs-charcoal md:text-4xl">
+              Why Vision Studio Works
+            </h2>
+          </motion.div>
+
+          <div className="grid gap-6 md:grid-cols-3">
+            {whyVisionStudio.map((item, i) => (
+              <motion.article
+                key={item.label}
+                initial="hidden"
+                whileInView="show"
+                viewport={{ once: true }}
+                variants={makeVariant(16, 0.6)}
+                transition={{ delay: prefersReducedMotion ? 0 : i * 0.04 }}
+                className="rounded-[20px] border border-vs-soft/45 bg-vs-warm p-6 shadow-[0_12px_28px_rgba(4,12,46,0.04)]"
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-vs-accent">
+                  {item.label}
+                </p>
+                <p className="mt-3 text-sm leading-relaxed text-vs-dark/84">{item.text}</p>
+              </motion.article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-stone-300/40 to-transparent" />
+
+      {/* How it works */}
+      <section id="workflow" className="border-b border-vs-soft/30 bg-vs-light">
+        <div className="mx-auto max-w-7xl px-6 py-[72px] md:px-8 md:py-[120px]">
+          <div className="mb-12 grid gap-10 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-end">
             <motion.div
               initial="hidden"
               whileInView="show"
@@ -149,36 +229,42 @@ export default function Home() {
               className="space-y-6"
             >
               <p className="text-[11px] font-semibold uppercase tracking-[0.38em] text-vs-accent">
-                Process
+                How it works
               </p>
-              <h2 className="font-display text-3xl font-medium leading-[1.12] tracking-[-0.03em] text-vs-charcoal md:text-[2.25rem]">
-                From plan upload to spatial review—without losing architectural intent.
+              <h2 className="font-display text-3xl font-medium leading-[1.12] tracking-[-0.03em] text-vs-charcoal md:text-[2.4rem]">
+                A studio workflow, reimagined.
               </h2>
-              <p className="max-w-md text-sm leading-relaxed text-vs-dark/78">
-                A measured sequence for homeowners, designers, and architects who want intelligence
-                without noise.
-              </p>
             </motion.div>
+            <motion.p
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true, margin: '-80px' }}
+              variants={sectionReveal}
+              className="max-w-lg text-sm leading-relaxed text-vs-dark/78"
+            >
+              Within seconds, first-time users can understand exactly what Vision Studio does: upload,
+              describe, generate, edit, preview, and export spatial concepts for real decisions.
+            </motion.p>
+          </div>
 
-            <div className="grid gap-5 sm:grid-cols-2">
-              {timeline.map((item, i) => (
-                <motion.article
-                  key={item.step}
-                  initial="hidden"
-                  whileInView="show"
-                  viewport={{ once: true, margin: '-40px' }}
-                  variants={makeVariant(20, 0.65)}
-                  transition={{ delay: prefersReducedMotion ? 0 : i * 0.05 }}
-                  className="rounded-[24px] border border-vs-soft/40 bg-white/80 p-7 shadow-[0_20px_50px_rgba(4,12,46,0.05)] transition hover:shadow-[0_24px_60px_rgba(4,12,46,0.07)]"
-                >
-                  <p className="font-mono text-[11px] tabular-nums text-vs-accent">{item.step}</p>
-                  <h3 className="mt-4 font-display text-lg font-medium tracking-[-0.02em] text-vs-charcoal">
-                    {item.title}
-                  </h3>
-                  <p className="mt-3 text-sm leading-relaxed text-vs-dark/84">{item.text}</p>
-                </motion.article>
-              ))}
-            </div>
+          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+            {workflow.map((item, i) => (
+              <motion.article
+                key={item.step}
+                initial="hidden"
+                whileInView="show"
+                viewport={{ once: true, margin: '-60px' }}
+                variants={makeVariant(20, 0.65)}
+                transition={{ delay: prefersReducedMotion ? 0 : i * 0.04 }}
+                className="rounded-[22px] border border-vs-soft/45 bg-white/85 p-6 shadow-[0_18px_44px_rgba(4,12,46,0.05)]"
+              >
+                <p className="font-mono text-[11px] tabular-nums text-vs-accent">{item.step}</p>
+                <h3 className="mt-3 font-display text-xl font-medium tracking-[-0.02em] text-vs-charcoal">
+                  {item.title}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-vs-dark/84">{item.text}</p>
+              </motion.article>
+            ))}
           </div>
         </div>
       </section>
@@ -190,7 +276,7 @@ export default function Home() {
         id="showcase"
         className="scroll-mt-24 border-b border-stone-800/10 bg-vs-charcoal text-stone-100"
       >
-        <div className="mx-auto max-w-7xl px-6 py-24 md:px-8 md:py-32">
+        <div className="mx-auto max-w-7xl px-6 py-[72px] md:px-8 md:py-[120px]">
           <motion.div
             initial="hidden"
             whileInView="show"
@@ -200,129 +286,85 @@ export default function Home() {
           >
             <div className="max-w-xl">
               <p className="text-[11px] font-semibold uppercase tracking-[0.38em] text-vs-soft">
-                Spatial studies
+                Showcase
               </p>
               <h2 className="mt-4 font-display text-3xl font-medium tracking-[-0.03em] md:text-4xl">
-                Outcomes shaped like real projects.
+                Image-led studies with product intent.
               </h2>
             </div>
-            <p className="max-w-sm text-sm leading-relaxed text-stone-400">
-              Residential massing, interior clarity, section thinking, and atmosphere—composed as a
-              portfolio rhythm, not a template grid.
-            </p>
+            <div className="text-xs uppercase tracking-[0.16em] text-white/50">Curated image studies</div>
           </motion.div>
 
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch">
-            <motion.figure
-              initial="hidden"
-              whileInView="show"
-              viewport={{ once: true }}
-              variants={makeVariant(24, 0.75)}
-              className="group relative min-h-[380px] flex-1 overflow-hidden rounded-[28px] border border-white/10 lg:min-h-[560px] lg:flex-[1.15]"
-            >
-              <img
-                src={lp('project-whitehouse-exterior.jpg')}
-                alt="Residential exterior study"
-                className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.03]"
-                loading="lazy"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-              <figcaption className="absolute bottom-0 left-0 p-8 md:p-10">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-white/60">
-                  Residential
-                </p>
-                <p className="mt-2 font-display text-xl text-white">Envelope & approach</p>
-              </figcaption>
-            </motion.figure>
-
-            <div className="flex flex-col gap-6 lg:flex-[0.85]">
-              <motion.figure
-                initial="hidden"
-                whileInView="show"
-                viewport={{ once: true }}
-                variants={makeVariant(18, 0.65)}
-                className="group relative aspect-[16/10] overflow-hidden rounded-[28px] border border-white/10"
-              >
-                <img
-                  src={lp('project-whitehouse-livingroom.jpg')}
-                  alt="Living space"
-                  className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.03]"
-                  loading="lazy"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent opacity-0 transition group-hover:opacity-100" />
-              </motion.figure>
-
-              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                <motion.figure
-                  initial="hidden"
-                  whileInView="show"
-                  viewport={{ once: true }}
-                  variants={makeVariant(18, 0.6)}
-                  className="group relative aspect-square overflow-hidden rounded-[24px] border border-white/10 sm:aspect-[4/5]"
-                >
-                  <img
-                    src={lp('project-cutaway.jpg')}
-                    alt="Section cutaway"
-                    className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.04]"
-                    loading="lazy"
-                  />
-                </motion.figure>
-                <motion.figure
-                  initial="hidden"
-                  whileInView="show"
-                  viewport={{ once: true }}
-                  variants={makeVariant(18, 0.6)}
-                  className="group relative aspect-square overflow-hidden rounded-[24px] border border-white/10 sm:aspect-[4/5]"
-                >
-                  <img
-                    src={lp('hero-alt.jpg')}
-                    alt="Visualization study"
-                    className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.04]"
-                    loading="lazy"
-                  />
-                </motion.figure>
-              </div>
+          <div className="grid gap-6 md:gap-8">
+            <div className="grid gap-6 lg:grid-cols-[1.65fr_1fr]">
+              <ImageCard image={lp('project-whitehouse-exterior.jpg')} title="Residential Layout Concepts" />
+              <ImageCard image={lp('project-whitehouse-livingroom.jpg')} title="Furniture Flow Study" />
             </div>
-          </div>
 
-          {/* Remaining portfolio imagery — decorative only (no copy changes) */}
-          <div
-            className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-3"
-            aria-hidden="true"
-          >
-            <figure className="group relative aspect-[4/3] overflow-hidden rounded-[24px] border border-white/10">
-              <img
-                src={lp('circular-courtyard.jpg')}
-                alt=""
-                className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.03]"
-                loading="lazy"
-              />
-            </figure>
-            <figure className="group relative aspect-[4/3] overflow-hidden rounded-[24px] border border-white/10">
-              <img
-                src={lp('interior-lobby.jpg')}
-                alt=""
-                className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.03]"
-                loading="lazy"
-              />
-            </figure>
-            <figure className="group relative aspect-[4/3] overflow-hidden rounded-[24px] border border-white/10">
-              <img
-                src={lp('interior-atrium.jpg')}
-                alt=""
-                className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.03]"
-                loading="lazy"
-              />
-            </figure>
+            <div className="grid gap-6 lg:grid-cols-2">
+              <ImageCard image={lp('project-cutaway.jpg')} title="Spatial Composition Test" />
+              <ImageCard image={lp('hero-alt.jpg')} title="Light & Atmosphere Preview" />
+            </div>
+
+            <ImageCard image={lp('warm-library-space.jpg')} title="Material Warmth Preview" wide />
+
+            <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+              <ImageCard image={lp('pink-lobby.jpg')} title="Hospitality Arrival Sequence" />
+              <ImageCard image={lp('circular-courtyard.jpg')} title="Spatial Composition Test" />
+            </div>
           </div>
         </div>
       </section>
 
-      <div className="h-px w-full bg-gradient-to-r from-transparent via-stone-300/35 to-transparent" />
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-vs-soft/45 to-transparent" />
 
-      {/* Interior atmosphere */}
-      <section className="border-b border-vs-soft/25 bg-vs-warm">
-        <div className="mx-auto max-w-7xl px-6 py-24 md:px-8 md:py-32">
+      {/* Why it's different */}
+      <section className="border-b border-vs-soft/30 bg-vs-light">
+        <div className="mx-auto max-w-7xl px-6 py-[72px] md:px-8 md:py-[120px]">
+          <div className="grid gap-12 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+            <motion.div
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true }}
+              variants={sectionReveal}
+              className="space-y-6"
+            >
+              <p className="text-[11px] font-semibold uppercase tracking-[0.38em] text-vs-accent">
+                Why it&apos;s different
+              </p>
+              <h2 className="font-display text-3xl font-medium leading-[1.12] tracking-[-0.03em] text-vs-charcoal md:text-[2.3rem]">
+                Not another image generator.
+              </h2>
+              <p className="max-w-md text-sm leading-relaxed text-vs-dark/82">
+                Vision Studio is built as a spatial workflow engine: it understands geometry, supports
+                iterative edits, and helps teams communicate buildable concepts with confidence.
+              </p>
+            </motion.div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              {differencePoints.map((point, i) => (
+                <motion.div
+                  key={point}
+                  initial="hidden"
+                  whileInView="show"
+                  viewport={{ once: true }}
+                  variants={makeVariant(16, 0.6)}
+                  transition={{ delay: prefersReducedMotion ? 0 : i * 0.03 }}
+                  className="rounded-xl border border-vs-soft/45 bg-white/85 px-4 py-4 text-sm text-vs-dark/90"
+                >
+                  {point}
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-stone-300/40 to-transparent" />
+
+      {/* Who it's for */}
+      <section className="border-b border-vs-soft/30 bg-vs-warm">
+        <div className="mx-auto max-w-7xl px-6 py-[72px] md:px-8 md:py-[120px]">
           <motion.div
             initial="hidden"
             whileInView="show"
@@ -330,68 +372,77 @@ export default function Home() {
             variants={sectionReveal}
             className="mb-12 max-w-2xl"
           >
-            <p className="text-[11px] font-semibold uppercase tracking-[0.38em] text-vs-accent">
-              Atmosphere
-            </p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.38em] text-vs-accent">Who it&apos;s for</p>
             <h2 className="mt-4 font-display text-3xl font-medium tracking-[-0.03em] text-vs-charcoal md:text-4xl">
-              Interiors with gravity and warmth.
+              Built for people shaping real spaces.
             </h2>
           </motion.div>
 
-          <motion.figure
-            initial="hidden"
-            whileInView="show"
-            viewport={{ once: true }}
-            variants={makeVariant(26, 0.85)}
-            className="group relative overflow-hidden rounded-[28px] border border-stone-200/80 shadow-[0_24px_70px_rgba(0,0,0,0.06)]"
-          >
-            <div className="relative aspect-[21/9] min-h-[280px] w-full md:min-h-[360px]">
-              <img
-                src={lp('warm-library-space.jpg')}
-                alt="Warm wood interior"
-                className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.02]"
-                loading="lazy"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/15 to-transparent" />
-              <figcaption className="absolute bottom-0 left-0 p-8 md:p-12">
-                <p className="max-w-lg font-display text-2xl text-white md:text-3xl">
-                  Materiality and calm light—readable at human scale.
-                </p>
-              </figcaption>
-            </div>
-          </motion.figure>
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            {audiences.map((audience, i) => (
+              <motion.article
+                key={audience.title}
+                initial="hidden"
+                whileInView="show"
+                viewport={{ once: true }}
+                variants={makeVariant(18, 0.6)}
+                transition={{ delay: prefersReducedMotion ? 0 : i * 0.05 }}
+                className="rounded-[20px] border border-vs-soft/40 bg-white/80 p-6 shadow-[0_16px_34px_rgba(4,12,46,0.04)]"
+              >
+                <h3 className="font-display text-2xl font-medium tracking-[-0.02em] text-vs-charcoal">
+                  {audience.title}
+                </h3>
+                <p className="mt-3 text-sm leading-relaxed text-vs-dark/82">{audience.text}</p>
+              </motion.article>
+            ))}
+          </div>
+        </div>
+      </section>
 
-          <div className="mt-10 grid gap-10 lg:grid-cols-2 lg:items-center lg:gap-16">
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-vs-soft/45 to-transparent" />
+
+      {/* AI chat section */}
+      <section className="border-b border-vs-soft/25 bg-vs-light">
+        <div className="mx-auto max-w-7xl px-6 py-24 md:px-8 md:py-32">
+          <div className="grid items-center gap-10 lg:grid-cols-[1.05fr_0.95fr]">
             <motion.div
               initial="hidden"
               whileInView="show"
               viewport={{ once: true }}
-              variants={makeVariant(20, 0.7)}
-              className="order-2 space-y-5 lg:order-1"
+              variants={sectionReveal}
+              className="space-y-6"
             >
-              <h3 className="font-display text-2xl font-medium tracking-[-0.02em] text-vs-charcoal">
-                Lobbies, lounges, and layered hospitality moments.
-              </h3>
-              <p className="text-sm leading-relaxed text-vs-dark/85">
-                Translate brand tone into spatial sequence—seating, circulation, and quiet focal
-                points that feel considered, not generated at random.
+              <p className="text-[11px] font-semibold uppercase tracking-[0.38em] text-vs-accent">
+                AI chat assistant
               </p>
+              <h2 className="font-display text-3xl font-medium leading-[1.12] tracking-[-0.03em] text-vs-charcoal md:text-[2.2rem]">
+                Design with an assistant that understands space.
+              </h2>
+              <p className="max-w-lg text-sm leading-relaxed text-vs-dark/84">
+                Ask for layout fixes, furniture swaps, budget alternatives, lighting changes, or
+                style shifts in real time while designing.
+              </p>
+              <Link
+                to="/chat"
+                className="inline-flex items-center justify-center rounded-full bg-vs-accent px-7 py-3 text-sm font-semibold text-white transition hover:brightness-110"
+              >
+                Open Chat
+              </Link>
             </motion.div>
+
             <motion.figure
               initial="hidden"
               whileInView="show"
               viewport={{ once: true }}
-              variants={makeVariant(24, 0.75)}
-              className="order-1 overflow-hidden rounded-[28px] border border-stone-200/80 shadow-lg lg:order-2"
+              variants={makeVariant(22, 0.75)}
+              className="overflow-hidden rounded-[26px] border border-stone-200/70 shadow-[0_24px_60px_rgba(0,0,0,0.06)]"
             >
-              <div className="relative aspect-[5/4] w-full">
-                <img
-                  src={lp('pink-lobby.jpg')}
-                  alt="Hospitality lobby atmosphere"
-                  className="h-full w-full object-cover"
-                  loading="lazy"
-                />
-              </div>
+              <img
+                src={lp('warm-library-space.jpg')}
+                alt="Interior atmosphere preview"
+                className="h-full w-full object-cover"
+                loading="lazy"
+              />
             </motion.figure>
           </div>
         </div>
@@ -400,8 +451,8 @@ export default function Home() {
       <div className="h-px w-full bg-gradient-to-r from-transparent via-vs-soft/45 to-transparent" />
 
       {/* Product reveal */}
-      <section className="border-b border-vs-soft/25 bg-vs-light">
-        <div className="mx-auto max-w-7xl px-6 py-24 md:px-8 md:py-32">
+      <section className="border-b border-vs-soft/25 bg-vs-warm">
+        <div className="mx-auto max-w-7xl px-6 py-[72px] md:px-8 md:py-[120px]">
           <div className="grid items-start gap-14 lg:grid-cols-[1.05fr_0.95fr] lg:gap-20">
             <motion.div
               initial="hidden"
@@ -411,10 +462,10 @@ export default function Home() {
               className="space-y-8"
             >
               <p className="text-[11px] font-semibold uppercase tracking-[0.38em] text-vs-accent">
-                The studio
+                Product reveal
               </p>
               <h2 className="font-display text-3xl font-medium leading-[1.12] tracking-[-0.03em] text-vs-charcoal md:text-[2.35rem]">
-                A spatial design studio—not a gimmick generator.
+                Spatial design intelligence with premium execution.
               </h2>
               <p className="text-base leading-relaxed text-vs-dark/85">
                 Vision Studio bridges software craft and architectural thinking: structured layouts,
@@ -422,7 +473,7 @@ export default function Home() {
                 can defend to clients and collaborators.
               </p>
               <ul className="space-y-6 border-t border-vs-soft/40 pt-8">
-                {productNotes.map((note) => (
+                {whyVisionStudio.map((note) => (
                   <li key={note.label} className="max-w-prose">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-vs-accent">
                       {note.label}
@@ -446,7 +497,7 @@ export default function Home() {
                   <span className="h-2 w-2 rounded-full bg-amber-400/90" />
                   <span className="h-2 w-2 rounded-full bg-emerald-400/90" />
                   <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.2em] text-white/35">
-                    Layout
+                    Vision Studio
                   </span>
                 </div>
                 <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -467,25 +518,25 @@ export default function Home() {
 
       <div className="h-px w-full bg-gradient-to-r from-transparent via-stone-600/25 to-transparent" />
 
-      {/* Closing CTA */}
-      <section className="bg-vs-midnight px-6 py-24 text-center md:px-8 md:py-32">
+      {/* Final CTA */}
+      <section className="bg-vs-midnight px-6 py-[72px] text-center md:px-8 md:py-[120px]">
         <motion.div
           initial="hidden"
           whileInView="show"
           viewport={{ once: true }}
           variants={sectionReveal}
-          className="mx-auto max-w-2xl"
+          className="mx-auto max-w-3xl"
         >
-          <p className="text-[11px] font-semibold uppercase tracking-[0.38em] text-vs-soft">Next step</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.38em] text-vs-soft">Final step</p>
           <h2 className="mt-6 font-display text-3xl font-medium leading-[1.15] tracking-[-0.03em] text-white md:text-4xl">
-            Bring a plan, leave with a spatial story you can stand behind.
+            Bring a floorplan. Leave with a room you can believe in.
           </h2>
           <div className="mt-12 flex flex-wrap justify-center gap-4">
             <Link
               to="/upload"
               className="inline-flex min-w-[180px] items-center justify-center rounded-full bg-vs-accent px-10 py-3.5 text-sm font-semibold text-white shadow-xl shadow-black/25 transition hover:brightness-110 active:scale-[0.98]"
             >
-              Start with a plan
+              Start Designing
             </Link>
             <Link
               to="/studio"
@@ -497,5 +548,26 @@ export default function Home() {
         </motion.div>
       </section>
     </div>
+  );
+}
+
+function ImageCard({ image, title, wide = false }) {
+  return (
+    <motion.figure
+      initial="hidden"
+      whileInView="show"
+      viewport={{ once: true, margin: '-40px' }}
+      variants={{
+        hidden: { opacity: 0, y: 16 },
+        show: { opacity: 1, y: 0, transition: { duration: 0.7 } },
+      }}
+      className={`group relative overflow-hidden rounded-[26px] border border-white/10 ${wide ? 'min-h-[280px] md:min-h-[360px]' : 'min-h-[280px]'}`}
+    >
+      <img src={image} alt={title} className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.03]" loading="lazy" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-transparent" />
+      <figcaption className="absolute bottom-0 left-0 p-6 md:p-8">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-vs-soft/90">{title}</p>
+      </figcaption>
+    </motion.figure>
   );
 }

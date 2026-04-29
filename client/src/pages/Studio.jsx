@@ -10,6 +10,9 @@ import RoomViewer3D from '@/components/viewer/RoomViewer3D';
 import StudioToolbar from '@/components/studio/StudioToolbar';
 import RoomSetupModal from '@/components/studio/RoomSetupModal';
 import ZoneBottomBar from '@/components/studio/ZoneBottomBar';
+import StudioLeftSidebar from '@/components/studio/StudioLeftSidebar';
+import StudioInspector from '@/components/studio/StudioInspector';
+import DemoProjects from '@/components/studio/DemoProjects';
 import { ROOM_TEMPLATES } from '@/utils/constants';
 import { inchesToFeet } from '@/utils/scale';
 
@@ -21,6 +24,7 @@ export default function Studio() {
   const [rooms, setRooms] = useState([]);
   const [loadingList, setLoadingList] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [showDemos, setShowDemos] = useState(false);
 
   // Load the requested room, or show a dashboard/setup UI
   useEffect(() => {
@@ -87,6 +91,15 @@ export default function Studio() {
           </div>
         ) : rooms.length === 0 ? (
           <div>
+            <div className="mb-8">
+              <button
+                onClick={() => setShowDemos(true)}
+                className="btn-primary mr-4"
+              >
+                Explore Demo Projects
+              </button>
+              <span className="text-ink-500 text-sm">See professionally designed room layouts</span>
+            </div>
             <p className="text-ink-500 mb-8 max-w-lg leading-relaxed">
               No rooms yet. Pick a template to get started, or create a custom room.
             </p>
@@ -150,47 +163,35 @@ export default function Studio() {
   }
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col bg-paper-100">
+    <div className="h-[calc(100vh-4rem)] flex flex-col bg-surface-900">
+      {/* Top Bar */}
       <StudioToolbar onToggleCatalog={() => setCatalogOpen(!catalogOpen)} catalogOpen={catalogOpen} />
+
+      {/* Main Workspace */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Catalog — collapsible drawer on mobile, fixed sidebar on desktop */}
-        <aside className={`
-          ${catalogOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-          fixed md:relative z-30 md:z-auto inset-y-0 left-0
-          w-[320px] border-r border-ink-900/10 bg-paper-50 overflow-y-auto
-          transition-transform duration-300 md:transition-none
-          top-[calc(4rem+3.5rem)] md:top-0 h-[calc(100vh-4rem-3.5rem)] md:h-auto
-        `}>
-          <CatalogPanel />
-        </aside>
+        {/* Left Sidebar */}
+        <StudioLeftSidebar catalogOpen={catalogOpen} onToggleCatalog={() => setCatalogOpen(!catalogOpen)} />
 
-        {/* Backdrop for mobile catalog */}
-        {catalogOpen && (
-          <div
-            className="fixed inset-0 z-20 bg-ink-900/20 md:hidden"
-            onClick={() => setCatalogOpen(false)}
-          />
-        )}
-
-        <section className="relative overflow-hidden flex-1 min-w-0">
-          <div className="h-full flex flex-col">
-            <div className="min-h-0 flex-1 relative overflow-hidden">
-              {viewMode === '3d' ? (
-                <RoomViewer3D />
-              ) : (
-                <RoomCanvas />
-              )}
-            </div>
-            <ZoneBottomBar />
+        {/* Center Viewport */}
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex-1 relative bg-surface-800 border border-surface-700 shadow-2xl">
+            {viewMode === '3d' ? (
+              <RoomViewer3D />
+            ) : (
+              <RoomCanvas />
+            )}
           </div>
-        </section>
+        </div>
 
-        {isChatOpen && (
-          <aside className="hidden md:flex w-[360px] border-l border-ink-900/10 bg-paper-50 overflow-hidden flex-col">
-            <ChatPanel />
-          </aside>
-        )}
+        {/* Right Inspector */}
+        <StudioInspector />
       </div>
+
+      {/* Bottom Drawer */}
+      <StudioBottomDrawer />
+
+      {/* Demo Projects Modal */}
+      {showDemos && <DemoProjects onClose={() => setShowDemos(false)} />}
     </div>
   );
 }

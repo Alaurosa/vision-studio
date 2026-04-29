@@ -339,4 +339,43 @@ export const useLayoutStore = create((set, get) => ({
     const { furniture, room } = get();
     return validateAll(furniture, room);
   },
+
+  // Save/load projects (localStorage for now)
+  saveProject: () => {
+    const { room, furniture, zones } = get();
+    if (!room) return;
+    const project = {
+      id: room.id,
+      name: room.name,
+      room,
+      furniture,
+      zones,
+      timestamp: Date.now()
+    };
+    const saved = JSON.parse(localStorage.getItem('vision-studio-projects') || '[]');
+    const existingIndex = saved.findIndex(p => p.id === room.id);
+    if (existingIndex >= 0) {
+      saved[existingIndex] = project;
+    } else {
+      saved.push(project);
+    }
+    localStorage.setItem('vision-studio-projects', JSON.stringify(saved));
+  },
+
+  loadProject: (projectId) => {
+    const saved = JSON.parse(localStorage.getItem('vision-studio-projects') || '[]');
+    const project = saved.find(p => p.id === projectId);
+    if (project) {
+      set({
+        room: project.room,
+        furniture: project.furniture,
+        zones: project.zones || [],
+        activeZoneId: project.zones?.[0]?.id || null,
+      });
+    }
+  },
+
+  getSavedProjects: () => {
+    return JSON.parse(localStorage.getItem('vision-studio-projects') || '[]');
+  },
 }));

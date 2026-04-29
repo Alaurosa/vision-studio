@@ -16,9 +16,9 @@ export default function App() {
   }, [pathname]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-paper-50 text-ink-900">
+    <div className="min-h-screen flex flex-col bg-surface-800 text-surface-100 dark">
       <Navbar />
-      <main className="flex-1">
+      <main className="flex-1 pt-16">
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />

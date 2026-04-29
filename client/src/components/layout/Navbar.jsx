@@ -3,19 +3,23 @@ import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { useAuth } from '@/hooks/useAuth';
 
-const links = [
-  { to: '/',        label: 'Home' },
-  { to: '/upload',  label: 'Upload' },
-  { to: '/studio',  label: 'Studio' },
+const navLinks = [
+  { to: '/', label: 'Home' },
+  { to: '/upload', label: 'Upload' },
+  { to: '/studio', label: 'Studio' },
 ];
 
 export default function Navbar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
-  const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [pastHero, setPastHero] = useState(false);
+
   const isStudio = pathname.startsWith('/studio');
+  const isHome = pathname === '/';
+  /** Transparent nav over cinematic hero */
+  const overHero = isHome && !pastHero && !isStudio;
 
   const handleSignOut = async () => {
     await signOut();
@@ -23,124 +27,214 @@ export default function Navbar() {
   };
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 10);
-    window.addEventListener('scroll', onScroll);
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
+    const update = () => {
+      if (!isHome || isStudio) {
+        setPastHero(true);
+        return;
+      }
+      const hero = document.getElementById('hero');
+      if (!hero) {
+        setPastHero(true);
+        return;
+      }
+      const bottom = hero.getBoundingClientRect().bottom;
+      setPastHero(bottom <= 72);
+    };
 
-  // Close mobile menu on route change
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [isHome, isStudio, pathname]);
+
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
 
-  return (
-    <header
-      className={clsx(
-        'sticky top-0 z-40 transition-all duration-500',
-        scrolled || isStudio
-          ? 'bg-paper-50/90 backdrop-blur border-b border-ink-900/10'
-          : 'bg-transparent'
-      )}
-    >
-      <div className="max-w-8xl mx-auto flex items-center justify-between px-6 md:px-10 h-16">
-        <Link to="/" className="flex items-center gap-3 group">
-          <div className="w-2.5 h-2.5 rounded-full bg-ink-900 group-hover:bg-sienna-500 transition" />
-          <span className="font-display text-lg tracking-tight">Vision Studio</span>
-        </Link>
+  const shell = clsx(
+    'fixed inset-x-0 top-0 z-50 transition-[background-color,border-color,backdrop-filter,box-shadow] duration-300',
+    isStudio &&
+      'border-b border-white/10 bg-[color-mix(in_srgb,var(--vs-midnight)_82%,transparent)] backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)]',
+    !isStudio &&
+      overHero &&
+      'border-b border-transparent bg-transparent shadow-none',
+    !isStudio &&
+      !overHero &&
+      'border-b border-stone-200/80 bg-vs-warm/95 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.04)]'
+  );
 
-        {/* Desktop nav */}
-        <nav className="hidden md:flex items-center gap-10">
-          {links.map((l) => (
-            <NavLink
-              key={l.to}
-              to={l.to}
-              end={l.to === '/'}
-              className={({ isActive }) =>
-                clsx(
-                  'text-[11px] uppercase tracking-editorial transition relative py-2',
-                  isActive ? 'text-ink-900' : 'text-ink-500 hover:text-ink-900'
-                )
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  {l.label}
-                  {isActive && (
-                    <span className="absolute left-0 right-0 -bottom-px h-px bg-ink-900" />
-                  )}
-                </>
-              )}
+  const linkClass = ({ isActive }) =>
+    clsx(
+      'rounded-full px-4 py-2 text-sm font-medium transition-colors duration-200',
+      overHero &&
+        (isActive ? 'bg-white/15 text-white' : 'text-white/85 hover:bg-white/10 hover:text-white'),
+      !overHero &&
+        !isStudio &&
+        (isActive
+          ? 'bg-vs-accent/10 text-vs-accent'
+          : 'text-vs-dark/80 hover:bg-stone-100 hover:text-vs-charcoal'),
+      isStudio &&
+        (isActive ? 'bg-white/12 text-white' : 'text-white/70 hover:bg-white/8 hover:text-white')
+    );
+
+  const logoText = clsx(
+    'text-[15px] font-semibold tracking-[-0.02em] transition-colors',
+    overHero && 'text-white',
+    !overHero && !isStudio && 'text-vs-charcoal',
+    isStudio && 'text-white'
+  );
+
+  const ctaPrimary = clsx(
+    'hidden rounded-full px-4 py-2 text-xs font-semibold transition md:inline-flex',
+    overHero && 'bg-white text-vs-charcoal hover:bg-stone-100',
+    !overHero && !isStudio && 'bg-vs-accent text-white hover:brightness-110',
+    isStudio && 'bg-vs-accent text-white hover:brightness-110'
+  );
+
+  const ctaSignIn = clsx(
+    'rounded-full px-4 py-2 text-xs font-semibold transition',
+    overHero && 'border border-white/25 bg-white/10 text-white hover:bg-white/15',
+    !overHero && !isStudio && 'border border-stone-200 bg-white text-vs-charcoal hover:border-stone-300',
+    isStudio && 'border border-white/20 bg-white/5 text-white hover:bg-white/10'
+  );
+
+  const mobileBtn = clsx('rounded-full p-2.5 transition md:hidden', overHero && 'text-white hover:bg-white/10', !overHero && !isStudio && 'text-vs-charcoal hover:bg-stone-100', isStudio && 'text-white hover:bg-white/10');
+
+  const mobilePanel = clsx(
+    'border-t md:hidden',
+    overHero && 'border-white/15 bg-black/45 backdrop-blur-xl',
+    !overHero && !isStudio && 'border-stone-200 bg-vs-warm/98 backdrop-blur-md',
+    isStudio && 'border-white/10 bg-[color-mix(in_srgb,var(--vs-midnight)_95%,transparent)] backdrop-blur-xl'
+  );
+
+  return (
+    <header className={shell}>
+      <div className="mx-auto grid h-16 max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-3 px-6 md:gap-6 lg:px-8">
+        <div className="flex min-w-0 items-center justify-self-start">
+          <Link to="/" className="flex items-center gap-2.5 transition-opacity hover:opacity-90">
+            <img src="/vision-studio-logo.png" alt="" className="h-8 w-auto object-contain md:h-9" />
+            <span className={logoText}>Vision Studio</span>
+          </Link>
+        </div>
+
+        <nav className="hidden shrink-0 items-center gap-1 justify-self-center md:flex" aria-label="Primary">
+          {navLinks.map((link) => (
+            <NavLink key={link.to} to={link.to} end={link.to === '/'} className={linkClass}>
+              {link.label}
             </NavLink>
           ))}
         </nav>
 
-        <div className="flex items-center gap-4">
+        <div className="flex min-w-0 items-center justify-end gap-2 md:gap-3">
+          <Link to="/studio" className={ctaPrimary}>
+            Open Studio
+          </Link>
+
           {user ? (
-            <>
-              <span className="hidden md:inline text-[11px] uppercase tracking-editorial text-ink-500">
+            <div className="hidden items-center gap-3 md:flex">
+              <span
+                className={clsx(
+                  'max-w-[140px] truncate text-xs',
+                  overHero && 'text-white/65',
+                  !overHero && !isStudio && 'text-vs-dark/55',
+                  isStudio && 'text-white/55'
+                )}
+              >
                 {user.email}
               </span>
               <button
+                type="button"
                 onClick={handleSignOut}
-                className="hidden md:inline text-[11px] uppercase tracking-editorial text-ink-500 hover:text-ink-900 transition"
+                className={clsx(
+                  'rounded-full px-4 py-2 text-xs font-medium transition',
+                  overHero && 'text-white/85 hover:bg-white/10',
+                  !overHero && !isStudio && 'text-vs-dark/75 hover:bg-stone-100',
+                  isStudio && 'text-white/75 hover:bg-white/10'
+                )}
               >
-                Sign out
+                Sign Out
               </button>
-            </>
+            </div>
           ) : (
-            <Link to="/login" className="hidden md:inline-flex btn-ink text-[10px] py-2 px-4">
-              Sign in
+            <Link to="/login" className={ctaSignIn}>
+              Sign In
             </Link>
           )}
 
-          {/* Mobile hamburger */}
           <button
-            className="md:hidden flex flex-col gap-1.5 p-2"
+            type="button"
             onClick={() => setMobileOpen(!mobileOpen)}
-            aria-label="Toggle navigation menu"
+            className={mobileBtn}
+            aria-expanded={mobileOpen}
+            aria-label="Toggle menu"
           >
-            <span className={clsx('block w-5 h-0.5 bg-ink-900 transition-transform origin-center', mobileOpen && 'rotate-45 translate-y-[4px]')} />
-            <span className={clsx('block w-5 h-0.5 bg-ink-900 transition-opacity', mobileOpen && 'opacity-0')} />
-            <span className={clsx('block w-5 h-0.5 bg-ink-900 transition-transform origin-center', mobileOpen && '-rotate-45 -translate-y-[4px]')} />
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d={mobileOpen ? 'M6 18L18 6M6 6l12 12' : 'M4 6h16M4 12h16M4 18h16'}
+              />
+            </svg>
           </button>
         </div>
       </div>
 
-      {/* Mobile menu */}
       {mobileOpen && (
-        <div className="md:hidden border-t border-ink-900/10 bg-paper-50/95 backdrop-blur">
-          <nav className="max-w-8xl mx-auto px-6 py-6 flex flex-col gap-4">
-            {links.map((l) => (
+        <div className={mobilePanel}>
+          <nav className="flex flex-col gap-1 p-4" aria-label="Mobile primary">
+            {navLinks.map((link) => (
               <NavLink
-                key={l.to}
-                to={l.to}
-                end={l.to === '/'}
+                key={link.to}
+                to={link.to}
+                end={link.to === '/'}
                 className={({ isActive }) =>
                   clsx(
-                    'text-[11px] uppercase tracking-editorial py-2 transition',
-                    isActive ? 'text-ink-900' : 'text-ink-500 hover:text-ink-900'
+                    'rounded-xl px-4 py-3 text-sm font-medium transition-colors',
+                    overHero &&
+                      (isActive ? 'bg-white/12 text-white' : 'text-white/85 hover:bg-white/8'),
+                    !overHero &&
+                      !isStudio &&
+                      (isActive ? 'bg-vs-accent/10 text-vs-accent' : 'text-vs-dark hover:bg-stone-100'),
+                    isStudio &&
+                      (isActive ? 'bg-white/12 text-white' : 'text-white/85 hover:bg-white/8')
                   )
                 }
               >
-                {l.label}
+                {link.label}
               </NavLink>
             ))}
-            {user ? (
-              <>
-                <p className="text-[11px] uppercase tracking-editorial text-ink-500 pt-2">
-                  {user.email}
-                </p>
-                <button
-                  onClick={handleSignOut}
-                  className="btn-ink text-[10px] py-2 px-4 text-center mt-2"
-                >
-                  Sign out
-                </button>
-              </>
-            ) : (
-              <Link to="/login" className="btn-ink text-[10px] py-2 px-4 text-center mt-2">
-                Sign in
-              </Link>
+            <Link
+              to="/studio"
+              className={clsx(
+                'mt-2 rounded-full px-4 py-3 text-center text-sm font-semibold',
+                overHero && 'bg-white text-vs-charcoal',
+                !overHero && !isStudio && 'bg-vs-accent text-white',
+                isStudio && 'bg-vs-accent text-white'
+              )}
+              onClick={() => setMobileOpen(false)}
+            >
+              Open Studio
+            </Link>
+            {user && (
+              <button
+                type="button"
+                onClick={() => {
+                  handleSignOut();
+                  setMobileOpen(false);
+                }}
+                className={clsx(
+                  'rounded-xl px-4 py-3 text-left text-sm',
+                  overHero && 'text-white/85 hover:bg-white/8',
+                  !overHero && !isStudio && 'text-vs-dark hover:bg-stone-100',
+                  isStudio && 'text-white/85 hover:bg-white/8'
+                )}
+              >
+                Sign Out
+              </button>
             )}
           </nav>
         </div>

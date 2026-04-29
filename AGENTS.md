@@ -8,13 +8,20 @@
 
 ### Current Phase
 
-Full-stack implementation — monorepo with React client, Express server, and FastAPI Python AI microservice. Supabase for auth, database, and storage.
+Full-stack implementation — monorepo with:
+- React + Vite product client (`client/`)
+- Express API server (`server/`)
+- FastAPI Python AI microservice (`python/`)
+- Next.js TypeScript marketing site (`marketing/`)
+
+Supabase remains the shared backend for auth, database, and storage.
 
 ## Tech Stack
 
 | Layer         | Technology                                    |
 | ------------- | --------------------------------------------- |
-| Client        | React 18.3 + Vite 5.3 + react-router-dom 6   |
+| Product Client | React 18.3 + Vite 5.4 + react-router-dom 6  |
+| Marketing Site | Next.js 16.2 + TypeScript + Tailwind CSS 4 + Framer Motion 12 |
 | 2D Canvas     | Konva 9.3 + react-konva 18.2 + Transformer    |
 | State         | Zustand 4.5                                   |
 | Styling       | Tailwind CSS 3.4 (warm neutral theme)         |
@@ -105,6 +112,23 @@ vision-studio/
 │           ├── Upload.jsx            # Drop-zone → AnalysisWorkflow → /studio/:roomId
 │           └── Studio.jsx            # Room dashboard (with delete) + responsive 3-panel editor (catalog drawer / canvas|3D / chat)
 │
+├── marketing/                    # Next.js TypeScript marketing site (separate from product app)
+│   ├── package.json
+│   ├── next.config.ts
+│   ├── tsconfig.json
+│   ├── postcss.config.mjs
+│   ├── eslint.config.mjs
+│   ├── public/
+│   │   ├── images/lucas portfolio/ # Portfolio imagery used by marketing homepage
+│   │   └── *.svg
+│   └── src/
+│       ├── app/
+│       │   ├── layout.tsx
+│       │   ├── page.tsx
+│       │   └── globals.css
+│       ├── components/landing/   # Hero, nav, section components for marketing page
+│       └── lib/images.ts         # URL helper for `public/images/lucas portfolio/*`
+│
 ├── server/                       # Node.js + Express backend
 │   ├── package.json
 │   ├── index.js                  # Express entry, CORS, route mounting
@@ -147,7 +171,6 @@ vision-studio/
 │       ├── object_recognition.py # Grounding DINO + SAM 3 via Replicate
 │       └── scale_estimator.py    # Manual calibration stub
 │
-└── app/                          # Legacy Next.js skeleton (to be removed)
 ```
 
 ## Environment Variables
@@ -169,6 +192,10 @@ vision-studio/
 - `OPENAI_API_KEY` (required for Codex 5.3 Vision room analysis)
 - `REPLICATE_API_TOKEN`
 - `PORT` (default: 5001)
+
+### Marketing (`marketing/.env*`)
+- Currently no required runtime env vars for local development
+- Add `NEXT_PUBLIC_*` variables only if marketing CTAs need environment-specific URLs
 
 ## State Management (Zustand)
 
@@ -271,4 +298,5 @@ The chat endpoint supports 9 layout manipulation functions via LLM tool use:
 - Environment variables come from `.env` files — never hardcode secrets
 - Server gracefully handles missing API keys (returns stubs/warnings)
 - Run `cd client && npx vite build` to verify client compiles
+- Run `cd marketing && npm run build` to verify marketing site compiles
 - **Update this AGENTS.md file whenever changes are made**

@@ -73,7 +73,7 @@ vision-studio/
 │   ├── tailwind.config.js        # paper/ink/sienna warm neutral palette, Fraunces + Inter fonts
 │   ├── postcss.config.js
 │   ├── index.html                # Google Fonts (Fraunces + Inter), entry point
-│   ├── .env.local                # Client env vars (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_API_URL)
+│   ├── .env.local                # Client env vars (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, VITE_API_URL)
 │   └── src/
 │       ├── main.jsx              # ReactDOM.createRoot + StrictMode + BrowserRouter
 │       ├── App.jsx               # Route shell with lazy-loaded pages, ErrorBoundary, HelmetProvider, Toaster
@@ -131,7 +131,7 @@ vision-studio/
 │   ├── index.js                  # Express entry: Helmet, CORS, rate-limit, image proxy, /health, /api/status, graceful shutdown
 │   ├── .env.example              # Template for server env vars
 │   ├── config/
-│   │   ├── env.js                # dotenv loader (root .env + server/.env; must be imported first)
+│   │   ├── env.js                # dotenv loader (root .env; must be imported first)
 │   │   └── defaults.js           # Export schema version, LLM config (gpt-5.4)
 │   ├── middleware/
 │   │   ├── auth.js               # requireAuth + optionalAuth (Supabase JWT + fallback test account: test@visionstudio.dev / test1234)
@@ -178,15 +178,18 @@ vision-studio/
 
 ## Environment Variables
 
-All three services read from the root `.env` file first, then their local `.env` files (which override).
+All three services read from the root `.env` file.
 
 ### Client (`client/.env.local`)
 - `VITE_SUPABASE_URL` — Supabase project URL
-- `VITE_SUPABASE_ANON_KEY` — Supabase anon key
+- `VITE_SUPABASE_ANON_KEY` — Supabase anon key (legacy alias)
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — preferred public Supabase client vars
 - `VITE_API_URL` — Backend URL (default: `http://localhost:3001`)
 
-### Server (`server/.env`)
-- `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+### Server (`root/.env`)
+- `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_PUBLIC_ANON_KEY` or `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (for auth verification client)
+- `SUPABASE_SERVICE_ROLE_KEY` (required for DB/admin operations)
 - `OPENAI_API_KEY` (required for chat assistant)
 - `REPLICATE_API_TOKEN` (optional — for AI room photo detection)
 - `MESHY_API_KEY` (optional — for 3D model generation)
@@ -400,4 +403,11 @@ The chat endpoint supports 15 layout manipulation functions via LLM tool use:
 - The LLM model is hardcoded to `gpt-5.4` across all services (server llmRouter, Python floorplan parser)
 - The `server/routes/models.js` route handles Meshy v2 image-to-3D generation with in-memory caching and background polling
 - The `server/scripts/applySchema.js` script can auto-apply the DB schema via pg-meta or psql — useful for CI/setup
+- `marketing/` is a separate Next.js app used for landing/experiments (runs with `cd marketing && npm run dev`)
+- Marketing Supabase SSR helpers live in:
+  - `marketing/src/utils/supabase/server.ts`
+  - `marketing/src/utils/supabase/client.ts`
+  - `marketing/src/utils/supabase/middleware.ts`
+  - `marketing/src/middleware.ts`
+  - Example query page: `marketing/src/app/todos/page.tsx`
 - **Update this AGENTS.md file whenever changes are made**

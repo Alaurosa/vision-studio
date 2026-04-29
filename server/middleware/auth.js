@@ -1,7 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
-const rawUrl = process.env.SUPABASE_URL;
-const rawKey = process.env.SUPABASE_ANON_KEY;
+const rawUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const rawKey =
+  process.env.SUPABASE_PUBLIC_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
 // Treat placeholder values (the <paste-...> scaffolding) as "not configured"
 // so we can still boot the server and let public/guest endpoints work.
@@ -13,7 +15,7 @@ const supabaseKey = rawKey && !looksLikePlaceholder(rawKey) ? rawKey : null;
 
 if (!supabaseUrl || !supabaseKey) {
   console.warn(
-    '[auth] SUPABASE_URL / SUPABASE_ANON_KEY missing or placeholder — auth is disabled; guest/public endpoints still work, all protected endpoints will 401.'
+    '[auth] Missing Supabase auth env vars in root .env (SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL, and SUPABASE_PUBLIC_ANON_KEY or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) — auth is disabled; guest/public endpoints still work, protected endpoints will 401.'
   );
 }
 

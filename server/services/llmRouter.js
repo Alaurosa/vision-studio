@@ -14,7 +14,7 @@ const openai = process.env.OPENAI_API_KEY
 export async function chat({ messages, systemPrompt, tools = [] }) {
   if (!openai) {
     return {
-      text: 'No OPENAI_API_KEY configured in server/.env — chat is disabled.',
+      text: 'No OPENAI_API_KEY configured in root .env — chat is disabled.',
       tool_calls: [],
       raw_message: null,
     };

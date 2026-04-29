@@ -9,7 +9,7 @@ import LoginModal from '@/components/auth/LoginModal';
 
 const isDraftId = (id) => typeof id === 'string' && id.startsWith('draft-');
 
-export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
+export default function StudioToolbar({ onToggleCatalog, catalogOpen, chatFullscreen, onToggleChatFullscreen }) {
   const {
     room, viewMode, setViewMode, gridEnabled, toggleGrid,
     isChatOpen, toggleChat, undo, redo, validate,
@@ -196,7 +196,12 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen }) {
       <ToolbarBtn onClick={() => runExport('svg')} disabled={exporting} className="hidden sm:inline-flex">SVG</ToolbarBtn>
       <ToolbarBtn onClick={() => runExport('dxf')} disabled={exporting} className="hidden sm:inline-flex">DXF</ToolbarBtn>
       <div className="h-5 w-px bg-ink-900/15 shrink-0" />
-      <ToolbarBtn onClick={toggleChat} active={isChatOpen} className="hidden md:inline-flex">Chat</ToolbarBtn>
+      <ToolbarBtn onClick={toggleChat} active={isChatOpen && !chatFullscreen} className="hidden md:inline-flex">Chat</ToolbarBtn>
+      {onToggleChatFullscreen && (
+        <ToolbarBtn onClick={onToggleChatFullscreen} active={chatFullscreen} className="hidden md:inline-flex">
+          {chatFullscreen ? 'Editor' : 'AI Full'}
+        </ToolbarBtn>
+      )}
 
       {/* Keyboard shortcuts */}
       <div className="relative shrink-0">

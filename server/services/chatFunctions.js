@@ -1,10 +1,22 @@
 /**
  * Chat tool definitions and execution logic.
- * Extracted from the 675-line chat.js route to improve maintainability.
  */
 import { useDb, supabaseAdmin, fallback } from './db.js';
 import { chat } from './llmRouter.js';
 import { resolveOverlaps, getEffectiveDims, validateLayout } from './overlapResolver.js';
+
+/** Fuzzy match: all words in needle must appear in haystack (diacritics-insensitive). */
+function fuzzyMatch(haystack, needle) {
+  const strip = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const words = strip(needle).split(/\s+/).filter(Boolean);
+  const h = strip(haystack);
+  return words.every(w => h.includes(w));
+}
+
+/** Find a placement by fuzzy name match. */
+function findPlacement(placements, name) {
+  return placements.find(p => fuzzyMatch(p.name || '', name));
+}
 
 /**
  * OpenAI function-calling tool definitions for the layout assistant.
@@ -174,7 +186,7 @@ export const LAYOUT_FUNCTIONS = [
 export async function executeFunction(fnName, args, roomId, placements, room, db) {
   switch (fnName) {
     case 'move_furniture': {
-      const p = placements.find((p) => p.name?.toLowerCase().includes(args.furniture_name.toLowerCase()));
+      const p = findPlacement(placements, args.furniture_name);
       if (!p) return { success: false, message: `Furniture "${args.furniture_name}" not found` };
       if (db) {
         await supabaseAdmin
@@ -187,7 +199,7 @@ export async function executeFunction(fnName, args, roomId, placements, room, db
       return { success: true, message: `Moved ${p.name} to (${args.x_inches}", ${args.y_inches}")` };
     }
     case 'rotate_furniture': {
-      const p = placements.find((p) => p.name?.toLowerCase().includes(args.furniture_name.toLowerCase()));
+      const p = findPlacement(placements, args.furniture_name);
       if (!p) return { success: false, message: `Furniture "${args.furniture_name}" not found` };
       if (db) {
         await supabaseAdmin.from('placements').update({ rotation: args.rotation }).eq('id', p.id);
@@ -246,10 +258,10 @@ export async function executeFunction(fnName, args, roomId, placements, room, db
       } else {
         fallback.addPlacement(placement);
       }
-      return { success: true, message: `Added ${item.name} to the room` };
+      return { success: true, message: `Added ${item.name} to the room`, added_item: { ...placement, image_url: item.image_url, model_url: item.model_url } };
     }
     case 'remove_furniture': {
-      const p = placements.find((p) => p.name?.toLowerCase().includes(args.furniture_name.toLowerCase()));
+      const p = findPlacement(placements, args.furniture_name);
       if (!p) return { success: false, message: `Furniture "${args.furniture_name}" not found` };
       if (db) {
         await supabaseAdmin.from('placements').delete().eq('id', p.id);
@@ -341,7 +353,7 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
       }
     }
     case 'swap_furniture': {
-      const current = placements.find(p => p.name?.toLowerCase().includes(args.current_furniture_name.toLowerCase()));
+      const current = findPlacement(placements, args.current_furniture_name);
       if (!current) return { success: false, message: `"${args.current_furniture_name}" not found in room` };
 
       let newItem;
@@ -374,7 +386,7 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
           x_inches: pos.x_inches, y_inches: pos.y_inches, rotation: pos.rotation, color: '#d4a27a',
         });
       }
-      return { success: true, message: `Replaced ${current.name} with ${newItem.name}`, refresh: true };
+      return { success: true, message: `Replaced ${current.name} with ${newItem.name}`, refresh: true, removed_name: current.name, added_item: { name: newItem.name, category: newItem.category, provider: newItem.provider, width: newItem.width, depth: newItem.depth, height: newItem.height, x_inches: pos.x_inches, y_inches: pos.y_inches, rotation: pos.rotation, color: '#d4a27a', image_url: newItem.image_url, model_url: newItem.model_url } };
     }
     case 'furnish_room': {
       if (!room?.width || !room?.depth) return { success: false, message: 'Room dimensions not set — upload a floor plan or set dimensions first' };

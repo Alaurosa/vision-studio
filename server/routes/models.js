@@ -1,6 +1,7 @@
 import express from 'express';
 import { optionalAuth } from '../middleware/auth.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
+import { log } from '../services/logger.js';
 import axios from 'axios';
 
 const router = express.Router();
@@ -66,13 +67,13 @@ router.post('/generate', optionalAuth, async (req, res) => {
 
     // Start background polling
     pollTask(taskId, image_url, catalog_id).catch(err => {
-      console.error('Model poll error:', err.message);
+      log.error('Model poll error', { error: err.message });
       modelCache.set(image_url, { status: 'failed', error: err.message });
     });
 
     res.json({ status: 'pending', task_id: taskId });
   } catch (err) {
-    console.error('Meshy submit error:', err.response?.data || err.message);
+    log.error('Meshy submit error', { error: err.message });
     res.status(500).json({ status: 'failed', error: err.response?.data?.message || err.message });
   }
 });
@@ -154,7 +155,7 @@ async function pollTask(taskId, imageUrl, catalogId) {
         return;
       }
     } catch (err) {
-      console.error('Poll error:', err.message);
+      log.error('Poll error', { error: err.message });
     }
   }
   modelCache.set(imageUrl, { status: 'failed', error: 'Timed out', taskId });

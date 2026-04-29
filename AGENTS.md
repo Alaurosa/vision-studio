@@ -80,9 +80,9 @@ vision-studio/
 │       ├── index.css             # Tailwind directives + editorial theme + component classes + a11y focus-visible + reduced-motion
 │       ├── lib/
 │       │   ├── supabaseClient.js # Supabase client singleton (graceful placeholder when keys missing)
-│       │   └── api.js            # Axios instance + Supabase JWT interceptor (auto-attaches Bearer token)
+│       │   └── api.js            # Axios instance + auth interceptor (Supabase JWT or fallback test token)
 │       ├── hooks/
-│       │   └── useAuth.js        # Auth state (signInWithPassword, signUp, signOut), session listener
+│       │   └── useAuth.js        # Auth state (signInWithPassword, signUp, signOut) + fallback test account (test@visionstudio.dev / test1234)
 │       ├── store/
 │       │   └── layoutStore.js    # Zustand: room, furniture, zones, detections, chat, view state, undo/redo, draft mode
 │       ├── utils/
@@ -98,8 +98,8 @@ vision-studio/
 │       │   │   ├── Navbar.jsx         # Top nav (Home/Upload/Studio/Chat), scroll-aware blur, mobile hamburger, skip-to-content
 │       │   │   └── Footer.jsx         # Editorial 4-column footer with semantic HTML (hidden on /studio routes)
 │       │   ├── canvas/
-│       │   │   ├── RoomCanvas.jsx     # Konva Stage with zoom/pan, room-zone overlays, and free-angle rotation controls
-│       │   │   ├── FurnitureItem.jsx  # Draggable/rotatable Konva Group with Transformer-based free rotation
+│       │   │   ├── RoomCanvas.jsx     # Konva Stage with zoom/pan, white background (no floorplan image), room-zone overlays, snap guides
+│       │   │   ├── FurnitureItem.jsx  # Draggable/rotatable Konva Group with Transformer, hover states, staggered fade-in animation (_animDelay)
 │       │   │   ├── WallOutline.jsx    # Wall polygon/segment renderer
 │       │   │   └── GridOverlay.jsx    # 6" snap grid (memoized)
 │       │   ├── upload/
@@ -121,9 +121,9 @@ vision-studio/
 │       └── pages/
 │           ├── Home.jsx              # Editorial landing (Batako-inspired: hero, process, quote band, services, CTA, smooth staggered reveals)
 │           ├── Login.jsx             # Email/password auth with Helmet SEO
-│           ├── Chat.jsx              # Full-screen AI design assistant — room selector, style preferences, rich chat (auth required)
+│           ├── Chat.jsx              # Full-page AI design assistant with minimize-to-editor toggle, style chips, quick prompts, draft room support
 │           ├── Upload.jsx            # Drop-zone → AnalysisWorkflow → /studio/:roomId (guest accessible)
-│           ├── Studio.jsx            # Room dashboard (with styled delete confirm) + responsive 3-panel editor (guest accessible)
+│           ├── Studio.jsx            # Room dashboard + responsive 3-panel editor + fullscreen AI chat on room entry (auto-minimizes on furniture placement)
 │           └── NotFound.jsx          # Polished 404 page with animated entry
 │
 ├── server/                       # Node.js + Express backend
@@ -134,7 +134,7 @@ vision-studio/
 │   │   ├── env.js                # dotenv loader (root .env + server/.env; must be imported first)
 │   │   └── defaults.js           # Export schema version, LLM config (gpt-5.4)
 │   ├── middleware/
-│   │   ├── auth.js               # Supabase JWT verification (graceful when unconfigured — returns 401)
+│   │   ├── auth.js               # requireAuth + optionalAuth (Supabase JWT + fallback test account: test@visionstudio.dev / test1234)
 │   │   └── errorHandler.js       # Centralized error handling with structured logger (5xx = error, 4xx = warn)
 │   ├── routes/
 │   │   ├── auth.js               # GET /api/auth/me
@@ -145,7 +145,7 @@ vision-studio/
 │   │   ├── publicParse.js        # POST /api/public/parse-floorplan — stateless guest parse, no auth, no DB writes
 │   │   ├── models.js             # Meshy API v2 image-to-3D GLB generation with in-memory cache + background polling
 │   │   ├── recognition.js        # Room photo → DINO detection + SAM click-segment
-│   │   └── export.js             # JSON/DXF/SVG download + latest export retrieval
+│   │   └── export.js             # JSON/DXF/SVG download + latest export retrieval + draft export routes (/export/{format}/draft)
 │   ├── services/
 │   │   ├── supabase.js           # Admin client (service role key, graceful placeholder when unconfigured)
 │   │   ├── db.js                 # Shared useDb() + re-exports supabaseAdmin/fallback
@@ -221,8 +221,6 @@ Store in `client/src/store/layoutStore.js` (wrapped with `zustand/persist` for d
 | `isChatOpen`            | `boolean`         | Chat panel visibility                        |
 | `undoStack`             | `array`           | Furniture state snapshots for undo           |
 | `redoStack`             | `array`           | Furniture state snapshots for redo           |
-| `draftFloorPlanDataUrl` | `string \| null`  | Base64 floor plan image for guest draft mode |
-| `draftScalePxPerInch`   | `number \| null`  | Scale factor for guest draft mode            |
 
 Actions: `loadRoom`, `createRoom`, `createDraftRoom`, `clearDraft`, `saveDraftToAccount`, `saveRoomGeometry`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`.
 

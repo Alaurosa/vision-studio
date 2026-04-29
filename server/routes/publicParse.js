@@ -3,6 +3,7 @@ import multer from 'multer';
 import axios from 'axios';
 import FormData from 'form-data';
 import { normalizeZones } from '../services/normalizeZones.js';
+import { log } from '../services/logger.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -34,7 +35,7 @@ router.post('/parse-floorplan', upload.single('file'), async (req, res) => {
     );
     parseResult = pythonRes.data;
   } catch (pyErr) {
-    console.warn('Python service unavailable (public parse):', pyErr.message);
+    log.warn('Python service unavailable (public parse)', { error: pyErr.message });
   }
 
   // Normalize zones the same way the authenticated path does so the client can reuse the editor.

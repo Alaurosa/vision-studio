@@ -3,6 +3,7 @@ import multer from 'multer';
 import FormData from 'form-data';
 import axios from 'axios';
 import { optionalAuth } from '../middleware/auth.js';
+import { log } from '../services/logger.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import { saveFileLocally } from '../services/fileStorage.js';
 import { normalizeZones } from '../services/normalizeZones.js';
@@ -145,7 +146,7 @@ router.post('/:id/upload-floorplan', optionalAuth, upload.single('file'), async 
         publicUrl = urlRes.data.publicUrl;
       }
     } catch (storageErr) {
-      console.warn('Storage upload failed (non-fatal):', storageErr.message);
+      log.warn('Storage upload failed (non-fatal)', { error: storageErr.message });
     }
 
     // Fallback: save locally if Supabase Storage didn't work
@@ -167,7 +168,7 @@ router.post('/:id/upload-floorplan', optionalAuth, upload.single('file'), async 
       );
       parseResult = pythonRes.data;
     } catch (pyErr) {
-      console.warn('Python service unavailable:', pyErr.message);
+      log.warn('Python service unavailable', { error: pyErr.message });
     }
 
     // 3. Save URL + parsed data to room
@@ -241,7 +242,7 @@ router.post('/:id/upload-floorplan', optionalAuth, upload.single('file'), async 
       },
     });
   } catch (err) {
-    console.error('Floor plan upload error:', err.message);
+    log.error('Floor plan upload error', { error: err.message });
     res.status(500).json({ error: err.message });
   }
 });

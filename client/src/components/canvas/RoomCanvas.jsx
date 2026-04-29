@@ -157,16 +157,16 @@ export default function RoomCanvas() {
   }, []);
 
   return (
-    <div ref={wrapRef} className="relative w-full h-full bg-paper-100" style={{ touchAction: 'none', userSelect: 'none' }}>
+    <div ref={wrapRef} className="relative w-full h-full bg-surface-800" style={{ touchAction: 'none', userSelect: 'none' }}>
       {/* Corner metadata */}
-      <div className="absolute top-4 left-4 eyebrow text-ink-500 z-10 pointer-events-none">
+      <div className="absolute top-4 left-4 text-xs text-surface-400 z-10 pointer-events-none font-mono">
         {room?.width ? `${inchesToFeet(room.width)} × ${inchesToFeet(room.depth)}` : 'Untitled canvas'}
       </div>
-      <div className="absolute bottom-4 right-4 eyebrow text-ink-500 z-10 pointer-events-none">
+      <div className="absolute bottom-4 right-4 text-xs text-surface-400 z-10 pointer-events-none font-mono">
         Zoom {(viewport.scale * 100).toFixed(0)}%
       </div>
       {placementWarning && (
-        <div className="absolute top-4 right-4 z-10 rounded-md border border-red-300 bg-white/95 px-3 py-2 text-[11px] uppercase tracking-editorial text-red-600 shadow-sm">
+        <div className="absolute top-4 right-4 z-10 rounded-md border border-red-500 bg-surface-900/95 px-3 py-2 text-xs text-red-400 shadow-lg backdrop-blur-sm">
           {placementWarning}
         </div>
       )}
@@ -196,8 +196,8 @@ export default function RoomCanvas() {
             <Rect
               x={roomOffsetX} y={roomOffsetY}
               width={focusPxW} height={focusPxH}
-              fill="#faf7f1"
-              stroke="#100f0d"
+              fill="#2a2a2a"
+              stroke="#404040"
               strokeWidth={2 / viewport.scale}
             />
           )}

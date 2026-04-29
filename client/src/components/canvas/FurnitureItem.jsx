@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Group, Rect, Text, Transformer } from 'react-konva';
+import { Group, Rect, Text, Transformer, Line } from 'react-konva';
 import { CATEGORY_COLORS } from '@/utils/constants';
 import { snapToGrid, getRotatedBoundingBox, normalizeRotation } from '@/utils/scale';
 import { getAABB, overlaps, withinRoom } from '@/utils/collision';
 import { GRID_SNAP_INCHES } from '@/utils/constants';
 
 export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selected, onSelect, onChange, room, allItems, onInvalidPlacement, placementBounds = null, viewOriginX = 0, viewOriginY = 0 }) {
+  const [dragState, setDragState] = useState({ isDragging: false, snapX: null, snapY: null });
   const groupRef = useRef(null);
   const transformerRef = useRef(null);
   const [opacity, setOpacity] = useState(item._animDelay != null ? 0 : 1);
@@ -82,21 +83,52 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
 
   const handleDragStart = (e) => {
     e.cancelBubble = true;
+    setDragState({ isDragging: true, snapX: null, snapY: null });
   };
 
   const handleDragMove = (e) => {
     e.cancelBubble = true;
+    const newCX = e.target.x();
+    const newCY = e.target.y();
+
+    // Calculate potential snap positions
+    const potentialX = (newCX - bboxW / 2 - offsetX) / pxPerInch + viewOriginX;
+    const potentialY = (newCY - bboxH / 2 - offsetY) / pxPerInch + viewOriginY;
+
+    const snappedX = snapToGrid(potentialX, GRID_SNAP_INCHES);
+    const snappedY = snapToGrid(potentialY, GRID_SNAP_INCHES);
+
+    const snapThreshold = 0.5; // inches
+    const shouldSnapX = Math.abs(potentialX - snappedX) < snapThreshold;
+    const shouldSnapY = Math.abs(potentialY - snappedY) < snapThreshold;
+
+    setDragState({
+      isDragging: true,
+      snapX: shouldSnapX ? snappedX : null,
+      snapY: shouldSnapY ? snappedY : null,
+    });
   };
 
   const handleDragEnd = (e) => {
     e.cancelBubble = true;
     const newCX = e.target.x();
     const newCY = e.target.y();
-    const xInches = snapToGrid((newCX - bboxW / 2 - offsetX) / pxPerInch + viewOriginX, GRID_SNAP_INCHES);
-    const yInches = snapToGrid((newCY - bboxH / 2 - offsetY) / pxPerInch + viewOriginY, GRID_SNAP_INCHES);
+
+    let xInches = (newCX - bboxW / 2 - offsetX) / pxPerInch + viewOriginX;
+    let yInches = (newCY - bboxH / 2 - offsetY) / pxPerInch + viewOriginY;
+
+    // Apply snapping if close to grid
+    const snappedX = snapToGrid(xInches, GRID_SNAP_INCHES);
+    const snappedY = snapToGrid(yInches, GRID_SNAP_INCHES);
+
+    const snapThreshold = 0.5; // inches
+    if (Math.abs(xInches - snappedX) < snapThreshold) xInches = snappedX;
+    if (Math.abs(yInches - snappedY) < snapThreshold) yInches = snappedY;
+
     const patch = { x_inches: Math.max(0, xInches), y_inches: Math.max(0, yInches) };
     if (!canCommitPatch(patch)) {
       revertNode();
+      setDragState({ isDragging: false, snapX: null, snapY: null });
       return;
     }
     e.target.position({
@@ -104,6 +136,7 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
       y: offsetY + (patch.y_inches - viewOriginY) * pxPerInch + bboxH / 2,
     });
     onChange(patch);
+    setDragState({ isDragging: false, snapX: null, snapY: null });
   };
 
   const handleTransformEnd = (e) => {
@@ -143,6 +176,8 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
         onTransformEnd={handleTransformEnd}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         onClick={(e) => { e.cancelBubble = true; onSelect(); }}
         onTap={(e) => { e.cancelBubble = true; onSelect(); }}
       >
@@ -150,11 +185,11 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
           width={w}
           height={d}
           fill={color}
-          stroke={selected ? '#100f0d' : 'rgba(16,15,13,0.35)'}
-          strokeWidth={selected ? 2 : 1}
-          cornerRadius={2}
-          shadowColor="rgba(0,0,0,0.15)"
-          shadowBlur={selected ? 12 : 4}
+          stroke={selected ? '#3b82f6' : hovered ? '#6b7280' : 'rgba(16,15,13,0.35)'}
+          strokeWidth={selected ? 3 : hovered ? 2 : 1}
+          cornerRadius={3}
+          shadowColor="rgba(0,0,0,0.2)"
+          shadowBlur={selected ? 16 : hovered ? 8 : 4}
           shadowOffset={{ x: 0, y: 2 }}
         />
         <Rect width={w} height={3} fill="rgba(16,15,13,0.35)" />
@@ -182,14 +217,41 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
           ref={transformerRef}
           enabledAnchors={[]}
           rotateEnabled
-          rotateAnchorOffset={22}
-          borderStroke="#100f0d"
-          borderStrokeWidth={1}
-          anchorStroke="#100f0d"
-          anchorFill="#faf7f1"
-          anchorSize={8}
+          rotateAnchorOffset={24}
+          borderStroke="#3b82f6"
+          borderStrokeWidth={2}
+          borderDash={[4, 4]}
+          anchorStroke="#3b82f6"
+          anchorFill="#ffffff"
+          anchorSize={10}
           keepRatio
           boundBoxFunc={(oldBox) => oldBox}
+        />
+      )}
+
+      {/* Snapping guides */}
+      {dragState.isDragging && dragState.snapX !== null && (
+        <Line
+          points={[
+            offsetX + (dragState.snapX - viewOriginX) * pxPerInch, 0,
+            offsetX + (dragState.snapX - viewOriginX) * pxPerInch, 10000
+          ]}
+          stroke="#10b981"
+          strokeWidth={2}
+          dash={[5, 5]}
+          opacity={0.8}
+        />
+      )}
+      {dragState.isDragging && dragState.snapY !== null && (
+        <Line
+          points={[
+            0, offsetY + (dragState.snapY - viewOriginY) * pxPerInch,
+            10000, offsetY + (dragState.snapY - viewOriginY) * pxPerInch
+          ]}
+          stroke="#10b981"
+          strokeWidth={2}
+          dash={[5, 5]}
+          opacity={0.8}
         />
       )}
     </>

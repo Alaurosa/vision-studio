@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Navbar color-mix() references */
+:root {
+  --vs-midnight: #040c2e;
+}
+
 /* ============================================
    Vision Studio — editorial architectural theme
    Warm paper base, deep ink display type

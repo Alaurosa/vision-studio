@@ -44,7 +44,7 @@ export default function App() {
 
       <div className="min-h-screen flex flex-col bg-paper-50 text-ink-900">
         <Navbar />
-        <main id="main-content" className="flex-1">
+        <main id="main-content" className="flex-1 pt-16">
           <ErrorBoundary>
             <Suspense fallback={<PageLoader />}>
               <Routes>

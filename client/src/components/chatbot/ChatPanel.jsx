@@ -72,11 +72,130 @@ export default function ChatPanel() {
         .flatMap((a) => a.result?.suggestions || []);
       if (suggestions.length) setRecommendedItems(suggestions);
 
-      // Refresh room if layout was mutated
-      const mutates = ['move_furniture', 'rotate_furniture', 'add_furniture',
-        'remove_furniture', 'arrange_room', 'swap_furniture', 'furnish_room'];
-      const didMutate = (data.actions || []).some((a) => mutates.includes(a.function));
-      if (didMutate) await loadRoom(room.id);
+      // Apply mutations to the room
+      const mutatingTools = ['move_furniture', 'rotate_furniture', 'add_furniture',
+        'remove_furniture', 'arrange_room', 'swap_furniture', 'furnish_room', 'clear_room'];
+      const didMutate = (data.actions || []).some((a) => mutatingTools.includes(a.function) && a.result?.success);
+
+      if (didMutate) {
+        const isDraft = room.id?.startsWith?.('draft-');
+        if (isDraft) {
+          // Draft rooms: apply mutations locally from action results
+          const store = useLayoutStore.getState();
+          for (const action of (data.actions || [])) {
+            const r = action.result;
+            if (!r?.success) continue;
+            switch (action.function) {
+              case 'add_furniture': {
+                const added = r.added_item;
+                if (added) {
+                  store.addFurniture({
+                    name: added.name, category: added.category, provider: added.provider,
+                    width: added.width, depth: added.depth, height: added.height,
+                    x_inches: added.x_inches || 12, y_inches: added.y_inches || 12,
+                    rotation: added.rotation || 0, color: added.color || '#d4a27a',
+                    image_url: added.image_url, model_url: added.model_url,
+                    _animDelay: 300,
+                  });
+                }
+                break;
+              }
+              case 'move_furniture':
+              case 'rotate_furniture': {
+                // Find the item by name and update it
+                const name = action.args?.furniture_name?.toLowerCase();
+                if (name) {
+                  const match = store.furniture.find(f => f.name?.toLowerCase().includes(name));
+                  if (match) {
+                    const patch = {};
+                    if (action.args.x_inches != null) patch.x_inches = action.args.x_inches;
+                    if (action.args.y_inches != null) patch.y_inches = action.args.y_inches;
+                    if (action.args.rotation != null) patch.rotation = action.args.rotation;
+                    store.updateFurniture(match.id, patch);
+                  }
+                }
+                break;
+              }
+              case 'remove_furniture': {
+                const name = action.args?.furniture_name?.toLowerCase();
+                if (name) {
+                  const match = store.furniture.find(f => f.name?.toLowerCase().includes(name));
+                  if (match) store.removeFurniture(match.id);
+                }
+                break;
+              }
+              case 'clear_room':
+                // Remove all furniture
+                for (const f of [...store.furniture]) store.removeFurniture(f.id);
+                break;
+              case 'swap_furniture': {
+                const removedName = r.removed_name?.toLowerCase();
+                if (removedName) {
+                  const match = store.furniture.find(f => f.name?.toLowerCase().includes(removedName));
+                  if (match) store.removeFurniture(match.id);
+                }
+                const added = r.added_item;
+                if (added) {
+                  store.addFurniture({
+                    name: added.name, category: added.category, provider: added.provider,
+                    width: added.width, depth: added.depth, height: added.height,
+                    x_inches: added.x_inches || 12, y_inches: added.y_inches || 12,
+                    rotation: added.rotation || 0, color: added.color || '#d4a27a',
+                    image_url: added.image_url, model_url: added.model_url,
+                    _animDelay: 300,
+                  });
+                }
+                break;
+              }
+              case 'furnish_room': {
+                const items = r.suggestions || [];
+                items.forEach((item, idx) => {
+                  store.addFurniture({
+                    name: item.name, category: item.category, provider: item.provider,
+                    width: item.width, depth: item.depth, height: item.height,
+                    x_inches: 12, y_inches: 12, rotation: 0, color: '#d4a27a',
+                    image_url: item.image_url, model_url: item.model_url,
+                    _animDelay: 400 + idx * 500,
+                  });
+                });
+                break;
+              }
+            }
+          }
+          // For furnish_room / arrange_room, re-fetch arranged positions
+          const hasArrange = (data.actions || []).some(a =>
+            ['arrange_room', 'furnish_room'].includes(a.function) && a.result?.success);
+          if (hasArrange) {
+            // The server arranged in the fallback store; we need to get those positions
+            // Send a follow-up auto-place request with current state
+            try {
+              const currentFurniture = useLayoutStore.getState().furniture;
+              if (currentFurniture.length > 0) {
+                const { data: arranged } = await api.post('/api/layout/auto-place', {
+                  room_id: room.id,
+                  room_context: { id: room.id, name: room.name, width: room.width, depth: room.depth },
+                  placements_context: currentFurniture.map(f => ({
+                    id: f.id, name: f.name, category: f.category, width: f.width,
+                    depth: f.depth, height: f.height, x_inches: f.x_inches,
+                    y_inches: f.y_inches, rotation: f.rotation,
+                  })),
+                });
+                for (const u of (arranged.placements || [])) {
+                  const match = useLayoutStore.getState().furniture.find(f => f.name === u.name);
+                  if (match) {
+                    useLayoutStore.getState().updateFurniture(match.id, {
+                      x_inches: u.x_inches, y_inches: u.y_inches, rotation: u.rotation,
+                    });
+                  }
+                }
+              }
+            } catch { /* auto-arrange is best-effort */ }
+          }
+        } else {
+          // Server-side rooms: just reload from DB
+          await loadRoom(room.id);
+        }
+      }
     } catch (e) {
       addChatMessage({
         role: 'assistant',

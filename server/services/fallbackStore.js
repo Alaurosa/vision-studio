@@ -178,9 +178,23 @@ export function addChatMessage(roomId, { role, content, tool_calls = null }) {
   return msg;
 }
 
-// Search catalog by name (fuzzy match for chatbot)
+// Search catalog by name (fuzzy match for chatbot — strips diacritics for forgiving matching)
+function stripDiacritics(s) {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 export function searchCatalogByName(name) {
-  return CATALOG.filter(i => i.name.toLowerCase().includes(name.toLowerCase()));
+  const words = stripDiacritics(name.toLowerCase()).split(/\s+/).filter(Boolean);
+  // Filter out common provider words that users add but aren't in the product name
+  const providerWords = new Set(['ikea', 'ashley', 'wayfair']);
+  const nameWords = words.filter(w => !providerWords.has(w));
+  const providerHint = words.find(w => providerWords.has(w));
+  return CATALOG.filter(i => {
+    const haystack = stripDiacritics(i.name.toLowerCase());
+    const wordsMatch = (nameWords.length > 0 ? nameWords : words).every(w => haystack.includes(w));
+    const providerMatch = !providerHint || i.provider === providerHint;
+    return wordsMatch && providerMatch;
+  });
 }
 
 // Layout exports (in-memory)

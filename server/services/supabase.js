@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 
-const rawUrl = process.env.SUPABASE_URL;
+const rawUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const rawKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const looksValidUrl = (v) => typeof v === 'string' && /^https?:\/\//i.test(v);
@@ -11,7 +11,7 @@ const key = rawKey && !looksLikePlaceholder(rawKey) ? rawKey : null;
 
 if (!url || !key) {
   console.warn(
-    'WARNING: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in server/.env — database operations will fail (guest/public endpoints still work).'
+    'WARNING: Missing SUPABASE URL or SUPABASE_SERVICE_ROLE_KEY. URL can come from SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL, but server still requires SUPABASE_SERVICE_ROLE_KEY for DB/admin operations.'
   );
 }
 

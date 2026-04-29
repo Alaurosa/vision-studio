@@ -3,12 +3,16 @@
 -- Run this entire block in Supabase SQL Editor
 -- ============================================================
 
+-- Needed for gen_random_uuid()
+create extension if not exists "pgcrypto";
+
+-- (You can keep this; it doesn't hurt)
 create extension if not exists "uuid-ossp";
 
 -- ============================================================
 -- PROVIDERS TABLE
 -- ============================================================
-create table if not exists providers (
+create table if not exists public.providers (
   id          text primary key,
   name        text not null,
   base_url    text,
@@ -17,7 +21,7 @@ create table if not exists providers (
   created_at  timestamptz default now()
 );
 
-insert into providers (id, name, base_url) values
+insert into public.providers (id, name, base_url) values
   ('ikea',    'IKEA',             'https://www.ikea.com/us/en/'),
   ('ashley',  'Ashley Furniture', 'https://www.ashleyfurniture.com/'),
   ('wayfair', 'Wayfair',          'https://www.wayfair.com/'),
@@ -27,11 +31,11 @@ on conflict do nothing;
 -- ============================================================
 -- FURNITURE CATALOG TABLE
 -- ============================================================
-create table if not exists furniture_catalog (
+create table if not exists public.furniture_catalog (
   id           uuid primary key default gen_random_uuid(),
   category     text not null,
   name         text not null,
-  provider     text references providers(id) default 'custom',
+  provider     text references public.providers(id) default 'custom',
   provider_id  text,
   width        numeric(8,2),
   depth        numeric(8,2),
@@ -45,17 +49,24 @@ create table if not exists furniture_catalog (
   created_at   timestamptz default now()
 );
 
-alter table furniture_catalog enable row level security;
-create policy "public catalog read" on furniture_catalog for select using (true);
+alter table public.furniture_catalog enable row level security;
+
+drop policy if exists "public catalog read" on public.furniture_catalog;
+
+create policy "public catalog read"
+on public.furniture_catalog
+for select
+to anon
+using (true);
 
 -- Unique constraint for upsert in seed script
 create unique index if not exists furniture_catalog_provider_provider_id_idx
-  on furniture_catalog (provider, provider_id);
+  on public.furniture_catalog (provider, provider_id);
 
 -- ============================================================
 -- ROOMS TABLE
 -- ============================================================
-create table if not exists rooms (
+create table if not exists public.rooms (
   id                  uuid primary key default gen_random_uuid(),
   user_id             uuid references auth.users(id) on delete cascade,
   name                text not null default 'My Room',
@@ -72,19 +83,27 @@ create table if not exists rooms (
   created_at          timestamptz default now(),
   updated_at          timestamptz default now()
 );
--- Additive migration for existing deployments
-alter table rooms add column if not exists zones jsonb;
 
-alter table rooms enable row level security;
-create policy "own rooms" on rooms for all using (auth.uid() = user_id);
+-- Additive migration for existing deployments
+alter table public.rooms add column if not exists zones jsonb;
+
+alter table public.rooms enable row level security;
+
+drop policy if exists "own rooms" on public.rooms;
+
+create policy "own rooms"
+on public.rooms
+for all
+to public
+using (auth.uid() = user_id);
 
 -- ============================================================
 -- PLACEMENTS TABLE
 -- ============================================================
-create table if not exists placements (
+create table if not exists public.placements (
   id           uuid primary key default gen_random_uuid(),
-  room_id      uuid references rooms(id) on delete cascade,
-  catalog_id   uuid references furniture_catalog(id),
+  room_id      uuid references public.rooms(id) on delete cascade,
+  catalog_id   uuid references public.furniture_catalog(id),
   name         text,
   category     text,
   provider     text,
@@ -102,38 +121,61 @@ create table if not exists placements (
   created_at   timestamptz default now(),
   updated_at   timestamptz default now()
 );
--- Additive migration for existing deployments
-alter table placements add column if not exists zone_id text;
 
-alter table placements enable row level security;
-create policy "own placements" on placements for all
-  using (exists (
-    select 1 from rooms r where r.id = placements.room_id and r.user_id = auth.uid()
-  ));
+-- Additive migration for existing deployments
+alter table public.placements add column if not exists zone_id text;
+
+alter table public.placements enable row level security;
+
+drop policy if exists "own placements" on public.placements;
+
+create policy "own placements"
+on public.placements
+for all
+to public
+using (
+  exists (
+    select 1
+    from public.rooms r
+    where r.id = public.placements.room_id
+      and r.user_id = auth.uid()
+  )
+);
 
 -- ============================================================
 -- LAYOUT EXPORTS TABLE
 -- ============================================================
-create table if not exists layout_exports (
+create table if not exists public.layout_exports (
   id           uuid primary key default gen_random_uuid(),
-  room_id      uuid references rooms(id) on delete cascade,
+  room_id      uuid references public.rooms(id) on delete cascade,
   layout_json  jsonb not null,
   schema_version text default '1.0',
   created_at   timestamptz default now()
 );
 
-alter table layout_exports enable row level security;
-create policy "own exports" on layout_exports for all
-  using (exists (
-    select 1 from rooms r where r.id = layout_exports.room_id and r.user_id = auth.uid()
-  ));
+alter table public.layout_exports enable row level security;
+
+drop policy if exists "own exports" on public.layout_exports;
+
+create policy "own exports"
+on public.layout_exports
+for all
+to public
+using (
+  exists (
+    select 1
+    from public.rooms r
+    where r.id = public.layout_exports.room_id
+      and r.user_id = auth.uid()
+  )
+);
 
 -- ============================================================
 -- CHAT HISTORY TABLE
 -- ============================================================
-create table if not exists chat_messages (
+create table if not exists public.chat_messages (
   id          uuid primary key default gen_random_uuid(),
-  room_id     uuid references rooms(id) on delete cascade,
+  room_id     uuid references public.rooms(id) on delete cascade,
   role        text not null,
   content     text not null,
   tool_calls  jsonb,
@@ -141,8 +183,19 @@ create table if not exists chat_messages (
   created_at  timestamptz default now()
 );
 
-alter table chat_messages enable row level security;
-create policy "own chat" on chat_messages for all
-  using (exists (
-    select 1 from rooms r where r.id = chat_messages.room_id and r.user_id = auth.uid()
-  ));
+alter table public.chat_messages enable row level security;
+
+drop policy if exists "own chat" on public.chat_messages;
+
+create policy "own chat"
+on public.chat_messages
+for all
+to public
+using (
+  exists (
+    select 1
+    from public.rooms r
+    where r.id = public.chat_messages.room_id
+      and r.user_id = auth.uid()
+  )
+);

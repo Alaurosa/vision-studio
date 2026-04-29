@@ -8,7 +8,6 @@ server/node_modules/
 .env.local
 .env.*.local
 client/.env.local
-server/.env
 python/.env
 
 # Build outputs

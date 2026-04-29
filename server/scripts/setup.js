@@ -15,11 +15,7 @@
 import '../config/env.js';
 import { createClient } from '@supabase/supabase-js';
 
-const REQUIRED_VARS = [
-  'SUPABASE_URL',
-  'SUPABASE_ANON_KEY',
-  'SUPABASE_SERVICE_ROLE_KEY',
-];
+const REQUIRED_VARS = ['SUPABASE_SERVICE_ROLE_KEY'];
 
 const OPTIONAL_VARS = [
   'OPENAI_API_KEY',
@@ -37,6 +33,17 @@ async function main() {
   // 1. Check environment variables
   console.log('1. Environment Variables');
   let envOk = true;
+  const resolvedUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const resolvedAnonKey =
+    process.env.SUPABASE_PUBLIC_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  console.log(
+    `   ${resolvedUrl ? '✅' : '❌'} SUPABASE_URL: ${resolvedUrl ? 'set (SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL)' : 'MISSING (required)'}`
+  );
+  console.log(
+    `   ${resolvedAnonKey ? '✅' : '⚠️ '} SUPABASE_PUBLIC_ANON_KEY: ${resolvedAnonKey ? 'set (SUPABASE_PUBLIC_ANON_KEY or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)' : 'not set (optional for setup script)'}`
+  );
+  if (!resolvedUrl) envOk = false;
   for (const v of REQUIRED_VARS) {
     const set = !!process.env[v];
     console.log(`   ${set ? '✅' : '❌'} ${v}: ${set ? 'set' : 'MISSING (required)'}`);
@@ -54,7 +61,7 @@ async function main() {
 
   // 2. Test Supabase connection
   console.log('2. Supabase Connection');
-  const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const sb = createClient(resolvedUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
   
   try {
     const { data, error } = await sb.auth.admin.listUsers({ perPage: 1 });
@@ -78,7 +85,7 @@ async function main() {
   console.log();
 
   if (!tablesExist) {
-    const ref = (process.env.SUPABASE_URL || '').replace('https://', '').replace('.supabase.co', '');
+    const ref = (resolvedUrl || '').replace('https://', '').replace('.supabase.co', '');
     console.log('⚠️  Some tables are missing or not accessible.');
     console.log('');
     console.log('   To fix this, run the schema in Supabase SQL Editor:');

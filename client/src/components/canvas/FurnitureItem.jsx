@@ -7,6 +7,7 @@ import { GRID_SNAP_INCHES } from '@/utils/constants';
 
 export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selected, onSelect, onChange, room, allItems, onInvalidPlacement, placementBounds = null, viewOriginX = 0, viewOriginY = 0 }) {
   const [dragState, setDragState] = useState({ isDragging: false, snapX: null, snapY: null });
+  const [hovered, setHovered] = useState(false);
   const groupRef = useRef(null);
   const transformerRef = useRef(null);
   const [opacity, setOpacity] = useState(item._animDelay != null ? 0 : 1);

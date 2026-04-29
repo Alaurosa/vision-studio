@@ -3,6 +3,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import multer from 'multer';
 import { optionalAuth } from '../middleware/auth.js';
+import { log } from '../services/logger.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import { saveFileLocally } from '../services/fileStorage.js';
 
@@ -35,7 +36,7 @@ router.post('/room-photo/:room_id', optionalAuth, upload.single('file'), async (
         const urlRes = supabaseAdmin.storage.from('room-photos').getPublicUrl(fileName);
         publicUrl = urlRes.data.publicUrl;
       } catch (storageErr) {
-        console.warn('Room photo storage upload failed:', storageErr.message);
+        log.warn('Room photo storage upload failed', { error: storageErr.message });
       }
     }
 
@@ -59,7 +60,7 @@ router.post('/room-photo/:room_id', optionalAuth, upload.single('file'), async (
       );
       detections = detectionRes.data.detections || [];
     } catch (pyErr) {
-      console.warn('Object detection unavailable:', pyErr.message);
+      log.warn('Object detection unavailable', { error: pyErr.message });
     }
 
     // 4. Save to room
@@ -82,7 +83,7 @@ router.post('/room-photo/:room_id', optionalAuth, upload.single('file'), async (
 
     res.json({ room_photo_url: publicUrl, detections });
   } catch (err) {
-    console.error('Object recognition error:', err.message);
+    log.error('Object recognition error', { error: err.message });
     res.status(500).json({ error: err.message });
   }
 });

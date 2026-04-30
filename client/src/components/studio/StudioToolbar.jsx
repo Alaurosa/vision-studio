@@ -14,7 +14,7 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen, chatFullsc
     room, viewMode, setViewMode, gridEnabled, toggleGrid,
     isChatOpen, toggleChat, undo, redo, validate,
     selectedId, furniture, rotateFurniture, removeFurniture,
-    saveDraftToAccount,
+    saveProject,
   } = useLayoutStore();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -108,18 +108,18 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen, chatFullsc
   };
 
   // Called either directly (if already signed in) or after the login modal finishes.
-  const pushDraftToServer = async () => {
+  const runSave = async () => {
     setSaving(true);
     setSaveMsg(null);
     try {
-      const serverRoom = await saveDraftToAccount();
+      const serverRoom = await saveProject();
       setSaveMsg('Saved ✓');
-      toast.success('Room saved to your account!');
+      toast.success(draft ? 'Room saved to your account!' : 'Project saved');
       setTimeout(() => setSaveMsg(null), 3000);
-      // Switch the URL to the now-real room id.
-      if (serverRoom?.id) navigate(`/studio/${serverRoom.id}`, { replace: true });
+      // Draft just became a real room — swap to its server id.
+      if (draft && serverRoom?.id) navigate(`/studio/${serverRoom.id}`, { replace: true });
     } catch (e) {
-      console.error('save draft', e);
+      console.error('save project', e);
       const msg = e?.response?.data?.error || e.message || 'Save failed';
       setSaveMsg(msg);
       toast.error(msg);
@@ -130,12 +130,18 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen, chatFullsc
   };
 
   const onSaveClick = async () => {
-    if (!user) {
+    if (draft && !user) {
       setShowLogin(true);
       return;
     }
-    await pushDraftToServer();
+    await runSave();
   };
+
+  const saveLabel = saving
+    ? 'Saving…'
+    : draft
+      ? (user ? 'Save Project' : 'Sign in & Save')
+      : 'Save Project';
 
   return (
     <div className="h-14 border-b border-ink-900/10 bg-paper-50 flex items-center px-4 md:px-6 gap-2 md:gap-4 overflow-x-auto">
@@ -161,14 +167,14 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen, chatFullsc
         </span>
       )}
 
-      {/* Save-to-account — only shown while editing a draft */}
-      {draft && (
+      {/* Save Project — always available so users can flush pending edits and confirm progress */}
+      {room && (
         <button
           onClick={onSaveClick}
           disabled={saving}
           className="shrink-0 text-[10px] uppercase tracking-editorial px-4 py-1.5 rounded-full border bg-ink-900 text-paper-50 border-ink-900 hover:bg-ink-800 transition disabled:opacity-50"
         >
-          {saving ? 'Saving…' : user ? 'Save to account' : 'Sign in & save'}
+          {saveLabel}
         </button>
       )}
 
@@ -229,7 +235,7 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen, chatFullsc
           onClose={() => setShowLogin(false)}
           onAuthed={async () => {
             setShowLogin(false);
-            await pushDraftToServer();
+            await runSave();
           }}
         />
       )}

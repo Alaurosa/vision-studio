@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -8,22 +8,30 @@ import { useAuth } from '@/hooks/useAuth';
 import { useLayoutStore } from '@/store/layoutStore';
 import AnalysisWorkflow from '@/components/upload/AnalysisWorkflow';
 import RoomEditor from '@/components/upload/RoomEditor';
+import { createProjectDraft, getProjectById, upsertProject } from '@/utils/projectCompat';
 
 export default function Upload() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const isGuest = !user;
   const createDraftRoom = useLayoutStore((s) => s.createDraftRoom);
+  const setProjectTheme = useLayoutStore((s) => s.setProjectTheme);
 
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
-  const [roomName, setRoomName] = useState('');
+  const [projectName, setProjectName] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState(null);
 
   // Post-analysis state for the room editor
   // { room, imageUrl, parseResult }
   const [editorData, setEditorData] = useState(null);
+  const [spaceReview, setSpaceReview] = useState(null);
+  const [visionStep, setVisionStep] = useState(false);
+  const [visionPrompt, setVisionPrompt] = useState('');
+  const [visionStyle, setVisionStyle] = useState([]);
+  const [inspirationImageName, setInspirationImageName] = useState('');
 
   const inputRef = useRef(null);
 
@@ -60,6 +68,40 @@ export default function Upload() {
     toast.error(message);
   };
 
+  const upsertSpace = (index, patch) => {
+    setSpaceReview((prev) => {
+      if (!prev) return prev;
+      const next = [...prev.spaces];
+      next[index] = { ...next[index], ...patch };
+      return { ...prev, spaces: next };
+    });
+  };
+
+  const addSpace = (type = 'interior') => {
+    setSpaceReview((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        spaces: [
+          ...prev.spaces,
+          {
+            id: `space-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+            name: type === 'interior' ? `Interior ${prev.spaces.length + 1}` : `Exterior ${prev.spaces.length + 1}`,
+            type,
+            zoneId: null,
+          },
+        ],
+      };
+    });
+  };
+
+  const removeSpace = (index) => {
+    setSpaceReview((prev) => {
+      if (!prev) return prev;
+      return { ...prev, spaces: prev.spaces.filter((_, i) => i !== index) };
+    });
+  };
+
   const onEditorConfirm = async (finalZones) => {
     if (!editorData?.room) return;
 
@@ -87,35 +129,88 @@ export default function Upload() {
       roomDepth = editorData.parseResult.boundary.h / scale;
     }
 
-    // --- Guest path: build a draft room entirely client-side, then enter studio.
-    if (isGuest) {
-      try {
-        const draft = createDraftRoom({
-          name: roomName || 'Untitled draft',
-          width: Math.round(roomWidth),
-          depth: Math.round(roomDepth),
-          scale_px_per_inch: scale,
-          zones: normalizedZones,
-        });
-        navigate(`/studio/${draft.id}`);
-      } catch (err) {
-        console.error('Failed to create draft room:', err);
-        setError('Could not build your draft room. Please try again.');
-      }
-      return;
+    const spaces = [
+      ...normalizedZones.map((zone) => ({
+        id: `space-${zone.id}`,
+        name: zone.name,
+        type: 'interior',
+        zoneId: zone.id,
+      })),
+      { id: `space-${Date.now().toString(36)}-front`, name: 'Front Yard', type: 'exterior', zoneId: null },
+      { id: `space-${Date.now().toString(36)}-back`, name: 'Backyard', type: 'exterior', zoneId: null },
+      { id: `space-${Date.now().toString(36)}-entry`, name: 'Entry', type: 'exterior', zoneId: null },
+    ];
+    setSpaceReview({
+      sourceRoomId: editorData.room.id,
+      normalizedZones,
+      roomWidth: Math.round(roomWidth),
+      roomDepth: Math.round(roomDepth),
+      scale,
+      spaces,
+    });
+    setEditorData(null);
+  };
+
+  const finalizeProject = async () => {
+    if (!spaceReview) return;
+    const projectIdParam = searchParams.get('projectId');
+    let project = projectIdParam ? getProjectById(projectIdParam) : null;
+    if (!project) {
+      project = createProjectDraft({
+        name: searchParams.get('projectName') || projectName || 'Untitled Project',
+        propertyType: searchParams.get('propertyType') || 'House',
+        startMode: 'upload',
+      });
     }
 
-    // --- Authed path: the server already owns the room; just save zones.
-    try {
-      await api.put(`/api/rooms/${editorData.room.id}`, {
-        zones: normalizedZones,
-        width: Math.round(roomWidth),
-        depth: Math.round(roomDepth),
+    const theme = {
+      styleChips: visionStyle,
+      prompt: visionPrompt,
+      inspirationImageName,
+      updatedAt: new Date().toISOString(),
+    };
+    setProjectTheme(theme);
+
+    let roomId = spaceReview.sourceRoomId;
+    const payload = {
+      zones: spaceReview.normalizedZones,
+      width: spaceReview.roomWidth,
+      depth: spaceReview.roomDepth,
+    };
+
+    if (isGuest) {
+      const draft = createDraftRoom({
+        name: projectName || `${project.name} - Floorplan`,
+        width: spaceReview.roomWidth,
+        depth: spaceReview.roomDepth,
+        scale_px_per_inch: spaceReview.scale,
+        zones: spaceReview.normalizedZones,
       });
-      navigate(`/studio/${editorData.room.id}`);
-    } catch (err) {
-      console.error('Failed to save rooms:', err);
-      navigate(`/studio/${editorData.room.id}`);
+      roomId = draft.id;
+    } else {
+      try {
+        await api.put(`/api/rooms/${spaceReview.sourceRoomId}`, payload);
+      } catch (err) {
+        console.error('Failed to save room updates:', err);
+      }
+    }
+
+    const mergedSpaces = spaceReview.spaces.map((space) => ({
+      ...space,
+      roomId,
+      placeholderMode: space.type === 'exterior',
+    }));
+    const firstSpace = mergedSpaces[0] || null;
+    project.spaces = mergedSpaces;
+    project.theme = theme;
+    project.updatedAt = new Date().toISOString();
+    upsertProject(project);
+
+    if (firstSpace) {
+      const params = new URLSearchParams({ projectId: project.id, spaceId: firstSpace.id });
+      navigate(`/studio/${roomId}?${params.toString()}`);
+    } else {
+      navigate('/studio');
     }
   };
 
@@ -192,20 +287,20 @@ export default function Upload() {
             <div className="sticky top-24 rounded-[22px] border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] p-8 shadow-[0_18px_40px_rgba(4,12,46,0.06)]">
               <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-vs-accent mb-6">Project Details</div>
               <label className="block mb-6">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] mb-2 text-[#5b5b5b]">Room name</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] mb-2 text-[#5b5b5b]">Project name</div>
                 <input
                   className="input-field bg-[#fffdf9]"
-                  value={roomName}
-                  onChange={(e) => setRoomName(e.target.value)}
-                  placeholder="Untitled room"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  placeholder="Untitled project"
                 />
               </label>
 
               <div className="text-[11px] font-semibold uppercase tracking-[0.22em] mb-2 text-[#5b5b5b]">What happens next</div>
               <ol className="text-sm text-[#2d2d2d] space-y-2 mb-8">
-                <li>01 Upload plan or room photo</li>
-                <li>02 Confirm detected rooms and scale</li>
-                <li>03 Continue into studio layout</li>
+                <li>01 Upload plan or property photo</li>
+                <li>02 Confirm detected spaces and scale</li>
+                <li>03 Set project vision and enter studio</li>
               </ol>
 
               {error && (
@@ -226,7 +321,7 @@ export default function Upload() {
                 onClick={() => navigate('/studio')}
                 className="btn-ghost mt-3 w-full"
               >
-                Use Sample Room
+                Use Sample Project
               </button>
               <p className="text-[11px] text-ink-400 mt-4 leading-relaxed">
                 No floorplan handy? Skip the upload and start from a blank template
@@ -246,7 +341,7 @@ export default function Upload() {
           >
             <AnalysisWorkflow
               file={file}
-              roomName={roomName || 'Untitled room'}
+              roomName={projectName || 'Untitled project'}
               isGuest={isGuest}
               onComplete={onAnalysisComplete}
               onError={onAnalysisError}
@@ -268,6 +363,79 @@ export default function Upload() {
             onConfirm={onEditorConfirm}
             onCancel={onEditorCancel}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Space confirmation step */}
+      <AnimatePresence>
+        {spaceReview && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-[#f6f3ee]/95 backdrop-blur-sm grid place-items-center p-4">
+            <div className="w-full max-w-3xl rounded-[22px] border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] p-8">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-vs-accent mb-3">Confirm Spaces</div>
+              <h2 className="display-md mb-2">Review interior and exterior spaces</h2>
+              <p className="text-sm text-[#5b5b5b] mb-6">Rename spaces, change type, remove false detections, or add missed spaces.</p>
+              <div className="space-y-3 max-h-[45vh] overflow-y-auto pr-1">
+                {spaceReview.spaces.map((space, idx) => (
+                  <div key={space.id} className="grid grid-cols-12 gap-2 items-center border border-[rgba(0,0,0,0.08)] rounded-lg p-3 bg-[#fffdf9]">
+                    <input className="col-span-6 input-field bg-transparent" value={space.name} onChange={(e) => upsertSpace(idx, { name: e.target.value })} />
+                    <select className="col-span-4 input-field bg-transparent" value={space.type} onChange={(e) => upsertSpace(idx, { type: e.target.value })}>
+                      <option value="interior">Interior</option>
+                      <option value="exterior">Exterior</option>
+                    </select>
+                    <button className="col-span-2 text-[10px] uppercase tracking-editorial text-red-600" onClick={() => removeSpace(idx)}>Delete</button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button className="btn-ghost" onClick={() => addSpace('interior')}>+ Interior</button>
+                <button className="btn-ghost" onClick={() => addSpace('exterior')}>+ Exterior</button>
+              </div>
+              <div className="flex justify-end gap-3 mt-6">
+                <button className="btn-ghost" onClick={() => setSpaceReview(null)}>Cancel</button>
+                <button className="btn-ink" onClick={() => { setSpaceReview((s) => ({ ...s })); setVisionStep(true); }}>Continue</button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Whole-property vision onboarding */}
+      <AnimatePresence>
+        {spaceReview && visionStep && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] bg-[#f6f3ee]/95 backdrop-blur-sm grid place-items-center p-4">
+            <div className="w-full max-w-2xl rounded-[22px] border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] p-8">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-vs-accent mb-3">Vision Step</div>
+              <h2 className="display-md mb-2">What feeling should guests have when entering?</h2>
+              <p className="text-sm text-[#5b5b5b] mb-5">Set a whole-property theme before entering the studio.</p>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {['Warm', 'Modern', 'Minimal', 'Coastal', 'Industrial', 'Organic'].map((chip) => {
+                  const active = visionStyle.includes(chip);
+                  return (
+                    <button key={chip}
+                      onClick={() => setVisionStyle((prev) => (prev.includes(chip) ? prev.filter((c) => c !== chip) : [...prev, chip]))}
+                      className={`text-[10px] uppercase tracking-editorial rounded-full px-3 py-1.5 border ${active ? 'border-[#004aad]/45 text-[#004aad] bg-[#eef4f7]' : 'border-[rgba(0,0,0,0.08)] text-[#5b5b5b]'}`}>
+                      {chip}
+                    </button>
+                  );
+                })}
+              </div>
+              <textarea className="w-full min-h-[110px] rounded-xl border border-[rgba(0,0,0,0.08)] bg-[#fffdf9] p-4 text-sm"
+                value={visionPrompt}
+                onChange={(e) => setVisionPrompt(e.target.value)}
+                placeholder="Describe the whole-house mood, circulation feel, and design intent..." />
+              <label className="mt-4 block text-sm text-[#5b5b5b]">
+                Inspiration image (optional)
+                <input type="file" accept="image/*" className="mt-1 block w-full text-sm" onChange={(e) => setInspirationImageName(e.target.files?.[0]?.name || '')} />
+                {inspirationImageName && <span className="text-xs text-[#171717]">Selected: {inspirationImageName}</span>}
+              </label>
+              <div className="flex justify-end gap-3 mt-6">
+                <button className="btn-ghost" onClick={() => setVisionStep(false)}>Back</button>
+                <button className="btn-ink" onClick={finalizeProject}>Enter Studio</button>
+              </div>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

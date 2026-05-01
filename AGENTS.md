@@ -88,7 +88,8 @@ vision-studio/
 │       ├── utils/
 │       │   ├── constants.js      # Grid snap, clearance, category colors/labels, room templates, zone colors (16 presets + random generator)
 │       │   ├── scale.js          # px↔inches conversion, snap-to-grid, rotation helpers, inchesToFeet formatter
-│       │   └── collision.js      # AABB detection (arbitrary rotation), overlap check, room bounds validation
+│       │   ├── collision.js      # AABB detection (arbitrary rotation), overlap check, room bounds validation
+│       │   └── projectCompat.js  # Frontend-only project compatibility layer (localStorage `vs-projects-v1`) + helper metadata for Phase 2 schema planning
 │       ├── components/
 │       │   ├── ErrorBoundary.jsx      # React class error boundary with polished fallback UI
 │       │   ├── ConfirmModal.jsx       # Animated confirmation modal with Framer Motion (replaces window.confirm)
@@ -122,8 +123,8 @@ vision-studio/
 │           ├── Home.jsx              # Editorial landing (Batako-inspired: hero, process, quote band, services, CTA, smooth staggered reveals)
 │           ├── Login.jsx             # Email/password auth with Helmet SEO
 │           ├── Chat.jsx              # Full-page AI design assistant with minimize-to-editor toggle, style chips, quick prompts, draft room support
-│           ├── Upload.jsx            # Drop-zone → AnalysisWorkflow → /studio/:roomId (guest accessible)
-│           ├── Studio.jsx            # Room dashboard + responsive 3-panel editor + fullscreen AI chat on room entry (auto-minimizes on furniture placement)
+│           ├── Upload.jsx            # Floorplan intake → AI analysis → room-zone editor → space confirmation (interior/exterior typing) → project vision onboarding → Studio
+│           ├── Studio.jsx            # Project-first dashboard (/studio) + project workspace routes (/studio/project/:projectId[/spaceId]) + existing room editor route (/studio/:roomId)
 │           └── NotFound.jsx          # Polished 404 page with animated entry
 │
 ├── server/                       # Node.js + Express backend
@@ -221,6 +222,7 @@ Store in `client/src/store/layoutStore.js` (wrapped with `zustand/persist` for d
 | `zones`                 | `array`           | Confirmed sub-rooms `{id,name,color,polygon,bbox,width,depth}` |
 | `activeZoneId`          | `string \| null`  | Currently focused sub-room (null = whole plan) |
 | `chatHistory`           | `array`           | Chat messages for current room               |
+| `projectTheme`          | `object \| null`  | Whole-property vision metadata collected during project onboarding |
 | `recommendedItems`      | `array`           | AI-recommended catalog items for display     |
 | `loading`               | `boolean`         | Global loading state                         |
 | `viewMode`              | `string`          | '2d' or '3d'                                 |
@@ -229,7 +231,7 @@ Store in `client/src/store/layoutStore.js` (wrapped with `zustand/persist` for d
 | `undoStack`             | `array`           | Furniture state snapshots for undo           |
 | `redoStack`             | `array`           | Furniture state snapshots for redo           |
 
-Actions: `loadRoom`, `createRoom`, `createDraftRoom`, `clearDraft`, `saveDraftToAccount`, `saveRoomGeometry`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`.
+Actions: `loadRoom`, `createRoom`, `createDraftRoom`, `clearDraft`, `saveDraftToAccount`, `saveRoomGeometry`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setProjectTheme`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`.
 
 Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furnitureBelongsToZone`, `normalizeDetectedObjects`, `normalizeZoneObjects` — handle various zone/detection data shapes from the server.
 
@@ -260,6 +262,19 @@ Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furn
 | DELETE | `/api/rooms/:id` | Delete room and associated placements |
 | POST | `/api/rooms/:id/upload-floorplan` | Upload floor plan → Python AI parse → zone extraction + dimension detection |
 | POST | `/api/rooms/:id/calibrate` | Two-point scale calibration (p1, p2, real_world_inches) |
+
+### Project Routes (Phase 2 additive alignment)
+
+| Method | Route | Description |
+| --- | --- | --- |
+| GET | `/api/projects` | List user projects with nested spaces |
+| POST | `/api/projects` | Create project metadata (`property_type`, `scope`, `global_vision`, `status`) |
+| GET | `/api/projects/:id` | Get single project with spaces |
+| PUT | `/api/projects/:id` | Update project metadata |
+| DELETE | `/api/projects/:id` | Delete project (space records cascade) |
+| POST | `/api/projects/:projectId/spaces` | Create space and auto-link/create room-compatible editor record |
+| PUT | `/api/projects/:projectId/spaces/:spaceId` | Update space metadata |
+| DELETE | `/api/projects/:projectId/spaces/:spaceId` | Delete space metadata |
 
 ### Furniture Routes
 
@@ -329,6 +344,8 @@ Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furn
 - **`providers`** — IKEA, Ashley, Wayfair, Custom (seeded via schema.sql)
 - **`furniture_catalog`** — 27 seeded items (22 IKEA + 5 Ashley) with dimensions, prices, provider links, model_url; public read via RLS; unique index on `(provider, provider_id)` for upsert
 - **`rooms`** — User rooms with walls (jsonb), dimensions, floor plan/photo URLs, detected_objects (jsonb), zones (jsonb array of sub-rooms); RLS: own rooms only
+- **`projects`** — User projects/floorplans with `property_type`, `scope`, `global_vision`, `status`; RLS: own projects only
+- **`spaces`** — Project-level interior/exterior space structure linked to existing `rooms` via nullable `room_id`; includes `category`, `space_vision`, `placeholder_mode`; RLS: via owning project
 - **`placements`** — Furniture placed in rooms with position, rotation, color, optional zone_id for sub-room assignment; RLS: via room ownership join
 - **`layout_exports`** — Archived JSON exports with schema_version; RLS: via room ownership join
 - **`chat_messages`** — Chat history per room with role, content, tool_calls (jsonb), model_used; RLS: via room ownership join
@@ -375,6 +392,12 @@ All tables use Row Level Security — users can only access their own data. The 
 - The `zone_id` column on placements and `zones` column on rooms use additive migrations (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`) for backward compatibility with existing deployments. Routes retry without these columns if the DB rejects them.
 - **Guest / Draft Mode**: Upload and Studio pages are accessible without authentication. Guests create local "draft" rooms stored in localStorage via Zustand `persist`. The `StudioToolbar` shows a "Save to account" button that opens a `LoginModal` inline. On save, `saveDraftToAccount()` pushes the room, zones, and placements to the server. The guest upload path uses `/api/public/parse-floorplan` to avoid auth. 401 responses from the API are silently handled (no redirect).
 - The chat endpoint runs a multi-turn tool execution loop (up to 5 rounds). After each round of tool calls, it re-fetches placements from the DB before executing the next tool, ensuring tools always operate on current state.
+- Studio now presents a **project-first dashboard** at `/studio`, with localStorage-backed compatibility objects that group existing backend room records into floorplan projects.
+- New frontend-only routes `/studio/project/:projectId` and `/studio/project/:projectId/:spaceId` provide project workspace navigation while preserving existing backend room CRUD and `/studio/:roomId` editor behavior.
+- Upload flow now includes two additional frontend steps after room-zone editing: (1) **space confirmation** (rename/add/delete/set interior/exterior type) and (2) **whole-property vision onboarding** (style chips, prompt, inspiration image filename), before entering Studio.
+- The project detail page (`/studio/project/:projectId`) acts as a floorplan hub with Interior/Exterior sections, empty-state add actions, and type pickers for creating interior/exterior spaces while still creating backend-compatible room records under the hood.
+- Project cards on `/studio` include status, space counts, last-updated metadata, and dual actions (`Open project`, `Continue editing`) with a CSS-only architectural preview placeholder.
+- The **New Project** modal submit path is resilient: project creation and navigation to `/studio/project/:projectId` remain the critical path, while initial interior seed-space setup is best-effort (non-blocking). If seeding fails, users still land on the project page and can add spaces via the visible interior/exterior add cards; creation failures surface as toast + inline modal error text.
 
 ## Chatbot Function Calling
 

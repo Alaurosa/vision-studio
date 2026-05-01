@@ -199,3 +199,69 @@ using (
       and r.user_id = auth.uid()
   )
 );
+
+-- ============================================================
+-- PROJECTS TABLE (Phase 2 alignment, additive)
+-- ============================================================
+create table if not exists public.projects (
+  id             uuid primary key default gen_random_uuid(),
+  user_id        uuid references auth.users(id) on delete cascade,
+  name           text not null default 'Untitled Project',
+  property_type  text default 'House',
+  scope          text default 'interior_exterior',
+  global_vision  jsonb default '{}'::jsonb,
+  status         text default 'in_progress',
+  created_at     timestamptz default now(),
+  updated_at     timestamptz default now()
+);
+
+alter table public.projects add column if not exists property_type text default 'House';
+alter table public.projects add column if not exists scope text default 'interior_exterior';
+alter table public.projects add column if not exists global_vision jsonb default '{}'::jsonb;
+alter table public.projects add column if not exists status text default 'in_progress';
+
+alter table public.projects enable row level security;
+drop policy if exists "own projects" on public.projects;
+create policy "own projects"
+on public.projects
+for all
+to public
+using (auth.uid() = user_id);
+
+-- ============================================================
+-- SPACES TABLE (links project structure to existing rooms)
+-- ============================================================
+create table if not exists public.spaces (
+  id                uuid primary key default gen_random_uuid(),
+  project_id        uuid references public.projects(id) on delete cascade,
+  room_id           uuid references public.rooms(id) on delete set null,
+  type              text not null default 'interior',
+  name              text not null default 'Space',
+  category          text,
+  space_vision      jsonb default '{}'::jsonb,
+  placeholder_mode  boolean default false,
+  created_at        timestamptz default now(),
+  updated_at        timestamptz default now()
+);
+
+alter table public.spaces add column if not exists room_id uuid references public.rooms(id) on delete set null;
+alter table public.spaces add column if not exists type text default 'interior';
+alter table public.spaces add column if not exists name text default 'Space';
+alter table public.spaces add column if not exists category text;
+alter table public.spaces add column if not exists space_vision jsonb default '{}'::jsonb;
+alter table public.spaces add column if not exists placeholder_mode boolean default false;
+
+alter table public.spaces enable row level security;
+drop policy if exists "own spaces" on public.spaces;
+create policy "own spaces"
+on public.spaces
+for all
+to public
+using (
+  exists (
+    select 1
+    from public.projects p
+    where p.id = public.spaces.project_id
+      and p.user_id = auth.uid()
+  )
+);

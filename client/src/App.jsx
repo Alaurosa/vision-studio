@@ -54,6 +54,8 @@ export default function App() {
                 <Route path="/upload" element={<Upload />} />
                 <Route path="/studio" element={<Studio />} />
                 <Route path="/studio/:roomId" element={<Studio />} />
+                <Route path="/studio/project/:projectId" element={<Studio />} />
+                <Route path="/studio/project/:projectId/:spaceId" element={<Studio />} />
                 <Route path="/chat" element={<Chat />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>

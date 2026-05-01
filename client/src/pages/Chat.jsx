@@ -8,14 +8,11 @@ import { useLayoutStore } from '@/store/layoutStore';
 import MessageBubble from '@/components/chatbot/MessageBubble';
 
 const QUICK_PROMPTS = [
-  { icon: '🏠', text: 'Furnish this as a living room', category: 'furnish' },
-  { icon: '🛏️', text: 'Set up a cozy bedroom', category: 'furnish' },
-  { icon: '💼', text: 'Design a productive home office', category: 'furnish' },
-  { icon: '🎨', text: 'I want a Scandinavian style', category: 'style' },
-  { icon: '🪑', text: 'Show me sofas under $600', category: 'browse' },
-  { icon: '📐', text: 'Auto-arrange everything', category: 'layout' },
-  { icon: '💡', text: 'Give me design tips', category: 'advice' },
-  { icon: '💰', text: 'What is the total cost?', category: 'budget' },
+  { icon: '✨', text: 'Give this house a warm luxury feel', category: 'style' },
+  { icon: '🌿', text: 'Modernize the backyard', category: 'exterior' },
+  { icon: '🛏️', text: 'Optimize bedroom layout', category: 'layout' },
+  { icon: '🎨', text: 'Scandinavian interior with bold exterior', category: 'style' },
+  { icon: '🏡', text: 'Improve curb appeal', category: 'exterior' },
 ];
 
 const STYLE_CHIPS = [
@@ -30,6 +27,7 @@ export default function Chat() {
   const [minimized, setMinimized] = useState(false);
   const [rooms, setRooms] = useState([]);
   const [selectedRoomId, setSelectedRoomId] = useState(null);
+  const [chatContext, setChatContext] = useState('current_space');
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -84,7 +82,7 @@ export default function Chat() {
   const send = async (msg) => {
     const text = typeof msg === 'string' ? msg : input;
     if (!text.trim()) return;
-    if (!room?.id) { toast.error('Select or create a room first'); return; }
+    if (!room?.id) { toast.error('Select or create a space first'); return; }
 
     addChatMessage({ role: 'user', content: text });
     setInput('');
@@ -95,6 +93,11 @@ export default function Chat() {
       const { data } = await api.post('/api/chat/message', {
         room_id: room.id,
         message: text,
+        project_id: null,
+        space_id: null,
+        context_type: chatContext,
+        global_vision: null,
+        space_vision: null,
         ...(isDraft && {
           room_context: {
             id: room.id, name: room.name, width: room.width, depth: room.depth,
@@ -210,7 +213,7 @@ export default function Chat() {
                 <div className="flex-1 bg-[#f8f8f6] grid place-items-center">
                   <div className="text-center p-8">
                     <div className="text-6xl mb-4 opacity-20">📐</div>
-                    <p className="text-ink-500 text-sm">Room: {room.width ? `${Math.round(room.width/12)}' × ${Math.round(room.depth/12)}'` : 'Unsized'}</p>
+                    <p className="text-ink-500 text-sm">Space: {room.width ? `${Math.round(room.width/12)}' × ${Math.round(room.depth/12)}'` : 'Unsized'}</p>
                     <p className="text-ink-400 text-xs mt-1">{furniture.length} items placed</p>
                     <button onClick={() => navigate(`/studio/${room.id}`)} className="btn-ghost text-[10px] mt-4 py-2 px-4">
                       Edit in Studio
@@ -235,19 +238,29 @@ export default function Chat() {
                 <div className="font-display text-base leading-tight text-[#171717]">Design Assistant</div>
                 <div className="text-[10px] uppercase tracking-editorial text-[#5b5b5b] flex items-center gap-1.5">
                   <span className={`w-1.5 h-1.5 rounded-full ${sending ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
-                  {sending ? 'Thinking…' : room ? room.name : 'No room selected'}
+                  {sending ? 'Thinking…' : room ? room.name : 'No space selected'}
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {/* Room selector */}
+              {/* Space selector */}
               {(rooms.length > 0 || room) && (
                 <select value={selectedRoomId || room?.id || ''} onChange={(e) => { setSelectedRoomId(e.target.value); clearChat(); }}
                   className="text-[11px] bg-[#f8f8f6] border border-[rgba(0,0,0,0.08)] rounded-lg px-3 py-1.5 text-[#171717] focus:outline-none max-w-[160px]">
-                  {room?.id?.startsWith('draft-') && <option value={room.id}>{room.name} (draft)</option>}
+                  {room?.id?.startsWith('draft-') && <option value={room.id}>{room.name} (draft space)</option>}
                   {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
               )}
+              <select
+                value={chatContext}
+                onChange={(e) => setChatContext(e.target.value)}
+                className="text-[11px] bg-[#f8f8f6] border border-[rgba(0,0,0,0.08)] rounded-lg px-3 py-1.5 text-[#171717] focus:outline-none max-w-[170px]"
+              >
+                <option value="whole_project">Whole Project</option>
+                <option value="interior">Interior</option>
+                <option value="exterior">Exterior</option>
+                <option value="current_space">Current Space</option>
+              </select>
               {room && (
                 <button onClick={() => setMinimized(!minimized)}
                   className="text-[10px] uppercase tracking-editorial px-3 py-1.5 rounded-full border border-[rgba(0,0,0,0.08)] text-[#5b5b5b] hover:border-[#004aad]/45 hover:text-[#171717] transition hidden md:inline-flex">
@@ -262,6 +275,23 @@ export default function Chat() {
               )}
             </div>
           </div>
+          <div className="border-t border-[rgba(0,0,0,0.08)] px-6 py-2 flex flex-wrap items-center gap-2 bg-[#f8f8f6]">
+            <span className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b]">
+              Current Context:
+            </span>
+            <span className="text-[10px] uppercase tracking-[0.2em] rounded-full border border-[rgba(0,0,0,0.08)] px-2.5 py-1 bg-[#eef4f7] text-vs-accent">
+              {chatContext === 'whole_project'
+                ? 'Whole Project'
+                : chatContext === 'interior'
+                  ? 'Interior'
+                  : chatContext === 'exterior'
+                    ? 'Exterior'
+                    : 'Current Space'}
+            </span>
+            <span className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b]">
+              AI suggestions based on project context
+            </span>
+          </div>
 
           {/* Messages */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto">
@@ -272,10 +302,10 @@ export default function Chat() {
                   <div className="w-14 h-14 mx-auto mb-5 rounded-2xl bg-gradient-to-br from-sienna-400 to-sienna-600 grid place-items-center shadow-lg">
                     <span className="text-xl text-paper-50 font-display">V</span>
                   </div>
-                  <h2 className="display-md mb-2">Describe the room you want to shape.</h2>
+                  <h2 className="display-md mb-2">Describe what you want to improve.</h2>
                   <p className="text-[#2d2d2d] max-w-2xl mx-auto text-sm mb-8 leading-relaxed">
-                    Ask for layout changes, furniture suggestions, style direction, budget-aware options, or
-                    spatial feedback tied to the selected room.
+                    Ask about layout, furniture, atmosphere, flow, materials, or exterior design.
+                    Use project vision when suggesting furniture, layout, and exterior flow.
                   </p>
 
                   {/* Style chips */}
@@ -332,7 +362,7 @@ export default function Chat() {
                 <div className="flex-1 relative">
                   <textarea ref={textareaRef}
                     className="w-full bg-[#f8f8f6] border border-[rgba(0,0,0,0.08)] rounded-2xl px-5 py-3.5 pr-14 text-sm text-[#171717] placeholder:text-[#5b5b5b] resize-none focus:outline-none focus:border-[#004aad]/45 focus:ring-2 focus:ring-[#004aad]/15 transition min-h-[52px] max-h-[160px]"
-                    placeholder={room ? 'Describe your room goals, ask for furniture, or request a layout change…' : 'Select a room to start…'}
+                    placeholder={room ? 'Describe your space goals, ask for furniture, or request a layout change…' : 'Select a space to start…'}
                     value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
                     disabled={!room || sending} rows={1} />
                   {input.length > 0 && <span className="absolute right-4 bottom-3 text-[10px] text-ink-400">{input.length}</span>}
@@ -347,7 +377,7 @@ export default function Chat() {
               </div>
               <div className="flex items-center justify-between mt-2 px-1">
                 <span className="text-[10px] text-ink-400">
-                  {room ? <>Room: <strong className="text-ink-600">{room.name}</strong> · {furniture.length} items</> : 'No room selected'}
+                  {room ? <>Space: <strong className="text-ink-600">{room.name}</strong> · {furniture.length} items</> : 'No space selected'}
                 </span>
                 <span className="text-[10px] text-ink-400 hidden sm:inline">Enter to send · Shift+Enter for new line</span>
               </div>

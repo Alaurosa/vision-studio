@@ -72,7 +72,7 @@ export default function ChatPanel() {
         .flatMap((a) => a.result?.suggestions || []);
       if (suggestions.length) setRecommendedItems(suggestions);
 
-      // Apply mutations to the room
+      // Apply mutations to the active space
       const mutatingTools = ['move_furniture', 'rotate_furniture', 'add_furniture',
         'remove_furniture', 'arrange_room', 'swap_furniture', 'furnish_room', 'clear_room'];
       const didMutate = (data.actions || []).some((a) => mutatingTools.includes(a.function) && a.result?.success);
@@ -192,7 +192,7 @@ export default function ChatPanel() {
             } catch { /* auto-arrange is best-effort */ }
           }
         } else {
-          // Server-side rooms: just reload from DB
+          // Server-side spaces: just reload from DB
           await loadRoom(room.id);
         }
       }
@@ -253,7 +253,7 @@ export default function ChatPanel() {
           )}
         </div>
         <p className="text-xs text-ink-500 leading-relaxed mt-2">
-          Describe your room goals, style preferences, or ask to move, add, and arrange furniture — all by chatting.
+          Describe your space goals, style preferences, or ask to move, add, and arrange furniture — all by chatting.
         </p>
       </div>
 
@@ -296,7 +296,7 @@ export default function ChatPanel() {
             <textarea
               ref={textareaRef}
               className="w-full bg-paper-100 border border-ink-900/10 rounded-xl px-4 py-3 pr-12 text-sm text-ink-900 placeholder:text-ink-400 resize-none focus:outline-none focus:border-ink-900/30 focus:ring-1 focus:ring-ink-900/10 transition min-h-[44px] max-h-[120px]"
-              placeholder={room ? 'Describe your room goals…' : 'Select a room first'}
+              placeholder={room ? 'Describe your space goals…' : 'Select a space first'}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -326,7 +326,7 @@ export default function ChatPanel() {
         </div>
         <div className="flex items-center justify-between mt-2 px-1">
           <span className="text-[10px] text-ink-400">
-            {room ? `Room: ${room.name}` : 'No room selected'}
+            {room ? `Space: ${room.name}` : 'No space selected'}
           </span>
           <span className="text-[10px] text-ink-400 hidden sm:inline">
             Enter to send · Shift+Enter for new line

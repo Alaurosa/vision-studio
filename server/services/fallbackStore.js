@@ -38,6 +38,8 @@ const CATALOG = [
 // In-memory rooms and placements (keyed by user id)
 const rooms = new Map();       // roomId -> room object
 const placements = new Map();  // placementId -> placement object
+const projects = new Map();    // projectId -> project object
+const spaces = new Map();      // spaceId -> space object
 
 let dbAvailable = null; // null = unknown, true/false
 
@@ -176,6 +178,108 @@ export function addChatMessage(roomId, { role, content, tool_calls = null }) {
   const msg = { id: randomUUID(), room_id: roomId, role, content, tool_calls, created_at: new Date().toISOString() };
   chatMessages.get(roomId).push(msg);
   return msg;
+}
+
+// Projects & spaces fallback (Phase 2 alignment)
+export function createProject(userId, { name, property_type, scope, global_vision, status } = {}) {
+  const now = new Date().toISOString();
+  const project = {
+    id: randomUUID(),
+    user_id: userId,
+    name: name || 'Untitled Project',
+    property_type: property_type || 'House',
+    scope: scope || 'interior_exterior',
+    global_vision: global_vision || {},
+    status: status || 'in_progress',
+    created_at: now,
+    updated_at: now,
+  };
+  projects.set(project.id, project);
+  return { ...project, spaces: [] };
+}
+
+export function getProjects(userId) {
+  const result = [...projects.values()]
+    .filter((p) => p.user_id === userId)
+    .map((p) => ({
+      ...p,
+      spaces: [...spaces.values()].filter((s) => s.project_id === p.id),
+    }))
+    .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+  return result;
+}
+
+export function getProject(projectId, userId) {
+  const project = projects.get(projectId);
+  if (!project || project.user_id !== userId) return null;
+  return {
+    ...project,
+    spaces: [...spaces.values()].filter((s) => s.project_id === projectId),
+  };
+}
+
+export function updateProject(projectId, userId, updates) {
+  const project = projects.get(projectId);
+  if (!project || project.user_id !== userId) return null;
+  Object.assign(project, updates, { updated_at: new Date().toISOString() });
+  projects.set(projectId, project);
+  return {
+    ...project,
+    spaces: [...spaces.values()].filter((s) => s.project_id === projectId),
+  };
+}
+
+export function deleteProject(projectId, userId) {
+  const project = projects.get(projectId);
+  if (!project || project.user_id !== userId) return false;
+  projects.delete(projectId);
+  for (const [spaceId, space] of spaces) {
+    if (space.project_id === projectId) spaces.delete(spaceId);
+  }
+  return true;
+}
+
+export function createSpace(projectId, userId, { room_id, type, name, category, space_vision, placeholder_mode } = {}) {
+  const project = projects.get(projectId);
+  if (!project || project.user_id !== userId) return null;
+  const now = new Date().toISOString();
+  const space = {
+    id: randomUUID(),
+    project_id: projectId,
+    room_id: room_id || null,
+    type: type || 'interior',
+    name: name || 'Space',
+    category: category || 'General',
+    space_vision: space_vision || {},
+    placeholder_mode: placeholder_mode ?? false,
+    created_at: now,
+    updated_at: now,
+  };
+  spaces.set(space.id, space);
+  project.updated_at = now;
+  projects.set(projectId, project);
+  return space;
+}
+
+export function updateSpace(projectId, spaceId, userId, updates = {}) {
+  const project = projects.get(projectId);
+  const space = spaces.get(spaceId);
+  if (!project || project.user_id !== userId || !space || space.project_id !== projectId) return null;
+  Object.assign(space, updates, { updated_at: new Date().toISOString() });
+  spaces.set(spaceId, space);
+  project.updated_at = new Date().toISOString();
+  projects.set(projectId, project);
+  return space;
+}
+
+export function deleteSpace(projectId, spaceId, userId) {
+  const project = projects.get(projectId);
+  const space = spaces.get(spaceId);
+  if (!project || project.user_id !== userId || !space || space.project_id !== projectId) return false;
+  spaces.delete(spaceId);
+  project.updated_at = new Date().toISOString();
+  projects.set(projectId, project);
+  return true;
 }
 
 // Search catalog by name (fuzzy match for chatbot — strips diacritics for forgiving matching)

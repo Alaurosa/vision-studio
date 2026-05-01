@@ -11,7 +11,16 @@ const hasDbUserId = (userId) => typeof userId === 'string' && UUID_RE.test(userI
 
 // POST /api/chat/message
 router.post('/message', optionalAuth, async (req, res) => {
-  const { room_id, message, room_context } = req.body;
+  const {
+    room_id,
+    message,
+    room_context,
+    project_id,
+    space_id,
+    context_type,
+    global_vision,
+    space_vision,
+  } = req.body;
   const db = (await useDb()) && hasDbUserId(req.user?.id);
   const isDraft = typeof room_id === 'string' && room_id.startsWith('draft-');
 
@@ -49,6 +58,18 @@ router.post('/message', optionalAuth, async (req, res) => {
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
     const stylePrefs = room?.style_preferences;
+    const contextType = context_type || 'current_space';
+    const projectVision = global_vision && typeof global_vision === 'object' ? global_vision : {};
+    const currentSpaceVision = space_vision && typeof space_vision === 'object' ? space_vision : {};
+    const projectContext = `
+PROJECT CONTEXT:
+- project_id: ${project_id || 'not_provided'}
+- space_id: ${space_id || 'not_provided'}
+- context_type: ${contextType}
+- whole project vibe (global_vision): ${JSON.stringify(projectVision)}
+- current space goals (space_vision): ${JSON.stringify(currentSpaceVision)}
+Use this context when interpreting "whole house", "interior", "exterior", or "this space" requests.
+`;
     const styleContext = stylePrefs
       ? `\nSTYLE PREFERENCES (user-set):\n- Design style: ${stylePrefs.style || 'not set'}\n- Mood: ${stylePrefs.mood || 'not set'}\n- Color palette: ${stylePrefs.color_palette || 'not set'}\n- Budget: ${stylePrefs.budget_preference || 'not set'}\n- Notes: ${stylePrefs.notes || 'none'}\nAlways respect these preferences when suggesting or arranging furniture.\n`
       : '';
@@ -73,6 +94,7 @@ ROOM CONTEXT:
 - Unit system: ${room?.unit || 'inches'}
 - Current furniture (${placements.length} items):
 ${placements.length > 0 ? placements.map((p) => `  • ${p.name} (${p.category}) — ${p.width}"W × ${p.depth}"D at (${p.x_inches}", ${p.y_inches}"), rotation ${p.rotation}°`).join('\n') : '  (empty room)'}
+${projectContext}
 ${styleContext}
 AUTONOMOUS MULTI-STEP BEHAVIOR:
 You can call tools in MULTIPLE ROUNDS. After each round of tool calls, you will see the results and can decide to call MORE tools.

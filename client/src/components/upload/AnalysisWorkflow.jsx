@@ -6,7 +6,7 @@ const STEPS = [
   { key: 'upload',     label: 'Uploading image',        eyebrow: '01' },
   { key: 'preprocess', label: 'Preprocessing pixels',   eyebrow: '02' },
   { key: 'walls',      label: 'Detecting walls',        eyebrow: '03' },
-  { key: 'rooms',      label: 'Segmenting sub-rooms',   eyebrow: '04' },
+  { key: 'rooms',      label: 'Segmenting interior spaces',   eyebrow: '04' },
   { key: 'measure',    label: 'Estimating dimensions',  eyebrow: '05' },
   { key: 'finalize',   label: 'Finalizing geometry',    eyebrow: '06' },
 ];

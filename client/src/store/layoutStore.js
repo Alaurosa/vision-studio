@@ -88,6 +88,7 @@ export const useLayoutStore = create(
       zones: [],
       activeZoneId: null,
       chatHistory: [],
+      projectTheme: null,
       recommendedItems: [],
       loading: false,
       viewMode: '2d',
@@ -151,6 +152,7 @@ export const useLayoutStore = create(
           activeZoneId: zones[0]?.id || null,
           detections: [],
           chatHistory: [],
+          projectTheme: null,
           undoStack: [],
           redoStack: [],
         });
@@ -165,6 +167,7 @@ export const useLayoutStore = create(
           activeZoneId: null,
           detections: [],
           chatHistory: [],
+          projectTheme: null,
           undoStack: [],
           redoStack: [],
         });
@@ -270,6 +273,7 @@ export const useLayoutStore = create(
       addChatMessage: (msg) =>
         set((s) => ({ chatHistory: [...s.chatHistory, { id: Date.now() + Math.random(), ...msg }] })),
       clearChat: () => set({ chatHistory: [] }),
+      setProjectTheme: (theme) => set({ projectTheme: theme || null }),
 
       setRecommendedItems: (items) => set({ recommendedItems: items || [] }),
       clearRecommendedItems: () => set({ recommendedItems: [] }),
@@ -483,13 +487,19 @@ export const useLayoutStore = create(
       // to snapshot it — we'll always re-fetch on load.
       partialize: (state) => {
         if (!isDraftId(state.room?.id)) {
-          return { viewMode: state.viewMode, gridEnabled: state.gridEnabled, isChatOpen: state.isChatOpen };
+          return {
+            viewMode: state.viewMode,
+            gridEnabled: state.gridEnabled,
+            isChatOpen: state.isChatOpen,
+            projectTheme: state.projectTheme,
+          };
         }
         return {
           room: state.room,
           furniture: state.furniture,
           zones: state.zones,
           activeZoneId: state.activeZoneId,
+          projectTheme: state.projectTheme,
           viewMode: state.viewMode,
           gridEnabled: state.gridEnabled,
           isChatOpen: state.isChatOpen,

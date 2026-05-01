@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ROOM_TEMPLATES } from '@/utils/constants';
 
 export default function RoomSetupModal({ onClose, onCreate }) {
-  const [name, setName] = useState('My Room');
+  const [name, setName] = useState('My Space');
   const [w, setW] = useState(180);
   const [d, setD] = useState(144);
   const [h, setH] = useState(96);
@@ -13,10 +13,10 @@ export default function RoomSetupModal({ onClose, onCreate }) {
         className="bg-paper-50 border border-ink-900/10 w-full max-w-xl p-8"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="eyebrow mb-4">New Room</div>
+        <div className="eyebrow mb-4">New Space</div>
         <h2 className="display-md mb-8">Define your space</h2>
         <label className="block mb-6">
-          <div className="eyebrow mb-2 text-ink-600">Room name</div>
+          <div className="eyebrow mb-2 text-ink-600">Space name</div>
           <input className="input-field" value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <div className="grid grid-cols-3 gap-4 mb-8">
@@ -50,7 +50,7 @@ export default function RoomSetupModal({ onClose, onCreate }) {
         <div className="flex justify-end gap-3">
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn-ink" onClick={() => onCreate({ name, width: w, depth: d, height: h })}>
-            Create Room
+            Create Space
           </button>
         </div>
       </div>

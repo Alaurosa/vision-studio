@@ -13,6 +13,7 @@ import roomRoutes from './routes/rooms.js';
 import furnitureRoutes from './routes/furniture.js';
 import layoutRoutes from './routes/layout.js';
 import chatRoutes from './routes/chat.js';
+import projectRoutes from './routes/projects.js';
 import exportRoutes from './routes/export.js';
 import recognitionRoutes from './routes/recognition.js';
 import modelsRoutes from './routes/models.js';
@@ -131,7 +132,7 @@ app.get('/api/proxy-image', async (req, res) => {
 // Database status check — helps diagnose setup issues
 app.get('/api/status', async (req, res) => {
   const { supabaseAdmin } = await import('./services/supabase.js');
-  const tables = ['providers', 'furniture_catalog', 'rooms', 'placements', 'layout_exports', 'chat_messages'];
+  const tables = ['providers', 'furniture_catalog', 'rooms', 'placements', 'layout_exports', 'chat_messages', 'projects', 'spaces'];
   const results = {};
   let allOk = true;
 
@@ -157,6 +158,7 @@ app.use('/api/rooms', roomRoutes);
 app.use('/api/furniture', furnitureRoutes);
 app.use('/api/layout', layoutRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/projects', projectRoutes);
 app.use('/api/export', exportRoutes);
 app.use('/api/recognition', recognitionRoutes);
 app.use('/api/models', modelsRoutes);

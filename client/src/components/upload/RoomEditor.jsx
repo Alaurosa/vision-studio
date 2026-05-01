@@ -11,7 +11,7 @@ const MIN_BOX = 20;
 function initZones(zones) {
   return (zones || []).map((z, i) => ({
     id: z.id || `zone-${i}`,
-    name: z.name || z.label || `Room ${i + 1}`,
+    name: z.name || z.label || `Space ${i + 1}`,
     bbox: [...(z.bbox || [0, 0, 100, 100])],
     color: getZoneColor(i),
     confidence: z.confidence ?? null,
@@ -138,7 +138,7 @@ export default function RoomEditor({
       const x2 = Math.max(drawStart.x, drawEnd.x), y2 = Math.max(drawStart.y, drawEnd.y);
       if (x2 - x1 > MIN_BOX && y2 - y1 > MIN_BOX) {
         const newZone = {
-          id: `zone-${Date.now()}`, name: `Room ${zones.length + 1}`,
+          id: `zone-${Date.now()}`, name: `Space ${zones.length + 1}`,
           bbox: [x1, y1, x2, y2], color: getZoneColor(zones.length),
           confidence: null, widthIn: null, depthIn: null,
         };
@@ -205,12 +205,12 @@ export default function RoomEditor({
       <div className="h-14 border-b border-ink-900/10 bg-paper-50 flex items-center px-6 gap-4 shrink-0">
         <button onClick={onCancel} className="eyebrow text-ink-500 hover:text-ink-900 transition">← Back</button>
         <div className="h-5 w-px bg-ink-900/15" />
-        <div className="font-display text-lg">Adjust Rooms</div>
+        <div className="font-display text-lg">Adjust Spaces</div>
         <div className="flex-1" />
         <button onClick={() => setDrawing(!drawing)}
           className={`text-[10px] uppercase tracking-editorial px-4 py-1.5 rounded-full border transition ${
             drawing ? 'bg-ink-900 text-paper-50 border-ink-900' : 'border-ink-900/20 text-ink-700 hover:border-ink-900'}`}>
-          {drawing ? 'Drawing…' : '+ Draw Room'}
+          {drawing ? 'Drawing…' : '+ Draw Space'}
         </button>
         <button onClick={handleConfirm} className="btn-ink text-[10px] px-6 py-2">Confirm & Open Studio →</button>
       </div>
@@ -261,9 +261,9 @@ export default function RoomEditor({
         {/* Right panel */}
         <aside className="w-[340px] border-l border-ink-900/10 bg-paper-50 flex flex-col shrink-0 overflow-hidden">
           <div className="p-6 border-b border-ink-900/10">
-            <div className="eyebrow mb-1">Detected Rooms</div>
+            <div className="eyebrow mb-1">Detected Spaces</div>
             <p className="text-xs text-ink-500 leading-relaxed">
-              {zones.length} room{zones.length !== 1 ? 's' : ''} detected. Drag to reposition, handles to resize. Dimensions are independent of the box position.
+              {zones.length} space{zones.length !== 1 ? 's' : ''} detected. Drag to reposition, handles to resize. Dimensions are independent of the box position.
             </p>
           </div>
 
@@ -293,7 +293,7 @@ export default function RoomEditor({
                         exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} className="overflow-hidden">
                         <div className="px-3 pb-3 space-y-3 border-t border-ink-900/5 pt-3">
                           <label className="block">
-                            <div className="text-[10px] uppercase tracking-editorial text-ink-500 mb-1">Room Name</div>
+                            <div className="text-[10px] uppercase tracking-editorial text-ink-500 mb-1">Space Name</div>
                             <input className="input-field text-sm" value={z.name} onChange={(e) => updateZoneName(z.id, e.target.value)} />
                           </label>
 
@@ -330,7 +330,7 @@ export default function RoomEditor({
 
                           <button onClick={() => removeZone(z.id)}
                             className="w-full text-[10px] uppercase tracking-editorial py-2 rounded-full border border-red-300 text-red-600 hover:bg-red-600 hover:text-white transition">
-                            Remove Room
+                            Remove Space
                           </button>
                         </div>
                       </motion.div>
@@ -342,15 +342,15 @@ export default function RoomEditor({
 
             {zones.length === 0 && (
               <div className="text-center py-10">
-                <p className="text-ink-500 text-sm mb-4">No rooms detected.</p>
-                <button onClick={() => setDrawing(true)} className="btn-ink text-[10px] px-6 py-2">+ Draw a Room</button>
+                <p className="text-ink-500 text-sm mb-4">No spaces detected.</p>
+                <button onClick={() => setDrawing(true)} className="btn-ink text-[10px] px-6 py-2">+ Draw a Space</button>
               </div>
             )}
           </div>
 
           <div className="p-4 border-t border-ink-900/10 bg-paper-100">
             <div className="flex items-center justify-between mb-3">
-              <span className="eyebrow text-ink-500">{zones.length} rooms</span>
+              <span className="eyebrow text-ink-500">{zones.length} spaces</span>
             </div>
             <button onClick={handleConfirm} className="btn-ink w-full text-[10px] py-2.5">Confirm & Open Studio →</button>
           </div>

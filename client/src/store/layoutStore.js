@@ -382,6 +382,44 @@ export const useLayoutStore = create(
         return furniture.filter((item) => furnitureBelongsToZone(item, activeZone));
       },
 
+      // ---------- explicit save ----------
+      // Force-flush all pending edits and persist current state.
+      // For drafts, delegates to saveDraftToAccount (which the caller must gate on auth).
+      saveProject: async () => {
+        const { room, zones, furniture, saveDraftToAccount } = get();
+        if (!room) throw new Error('No project loaded.');
+        if (isDraftId(room.id)) return saveDraftToAccount();
+
+        // Cancel pending debounced saves; we're about to issue them explicitly.
+        Object.values(saveTimers).forEach((t) => clearTimeout(t));
+        saveTimers = {};
+        clearTimeout(zoneSaveTimer);
+        zoneSaveTimer = null;
+
+        await api.put(`/api/rooms/${room.id}`, {
+          name: room.name,
+          width: room.width,
+          depth: room.depth,
+          height: room.height,
+          zones,
+          walls: room.walls || null,
+          scale_px_per_inch: room.scale_px_per_inch || null,
+        });
+
+        await Promise.all(
+          furniture.map((f) =>
+            api.put(`/api/furniture/placements/${f.id}`, {
+              x_inches: f.x_inches,
+              y_inches: f.y_inches,
+              rotation: f.rotation,
+              color: f.color,
+            }).catch((e) => console.warn('save placement', f.id, e.message))
+          )
+        );
+
+        return room;
+      },
+
       // ---------- draft → account migration ----------
       // Pushes the current draft room to the server. Assumes caller verified auth.
       saveDraftToAccount: async () => {

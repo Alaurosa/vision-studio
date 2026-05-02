@@ -151,12 +151,12 @@ export default function Chat() {
               if (r.added_item) { const ai = r.added_item; store.addFurniture({ name: ai.name, category: ai.category, provider: ai.provider, width: ai.width, depth: ai.depth, height: ai.height, x_inches: ai.x_inches || 12, y_inches: ai.y_inches || 12, rotation: ai.rotation || 0, color: '#d4a27a', image_url: ai.image_url, model_url: ai.model_url }); }
             } else if (action.function === 'furnish_room' && r.suggestions) {
               for (const item of r.suggestions) {
-                store.addFurniture({ name: item.name, category: item.category, provider: item.provider, width: item.width, depth: item.depth, height: item.height, x_inches: 12, y_inches: 12, rotation: 0, color: '#d4a27a', image_url: item.image_url, model_url: item.model_url });
+                store.addFurniture({ name: item.name, category: item.category, provider: item.provider, width: item.width, depth: item.depth, height: item.height, x_inches: item.x_inches || 12, y_inches: item.y_inches || 12, rotation: item.rotation || 0, color: '#d4a27a', image_url: item.image_url, model_url: item.model_url });
               }
             }
           }
-          // Auto-arrange if needed
-          const hasArrange = (data.actions || []).some(a => ['arrange_room', 'furnish_room'].includes(a.function) && a.result?.success);
+          // Auto-arrange only for arrange_room (furnish_room already returns arranged positions)
+          const hasArrange = (data.actions || []).some(a => a.function === 'arrange_room' && a.result?.success);
           if (hasArrange) {
             try {
               const cur = useLayoutStore.getState().furniture;

@@ -118,9 +118,10 @@ function FullscreenChat({
             else if (action.function === 'remove_furniture') { const nm = action.args?.furniture_name?.toLowerCase(); if (nm) { const m = store.furniture.find(f => f.name?.toLowerCase().includes(nm)); if (m) store.removeFurniture(m.id); } }
             else if (action.function === 'clear_room') { for (const f of [...store.furniture]) store.removeFurniture(f.id); }
             else if (action.function === 'swap_furniture') { if (r.removed_name) { const m = store.furniture.find(f => f.name?.toLowerCase().includes(r.removed_name.toLowerCase())); if (m) store.removeFurniture(m.id); } if (r.added_item) { const ai = r.added_item; store.addFurniture({ name: ai.name, category: ai.category, provider: ai.provider, width: ai.width, depth: ai.depth, height: ai.height, x_inches: ai.x_inches || 12, y_inches: ai.y_inches || 12, rotation: ai.rotation || 0, color: '#d4a27a', image_url: ai.image_url, model_url: ai.model_url, _animDelay: 300 }); } }
-            else if (action.function === 'furnish_room' && r.suggestions) { r.suggestions.forEach((item, idx) => store.addFurniture({ name: item.name, category: item.category, provider: item.provider, width: item.width, depth: item.depth, height: item.height, x_inches: 12, y_inches: 12, rotation: 0, color: '#d4a27a', image_url: item.image_url, model_url: item.model_url, _animDelay: 400 + idx * 500 })); }
+            else if (action.function === 'furnish_room' && r.suggestions) { r.suggestions.forEach((item, idx) => store.addFurniture({ name: item.name, category: item.category, provider: item.provider, width: item.width, depth: item.depth, height: item.height, x_inches: item.x_inches || 12, y_inches: item.y_inches || 12, rotation: item.rotation || 0, color: '#d4a27a', image_url: item.image_url, model_url: item.model_url, _animDelay: 400 + idx * 500 })); }
           }
-          const hasArrange = (data.actions || []).some(a => ['arrange_room', 'furnish_room'].includes(a.function) && a.result?.success);
+          // Skip follow-up auto-place for furnish_room since positions are already arranged
+          const hasArrange = (data.actions || []).some(a => a.function === 'arrange_room' && a.result?.success);
           if (hasArrange) {
             try {
               const cur = useLayoutStore.getState().furniture;

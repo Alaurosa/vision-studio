@@ -467,14 +467,29 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
 
       const arrangeResult = await executeFunction('arrange_room', { style: args.style || 'functional' }, roomId, allPlacements, room, db);
 
+      // Re-fetch placements after arrangement to get final positions
+      let finalPlacements;
+      if (db) {
+        const { data } = await supabaseAdmin.from('placements').select('*').eq('room_id', roomId);
+        finalPlacements = data || [];
+      } else {
+        finalPlacements = fallback.getPlacementsForRoom(roomId);
+      }
+
+      // Match by order (added array corresponds to finalPlacements for this room)
+      const arrangedItems = selectedItems.map((item, idx) => {
+        const placed = added[idx] ? finalPlacements.find(p => p.id === added[idx].id) : null;
+        return { ...item, x_inches: placed?.x_inches ?? 12, y_inches: placed?.y_inches ?? 12, rotation: placed?.rotation ?? 0 };
+      });
+
       const totalCost = selectedItems.reduce((sum, it) => sum + (it.price_usd || 0), 0);
       const itemNames = selectedItems.map(it => it.name).join(', ');
 
       return {
         success: true,
-        message: `Furnished ${args.room_type.replace('_', ' ')} with ${selectedItems.length} items: ${itemNames}. Total estimated cost: $${totalCost.toFixed(0)}. ${arrangeResult.success ? 'Arranged optimally.' : ''}`,
+        message: `Furnished ${(args.room_type || 'room').replace('_', ' ')} with ${selectedItems.length} items: ${itemNames}. Total estimated cost: $${totalCost.toFixed(0)}. ${arrangeResult.success ? 'Arranged optimally.' : ''}`,
         refresh: true,
-        suggestions: selectedItems,
+        suggestions: arrangedItems,
       };
     }
     case 'set_style_preference': {

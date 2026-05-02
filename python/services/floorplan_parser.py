@@ -190,8 +190,11 @@ async def _openai_vision_analyze(image_bytes: bytes) -> dict:
 Grid numbers go from 0 to 20 on both X (left-right) and Y (top-bottom) axes.
 
 RULES:
-- Provide bounding boxes as grid coordinates [x1, y1, x2, y2] using decimals for precision.
-- The box must follow the INNER edges of the thick architectural walls.
+- For each room, provide EITHER a rectangular bbox OR a polygon for non-rectangular rooms.
+- Use grid coordinates with decimals for precision (e.g., 3.5, 12.8).
+- For rectangular rooms: use "bbox": [x1, y1, x2, y2].
+- For L-shaped, angled, or irregular rooms: use "polygon": [[x1,y1], [x2,y2], ...] with vertices in order. Use 4-8 vertices to trace the room's inner wall edges.
+- Follow the INNER edges of the thick architectural walls.
 - ONLY include real habitable rooms: bedrooms, bathrooms, kitchen, dining room, living room, den, office/study, laundry room, pantry, closets, walk-in closets, en-suite bathrooms, powder rooms, utility rooms, bonus rooms, family rooms, sunrooms, nurseries, game rooms, media rooms.
 - Do NOT include: hallways, corridors, stairs/stairways, entry/foyer areas, porches, decks, patios, garages, exterior spaces, landings, vestibules, or any transitional/circulation spaces.
 - If a room has a label on the plan, use that exact label.
@@ -204,7 +207,9 @@ DIMENSION READING:
 - For total building dimensions: look for dimension lines with arrows outside the building.
 
 Return ONLY a JSON object:
-{"rooms": [{"label": "Room Name", "bbox": [x1, y1, x2, y2], "confidence": 0.9, "width_inches": N_or_null, "depth_inches": N_or_null}], "total_width_inches": N_or_null, "total_depth_inches": N_or_null}"""
+{"rooms": [{"label": "Room Name", "bbox": [x1,y1,x2,y2] or null, "polygon": [[x1,y1],[x2,y2],...] or null, "confidence": 0.9, "width_inches": N_or_null, "depth_inches": N_or_null}], "total_width_inches": N_or_null, "total_depth_inches": N_or_null}
+
+Use "bbox" for simple rectangles, "polygon" for irregular shapes. Every room must have at least one of bbox or polygon."""
 
     try:
         client = AsyncOpenAI(api_key=openai_api_key)
@@ -239,55 +244,85 @@ Return ONLY a JSON object:
 
         rooms = []
         for r in raw_rooms:
-            bbox = r.get("bbox", [])
-            if len(bbox) != 4:
-                continue
-
-            gx1, gy1, gx2, gy2 = [float(v) for v in bbox]
-
-            # Convert grid coordinates to pixel coordinates
-            px1 = int(gx1 * img_w / GRID)
-            py1 = int(gy1 * img_h / GRID)
-            px2 = int(gx2 * img_w / GRID)
-            py2 = int(gy2 * img_h / GRID)
-
-            # Snap each edge to the nearest architectural wall
-            sx1 = _snap_to_nearest_wall_v(walls_mask, px1, py1, py2)
-            sx2 = _snap_to_nearest_wall_v(walls_mask, px2, py1, py2)
-            sy1 = _snap_to_nearest_wall_h(walls_mask, py1, px1, px2)
-            sy2 = _snap_to_nearest_wall_h(walls_mask, py2, px1, px2)
-
-            # Ensure valid box
-            x1, x2 = min(sx1, sx2), max(sx1, sx2)
-            y1, y2 = min(sy1, sy2), max(sy1, sy2)
-
-            # Clamp to image bounds
-            x1 = max(0, min(x1, img_w))
-            y1 = max(0, min(y1, img_h))
-            x2 = max(0, min(x2, img_w))
-            y2 = max(0, min(y2, img_h))
-
-            w = x2 - x1
-            h = y2 - y1
-            area = w * h
-            if area < img_w * img_h * 0.005:
-                continue
-
-            polygon = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
             label = r.get("label", f"Room {len(rooms) + 1}")
-            print(f"  {label}: grid=[{gx1},{gy1},{gx2},{gy2}] -> px=[{x1},{y1},{x2},{y2}]")
+            raw_polygon = r.get("polygon")
+            bbox = r.get("bbox", [])
 
-            rooms.append({
-                "label": label,
-                "polygon": polygon,
-                "bbox": [x1, y1, x2, y2],
-                "width": float(w),
-                "depth": float(h),
-                "area_px": float(area),
-                "confidence": float(r.get("confidence", 0.9)),
-                "width_inches": r.get("width_inches"),
-                "depth_inches": r.get("depth_inches"),
-            })
+            if raw_polygon and len(raw_polygon) >= 3:
+                # Polygon room (L-shape, irregular, etc.)
+                # Convert grid coords to pixel coords and snap each vertex
+                polygon = []
+                for gx, gy in raw_polygon:
+                    px = int(float(gx) * img_w / GRID)
+                    py = int(float(gy) * img_h / GRID)
+                    px = max(0, min(px, img_w))
+                    py = max(0, min(py, img_h))
+                    polygon.append([px, py])
+
+                # Compute bounding box from polygon
+                xs = [p[0] for p in polygon]
+                ys = [p[1] for p in polygon]
+                x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
+                w, h = x2 - x1, y2 - y1
+                area = float(cv2.contourArea(np.array(polygon, dtype=np.int32)))
+                if area < img_w * img_h * 0.003:
+                    continue
+
+                print(f"  {label}: polygon with {len(polygon)} vertices, area={area:.0f}px")
+                rooms.append({
+                    "label": label,
+                    "polygon": polygon,
+                    "bbox": [x1, y1, x2, y2],
+                    "width": float(w),
+                    "depth": float(h),
+                    "area_px": area,
+                    "confidence": float(r.get("confidence", 0.9)),
+                    "width_inches": r.get("width_inches"),
+                    "depth_inches": r.get("depth_inches"),
+                    "shape": "polygon",
+                })
+
+            elif len(bbox) == 4:
+                # Rectangular room — snap edges to walls
+                gx1, gy1, gx2, gy2 = [float(v) for v in bbox]
+                px1 = int(gx1 * img_w / GRID)
+                py1 = int(gy1 * img_h / GRID)
+                px2 = int(gx2 * img_w / GRID)
+                py2 = int(gy2 * img_h / GRID)
+
+                sx1 = _snap_to_nearest_wall_v(walls_mask, px1, py1, py2)
+                sx2 = _snap_to_nearest_wall_v(walls_mask, px2, py1, py2)
+                sy1 = _snap_to_nearest_wall_h(walls_mask, py1, px1, px2)
+                sy2 = _snap_to_nearest_wall_h(walls_mask, py2, px1, px2)
+
+                x1, x2 = min(sx1, sx2), max(sx1, sx2)
+                y1, y2 = min(sy1, sy2), max(sy1, sy2)
+                x1 = max(0, min(x1, img_w))
+                y1 = max(0, min(y1, img_h))
+                x2 = max(0, min(x2, img_w))
+                y2 = max(0, min(y2, img_h))
+
+                w, h = x2 - x1, y2 - y1
+                area = w * h
+                if area < img_w * img_h * 0.005:
+                    continue
+
+                polygon = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+                print(f"  {label}: rect grid=[{gx1},{gy1},{gx2},{gy2}] -> px=[{x1},{y1},{x2},{y2}]")
+                rooms.append({
+                    "label": label,
+                    "polygon": polygon,
+                    "bbox": [x1, y1, x2, y2],
+                    "width": float(w),
+                    "depth": float(h),
+                    "area_px": float(area),
+                    "confidence": float(r.get("confidence", 0.9)),
+                    "width_inches": r.get("width_inches"),
+                    "depth_inches": r.get("depth_inches"),
+                    "shape": "rect",
+                })
+            else:
+                continue
 
         if not rooms:
             print("OpenAI Vision returned no valid rooms")

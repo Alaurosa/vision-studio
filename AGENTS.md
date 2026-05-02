@@ -105,7 +105,7 @@ vision-studio/
 │       │   │   └── GridOverlay.jsx    # 6" snap grid (memoized)
 │       │   ├── upload/
 │       │   │   ├── AnalysisWorkflow.jsx # 6-step animated floor-plan pipeline overlay (guest + authed paths)
-│       │   │   └── RoomEditor.jsx     # Full-screen SVG zone editor: drag/resize/draw rooms, edit names/dimensions/colors, native color picker, decoupled dimensions
+│       │   │   └── RoomEditor.jsx     # Full-screen SVG zone editor: drag/resize/draw rooms (rectangle + polygon), edit names/dimensions/colors, native color picker, decoupled dimensions
 │       │   ├── studio/
 │       │   │   ├── StudioToolbar.jsx  # Undo/Redo/Grid/Validate/Auto-Arrange/2D/3D/Export/Chat/Shortcuts
 │       │   │   ├── RoomSetupModal.jsx # Template + dimensions picker
@@ -373,9 +373,9 @@ All tables use Row Level Security — users can only access their own data. The 
 
 - Furniture can be rotated freely in the 2D editor via the Konva transformer handle, 15° toolbar nudges, or the in-canvas rotation slider.
 - The 3D viewer prefers real GLB assets from `model_url` and will request Meshy generation from `image_url` when a placement has no model yet.
-- Floorplan upload uses a 3-stage pipeline: (1) 20×20 grid overlay drawn on image, (2) GPT-5.4 identifies rooms using grid coordinates (only real habitable rooms — no hallways, stairs, or entries), (3) OpenCV wall-snap aligns each bbox edge to the nearest architectural wall. Results are normalized into editable `zones` stored in room-local coordinates.
-- GPT-5.4 also reads dimension labels from the floorplan (e.g., 13'-4" X 9'-0") and pre-populates room widthIn/depthIn in the RoomEditor.
-- The RoomEditor (`upload/RoomEditor.jsx`) is a full-screen SVG overlay where users can drag, resize, draw, rename, recolor, and set dimensions for detected room zones before confirming. Room dimensions are decoupled from the visual box — dragging/resizing the box does not change the entered dimensions, and entering dimensions does not resize the box. Zone colors are randomized from a 16-color palette with a native color picker for custom colors.
+- Floorplan upload uses a 3-stage pipeline: (1) 20×20 grid overlay drawn on image, (2) GPT-5.4 identifies rooms using grid coordinates — returns rectangular bboxes for simple rooms and polygon vertices for L-shaped/irregular rooms (only real habitable rooms — no hallways, stairs, or entries), (3) OpenCV wall-snap aligns each bbox edge to the nearest architectural wall. Results are normalized into editable `zones` stored in room-local coordinates.
+- The RoomEditor (`upload/RoomEditor.jsx`) supports both rectangular and polygon room shapes. Users can draw rectangles (click-drag) or polygons (click vertices, close by clicking first vertex or "Close Shape" button). AI-detected polygons are rendered as SVG polygons with vertex handles. Room dimensions are decoupled from the visual shape.
+- The studio canvas (`RoomCanvas.jsx`) renders polygon zones using Konva `Line` with the actual polygon points, not just bounding boxes. This allows non-rectangular rooms to display correctly in the editor.
 - The studio canvas supports room-focused editing: selecting a zone zooms the center pane to that room, constrains furniture placement to the selected room, and exposes draggable/resizable color-coded room boxes plus a bottom room inspector.
 - Client-side route changes reset the window scroll position to the top so navigation between Home, Upload, and Studio never preserves mid-page scroll offsets.
 - The homepage uses eased, staggered Framer Motion reveals with reduced-motion fallbacks so sections enter smoothly without abrupt jumps.

@@ -257,20 +257,30 @@ export default function RoomCanvas() {
                   onClick={() => setActiveZone(isActive ? null : zone.id)}
                   onTap={() => setActiveZone(isActive ? null : zone.id)}
                 >
-                  <Line
-                    points={[
-                      zx, zy,
-                      zx + zw, zy,
-                      zx + zw, zy + zh,
-                      zx, zy + zh,
-                    ]}
-                    closed
-                    fill={color}
-                    opacity={isActive ? 0.18 : activeZoneId ? 0.05 : 0.1}
-                    stroke={color}
-                    strokeWidth={isActive ? 2.5 : 1.25}
-                    dash={isActive ? undefined : [6, 4]}
-                  />
+                  {zone.polygon && zone.polygon.length >= 3 ? (
+                    <Line
+                      points={zone.polygon.flatMap(([px, py]) => [
+                        toCanvasX(px / (room?.scale_px_per_inch || 1)),
+                        toCanvasY(py / (room?.scale_px_per_inch || 1)),
+                      ])}
+                      closed
+                      fill={color}
+                      opacity={isActive ? 0.18 : activeZoneId ? 0.05 : 0.1}
+                      stroke={color}
+                      strokeWidth={isActive ? 2.5 : 1.25}
+                      dash={isActive ? undefined : [6, 4]}
+                    />
+                  ) : (
+                    <Line
+                      points={[zx, zy, zx + zw, zy, zx + zw, zy + zh, zx, zy + zh]}
+                      closed
+                      fill={color}
+                      opacity={isActive ? 0.18 : activeZoneId ? 0.05 : 0.1}
+                      stroke={color}
+                      strokeWidth={isActive ? 2.5 : 1.25}
+                      dash={isActive ? undefined : [6, 4]}
+                    />
+                  )}
                   <Rect
                     x={zx}
                     y={zy}

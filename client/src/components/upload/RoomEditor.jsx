@@ -8,16 +8,27 @@ function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
 const MIN_BOX = 20;
 
+function bboxFromPolygon(polygon) {
+  const xs = polygon.map(p => p[0]);
+  const ys = polygon.map(p => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
 function initZones(zones) {
-  return (zones || []).map((z, i) => ({
-    id: z.id || `zone-${i}`,
-    name: z.name || z.label || `Space ${i + 1}`,
-    bbox: [...(z.bbox || [0, 0, 100, 100])],
-    color: getZoneColor(i),
-    confidence: z.confidence ?? null,
-    widthIn: z.width_inches || null,
-    depthIn: z.depth_inches || null,
-  }));
+  return (zones || []).map((z, i) => {
+    const polygon = z.polygon && z.polygon.length >= 3 ? z.polygon : null;
+    const bbox = z.bbox && z.bbox.length === 4 ? [...z.bbox] : (polygon ? bboxFromPolygon(polygon) : [0, 0, 100, 100]);
+    return {
+      id: z.id || `zone-${i}`,
+      name: z.name || z.label || `Room ${i + 1}`,
+      bbox,
+      polygon,
+      color: getZoneColor(i),
+      confidence: z.confidence ?? null,
+      widthIn: z.width_inches || null,
+      depthIn: z.depth_inches || null,
+    };
+  });
 }
 
 function pxToInches(px, scale) { return scale > 0 ? px / scale : px; }
@@ -65,8 +76,10 @@ export default function RoomEditor({
   const [zones, setZones] = useState(() => initZones(initialZones));
   const [selectedId, setSelectedId] = useState(null);
   const [drawing, setDrawing] = useState(false);
+  const [drawMode, setDrawMode] = useState('rect'); // 'rect' or 'polygon'
   const [drawStart, setDrawStart] = useState(null);
   const [drawEnd, setDrawEnd] = useState(null);
+  const [polyPoints, setPolyPoints] = useState([]); // vertices for polygon drawing
   const [editPanel, setEditPanel] = useState(null);
   const [dragState, setDragState] = useState(null);
 
@@ -152,11 +165,30 @@ export default function RoomEditor({
   }, [drawing, drawStart, drawEnd, zones.length]);
 
   const onSvgPointerDown = useCallback((e) => {
-    if (drawing) { const pos = mouseToImg(e); setDrawStart(pos); setDrawEnd(pos); return; }
+    if (drawing && drawMode === 'rect') { const pos = mouseToImg(e); setDrawStart(pos); setDrawEnd(pos); return; }
+    if (drawing && drawMode === 'polygon') {
+      const pos = mouseToImg(e);
+      setPolyPoints(prev => [...prev, [pos.x, pos.y]]);
+      return;
+    }
     setSelectedId(null);
-  }, [drawing, mouseToImg]);
+  }, [drawing, drawMode, mouseToImg]);
 
   /* ── zone actions ── */
+  const finishPolygon = () => {
+    if (polyPoints.length < 3) { setPolyPoints([]); return; }
+    const polygon = polyPoints.map(([x, y]) => [Math.round(x), Math.round(y)]);
+    const bbox = bboxFromPolygon(polygon);
+    const newZone = {
+      id: `zone-${Date.now()}`, name: `Room ${zones.length + 1}`,
+      bbox, polygon, color: getZoneColor(zones.length),
+      confidence: null, widthIn: null, depthIn: null,
+    };
+    setZones(prev => [...prev, newZone]);
+    setSelectedId(newZone.id);
+    setPolyPoints([]);
+    setDrawing(false);
+  };
   const removeZone = (id) => {
     setZones(prev => prev.filter(z => z.id !== id));
     if (selectedId === id) setSelectedId(null);
@@ -181,10 +213,14 @@ export default function RoomEditor({
     const finalZones = zones.map((z) => {
       const [x1, y1, x2, y2] = z.bbox;
       const wPx = x2 - x1, hPx = y2 - y1;
+      // Use the actual polygon if available, otherwise generate from bbox
+      const polygon = (z.polygon && z.polygon.length >= 3)
+        ? z.polygon.map(([x, y]) => [Math.round(x), Math.round(y)])
+        : [[x1, y1], [x2, y1], [x2, y2], [x1, y2]].map(([x, y]) => [Math.round(x), Math.round(y)]);
       return {
         id: z.id, name: z.name, color: z.color,
         bbox: z.bbox.map(v => Math.round(v)),
-        polygon: [[x1, y1], [x2, y1], [x2, y2], [x1, y2]].map(([x, y]) => [Math.round(x), Math.round(y)]),
+        polygon,
         width: z.widthIn ? Math.round(z.widthIn) : Math.round(pxToInches(wPx, scale)),
         depth: z.depthIn ? Math.round(z.depthIn) : Math.round(pxToInches(hPx, scale)),
       };
@@ -207,11 +243,22 @@ export default function RoomEditor({
         <div className="h-5 w-px bg-ink-900/15" />
         <div className="font-display text-lg">Adjust Spaces</div>
         <div className="flex-1" />
-        <button onClick={() => setDrawing(!drawing)}
+        <button onClick={() => { setDrawing(!drawing); setDrawMode('rect'); setPolyPoints([]); }}
           className={`text-[10px] uppercase tracking-editorial px-4 py-1.5 rounded-full border transition ${
-            drawing ? 'bg-ink-900 text-paper-50 border-ink-900' : 'border-ink-900/20 text-ink-700 hover:border-ink-900'}`}>
-          {drawing ? 'Drawing…' : '+ Draw Space'}
+            drawing && drawMode === 'rect' ? 'bg-ink-900 text-paper-50 border-ink-900' : 'border-ink-900/20 text-ink-700 hover:border-ink-900'}`}>
+          {drawing && drawMode === 'rect' ? 'Drawing…' : '+ Rectangle'}
         </button>
+        <button onClick={() => { setDrawing(!drawing); setDrawMode('polygon'); setPolyPoints([]); setDrawStart(null); setDrawEnd(null); }}
+          className={`text-[10px] uppercase tracking-editorial px-4 py-1.5 rounded-full border transition ${
+            drawing && drawMode === 'polygon' ? 'bg-sienna-500 text-paper-50 border-sienna-500' : 'border-ink-900/20 text-ink-700 hover:border-ink-900'}`}>
+          {drawing && drawMode === 'polygon' ? `${polyPoints.length} pts` : '+ Polygon'}
+        </button>
+        {drawing && drawMode === 'polygon' && polyPoints.length >= 3 && (
+          <button onClick={finishPolygon}
+            className="text-[10px] uppercase tracking-editorial px-4 py-1.5 rounded-full border bg-emerald-600 text-paper-50 border-emerald-600 hover:bg-emerald-700 transition">
+            Close Shape ✓
+          </button>
+        )}
         <button onClick={handleConfirm} className="btn-ink text-[10px] px-6 py-2">Confirm & Open Studio →</button>
       </div>
 
@@ -223,36 +270,74 @@ export default function RoomEditor({
             <img src={imageUrl} alt="Floor plan" className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" draggable={false} />
             <svg ref={svgRef} viewBox={`0 0 ${imageWidth} ${imageHeight}`} className="absolute inset-0 w-full h-full"
               onPointerDown={onSvgPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} style={{ touchAction: 'none' }}>
-              {zones.map((z) => {
+{zones.map((z) => {
                 const [x1, y1, x2, y2] = z.bbox;
                 const w = x2 - x1, h = y2 - y1;
                 const isSelected = z.id === selectedId;
+                const hasPolygon = z.polygon && z.polygon.length >= 3;
+                const polyPoints = hasPolygon ? z.polygon.map(p => p.join(',')).join(' ') : null;
                 return (
                   <g key={z.id}>
-                    <rect x={x1} y={y1} width={w} height={h} fill={z.color}
-                      fillOpacity={isSelected ? 0.35 : 0.2} stroke={z.color}
-                      strokeWidth={isSelected ? 3 / viewScale : 2 / viewScale}
-                      strokeDasharray={isSelected ? 'none' : `${6 / viewScale}`}
-                      style={{ cursor: drawing ? 'crosshair' : 'move' }}
-                      onPointerDown={(e) => !drawing && onPointerDown(e, z.id, 'move')} />
+                    {hasPolygon ? (
+                      <polygon points={polyPoints} fill={z.color}
+                        fillOpacity={isSelected ? 0.35 : 0.2} stroke={z.color}
+                        strokeWidth={isSelected ? 3 / viewScale : 2 / viewScale}
+                        strokeDasharray={isSelected ? 'none' : `${6 / viewScale}`}
+                        style={{ cursor: drawing ? 'crosshair' : 'move' }}
+                        onPointerDown={(e) => !drawing && onPointerDown(e, z.id, 'move')} />
+                    ) : (
+                      <rect x={x1} y={y1} width={w} height={h} fill={z.color}
+                        fillOpacity={isSelected ? 0.35 : 0.2} stroke={z.color}
+                        strokeWidth={isSelected ? 3 / viewScale : 2 / viewScale}
+                        strokeDasharray={isSelected ? 'none' : `${6 / viewScale}`}
+                        style={{ cursor: drawing ? 'crosshair' : 'move' }}
+                        onPointerDown={(e) => !drawing && onPointerDown(e, z.id, 'move')} />
+                    )}
                     <text x={x1 + 6 / viewScale} y={y1 + 18 / viewScale} fill="#fff" fontSize={13 / viewScale} fontWeight="600"
                       style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)', pointerEvents: 'none', userSelect: 'none' }}>{z.name}</text>
                     <text x={x1 + 6 / viewScale} y={y1 + 34 / viewScale} fill="#fff" fontSize={10 / viewScale} fontWeight="400" opacity={0.85}
                       style={{ textShadow: '0 1px 2px rgba(0,0,0,0.6)', pointerEvents: 'none', userSelect: 'none' }}>
-                      {z.widthIn ? fmtFeetInches(z.widthIn) : fmtFeetInches(pxToInches(w, scale))} × {z.depthIn ? fmtFeetInches(z.depthIn) : fmtFeetInches(pxToInches(h, scale))}
+                      {z.widthIn ? fmtFeetInches(z.widthIn) : fmtFeetInches(pxToInches(w, scale))} \u00d7 {z.depthIn ? fmtFeetInches(z.depthIn) : fmtFeetInches(pxToInches(h, scale))}
                     </text>
-                    {isSelected && !drawing && getHandles(z.bbox, viewScale).map((hdl, hi) => (
+                    {isSelected && !drawing && !hasPolygon && getHandles(z.bbox, viewScale).map((hdl, hi) => (
                       <rect key={hi} x={hdl.x} y={hdl.y} width={HANDLE_SIZE / viewScale} height={HANDLE_SIZE / viewScale}
                         fill="#fff" stroke={z.color} strokeWidth={1.5 / viewScale} style={{ cursor: hdl.cursor }}
                         onPointerDown={(e) => onPointerDown(e, z.id, 'resize', hi)} />
                     ))}
+                    {isSelected && !drawing && hasPolygon && z.polygon.map((pt, pi) => (
+                      <circle key={pi} cx={pt[0]} cy={pt[1]} r={4 / viewScale}
+                        fill="#fff" stroke={z.color} strokeWidth={1.5 / viewScale}
+                        style={{ cursor: 'move' }} />
+                    ))}
                   </g>
                 );
               })}
-              {drawRect && (
+              {drawRect && drawMode === 'rect' && (
                 <rect x={drawRect.x} y={drawRect.y} width={drawRect.w} height={drawRect.h}
                   fill={getZoneColor(zones.length)} fillOpacity={0.25} stroke={getZoneColor(zones.length)}
                   strokeWidth={2 / viewScale} strokeDasharray={`${4 / viewScale}`} />
+              )}
+              {/* Polygon drawing preview */}
+              {polyPoints.length > 0 && (
+                <g>
+                  <polyline
+                    points={polyPoints.map(p => p.join(',')).join(' ')}
+                    fill="none" stroke={getZoneColor(zones.length)}
+                    strokeWidth={2 / viewScale} strokeDasharray={`${4 / viewScale}`} />
+                  {polyPoints.length >= 3 && (
+                    <polygon
+                      points={polyPoints.map(p => p.join(',')).join(' ')}
+                      fill={getZoneColor(zones.length)} fillOpacity={0.15}
+                      stroke="none" />
+                  )}
+                  {polyPoints.map((pt, i) => (
+                    <circle key={i} cx={pt[0]} cy={pt[1]} r={5 / viewScale}
+                      fill={i === 0 ? '#fff' : getZoneColor(zones.length)}
+                      stroke={getZoneColor(zones.length)} strokeWidth={2 / viewScale}
+                      style={{ cursor: i === 0 && polyPoints.length >= 3 ? 'pointer' : 'default' }}
+                      onPointerDown={(e) => { if (i === 0 && polyPoints.length >= 3) { e.stopPropagation(); finishPolygon(); } }} />
+                  ))}
+                </g>
               )}
             </svg>
           </div>

@@ -153,7 +153,8 @@ export default function ChatPanel() {
                   store.addFurniture({
                     name: item.name, category: item.category, provider: item.provider,
                     width: item.width, depth: item.depth, height: item.height,
-                    x_inches: 12, y_inches: 12, rotation: 0, color: '#d4a27a',
+                    x_inches: item.x_inches || 12, y_inches: item.y_inches || 12,
+                    rotation: item.rotation || 0, color: '#d4a27a',
                     image_url: item.image_url, model_url: item.model_url,
                     _animDelay: 400 + idx * 500,
                   });
@@ -162,9 +163,9 @@ export default function ChatPanel() {
               }
             }
           }
-          // For furnish_room / arrange_room, re-fetch arranged positions
+          // For arrange_room only (furnish_room already returns arranged positions)
           const hasArrange = (data.actions || []).some(a =>
-            ['arrange_room', 'furnish_room'].includes(a.function) && a.result?.success);
+            a.function === 'arrange_room' && a.result?.success);
           if (hasArrange) {
             // The server arranged in the fallback store; we need to get those positions
             // Send a follow-up auto-place request with current state

@@ -6,7 +6,9 @@
     "dev": "nodemon --experimental-specifier-resolution=node index.js",
     "start": "node index.js",
     "setup": "node scripts/setup.js",
-    "seed": "node scripts/seedFurniture.js"
+    "seed": "node scripts/seedFurniture.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.43.0",
@@ -21,6 +23,8 @@
     "openai": "^4.52.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.3"
+    "nodemon": "^3.1.3",
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.5"
   }
 }

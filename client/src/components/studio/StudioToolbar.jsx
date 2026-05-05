@@ -23,7 +23,7 @@ export default function StudioToolbar({
 }) {
   const {
     room, viewMode, setViewMode, gridEnabled, toggleGrid,
-    roomWallsTool, toggleRoomWallsTool,
+    roomWallsTool, toggleRoomWallsTool, roomResizeTool, toggleRoomResizeTool,
     isChatOpen, toggleChat, undo, redo, validate,
     selectedId, furniture, rotateFurniture, removeFurniture,
     saveProject,
@@ -39,17 +39,17 @@ export default function StudioToolbar({
 
   const draft = isDraftId(room?.id);
   const polygonWallsOnly = isPolygonWallsFormat(room?.walls);
-  const canUseWallPoints =
-    wallPointsCanvasActive &&
-    room?.width > 0 &&
-    room?.depth > 0 &&
-    !polygonWallsOnly;
-  const wallPointsDisabled = !canUseWallPoints;
   const wallPointsTitle = !wallPointsCanvasActive
     ? 'Open a linked space from the bottom bar (room view) to edit wall points'
     : polygonWallsOnly
       ? 'Wall points apply to rectangular or segment walls; this room uses a scanned polygon outline'
       : 'Drag wall joints — rectangular rooms use the perimeter from width × depth until you save edits';
+
+  const canUseRoomCanvasTools =
+    wallPointsCanvasActive && room?.width > 0 && room?.depth > 0;
+  const roomResizeTitle = !wallPointsCanvasActive
+    ? 'Open a linked space (room view) to resize dimensions'
+    : 'Drag east, south, or south-east handle to resize; room origin stays at top-left';
 
   const doValidate = () => {
     const { valid, errors } = validate();
@@ -185,15 +185,26 @@ export default function StudioToolbar({
       <ToolbarBtn onClick={redo}>Redo</ToolbarBtn>
       <ToolbarBtn onClick={toggleGrid} active={gridEnabled}>Grid</ToolbarBtn>
       {room?.width > 0 && room?.depth > 0 && viewMode === '2d' && (
-        <ToolbarBtn
-          onClick={toggleRoomWallsTool}
-          active={roomWallsTool}
-          disabled={wallPointsDisabled}
-          title={wallPointsTitle}
-          className="hidden sm:inline-flex"
-        >
-          Wall points
-        </ToolbarBtn>
+        <>
+          <ToolbarBtn
+            onClick={toggleRoomResizeTool}
+            active={roomResizeTool}
+            disabled={!canUseRoomCanvasTools}
+            title={roomResizeTitle}
+            className="hidden sm:inline-flex"
+          >
+            Room size
+          </ToolbarBtn>
+          <ToolbarBtn
+            onClick={toggleRoomWallsTool}
+            active={roomWallsTool}
+            disabled={!canUseRoomCanvasTools || polygonWallsOnly}
+            title={wallPointsTitle}
+            className="hidden sm:inline-flex"
+          >
+            Wall points
+          </ToolbarBtn>
+        </>
       )}
       <ToolbarBtn onClick={doValidate} className="hidden sm:inline-flex">Validate</ToolbarBtn>
       <ToolbarBtn onClick={autoPlace} className="hidden sm:inline-flex">Auto-Arrange</ToolbarBtn>

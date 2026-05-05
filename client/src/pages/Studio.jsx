@@ -1466,7 +1466,7 @@ export default function Studio() {
             className={`
             ${catalogOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
             fixed md:relative z-20 md:z-auto inset-y-0 left-0
-            w-[320px] border-r border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] overflow-hidden flex flex-col min-h-0
+            w-auto bg-[#f8f8f6] overflow-hidden flex flex-col min-h-0
             transition-transform duration-300 md:transition-none
             ${
               isProjectEditorRoute

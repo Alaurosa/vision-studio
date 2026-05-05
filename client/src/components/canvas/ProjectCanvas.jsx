@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Stage, Layer, Rect, Text } from 'react-konva';
 
 function buildProjectLayout(projectSpaces = [], roomsById = {}) {
@@ -37,6 +37,8 @@ function buildProjectLayout(projectSpaces = [], roomsById = {}) {
 }
 
 export default function ProjectCanvas({ projectSpaces = [], rooms = [], selectedSpaceId = null, onSelectSpace }) {
+  const wrapRef = useRef(null);
+  const [size, setSize] = useState({ w: 900, h: 520 });
   const roomsById = useMemo(
     () =>
       (Array.isArray(rooms) ? rooms : []).reduce((acc, room) => {
@@ -45,17 +47,23 @@ export default function ProjectCanvas({ projectSpaces = [], rooms = [], selected
       }, {}),
     [rooms],
   );
-  const { placed, totalW, totalH } = useMemo(
+  const { placed } = useMemo(
     () => buildProjectLayout(projectSpaces, roomsById),
     [projectSpaces, roomsById],
   );
+  useEffect(() => {
+    if (!wrapRef.current) return;
+    const obs = new ResizeObserver(() => {
+      const r = wrapRef.current.getBoundingClientRect();
+      setSize({ w: Math.max(320, Math.floor(r.width)), h: Math.max(280, Math.floor(r.height)) });
+    });
+    obs.observe(wrapRef.current);
+    return () => obs.disconnect();
+  }, []);
 
   return (
-    <div className="relative h-full w-full bg-surface-800">
-      <div className="absolute left-4 top-4 z-10 text-xs font-mono text-surface-400">
-        Full floorplan preview ({placed.length} spaces)
-      </div>
-      <Stage width={Math.max(totalW, 900)} height={Math.max(totalH, 520)} draggable>
+    <div ref={wrapRef} className="relative h-full w-full bg-surface-800">
+      <Stage width={size.w} height={size.h} draggable>
         <Layer>
           {placed.map((space) => {
             const active = selectedSpaceId === space.id;

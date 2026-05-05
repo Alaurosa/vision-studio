@@ -7,6 +7,7 @@ import GridOverlay from './GridOverlay';
 import WallOutline from './WallOutline';
 import WallJointHandles from './WallJointHandles';
 import RoomBoundsHandles from './RoomBoundsHandles';
+import WallDimensionLabels from './WallDimensionLabels';
 import { isPolygonWallsFormat, isSegmentWallsFormat, roomRectangleOutline } from '@/utils/roomWallMath';
 
 function getZoneBox(zone) {
@@ -183,6 +184,9 @@ export default function RoomCanvas() {
     isSegmentWallsFormat(wallsForOutline) &&
     effectiveRoomW > 0 &&
     effectiveRoomD > 0;
+
+  const wallDimensionSegments =
+    wallsForOutline && isSegmentWallsFormat(wallsForOutline) ? wallsForOutline : null;
 
   const roomPxW = (room?.width || 0) * pxPerInch;
   const roomPxH = (room?.depth || 0) * pxPerInch;
@@ -375,6 +379,21 @@ export default function RoomCanvas() {
                 </Group>
               );
             })}
+          </Layer>
+        )}
+
+        {/* Per-wall length labels — above zone fills so edges stay readable */}
+        {wallDimensionSegments && (
+          <Layer listening={false}>
+            <WallDimensionLabels
+              segments={wallDimensionSegments}
+              roomOffsetX={roomOffsetX}
+              roomOffsetY={roomOffsetY}
+              pxPerInch={pxPerInch}
+              viewOriginX={focusBox[0]}
+              viewOriginY={focusBox[1]}
+              viewportScale={viewport.scale}
+            />
           </Layer>
         )}
 

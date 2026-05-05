@@ -34,6 +34,10 @@ export default function Upload({ embedInWizard = false }) {
   const [inspirationImageName, setInspirationImageName] = useState('');
 
   const inputRef = useRef(null);
+  const projectIdParam = searchParams.get('projectId');
+  const wizardProject = projectIdParam ? getProjectById(projectIdParam) : null;
+  const resolvedProjectTitle =
+    wizardProject?.name || searchParams.get('projectName') || projectName?.trim() || 'Untitled project';
 
   const handleFile = (f) => {
     if (!f) return;
@@ -142,6 +146,7 @@ export default function Upload({ embedInWizard = false }) {
     ];
     setSpaceReview({
       sourceRoomId: editorData.room.id,
+      imageUrl: editorData.imageUrl || null,
       normalizedZones,
       roomWidth: Math.round(roomWidth),
       roomDepth: Math.round(roomDepth),
@@ -153,7 +158,6 @@ export default function Upload({ embedInWizard = false }) {
 
   const finalizeProject = async () => {
     if (!spaceReview) return;
-    const projectIdParam = searchParams.get('projectId');
     let project = projectIdParam ? getProjectById(projectIdParam) : null;
     const nameFromWizard =
       resolvedProjectTitle || searchParams.get('projectName') || projectName?.trim();
@@ -209,6 +213,13 @@ export default function Upload({ embedInWizard = false }) {
     const firstSpace = mergedSpaces[0] || null;
     project.spaces = mergedSpaces;
     project.theme = theme;
+    project.floorplan = {
+      imageUrl: spaceReview.imageUrl || null,
+      zones: spaceReview.normalizedZones || [],
+      scalePxPerInch: spaceReview.scale || null,
+      sourceRoomId: roomId || null,
+      updatedAt: new Date().toISOString(),
+    };
     project.updatedAt = new Date().toISOString();
     upsertProject(project);
 

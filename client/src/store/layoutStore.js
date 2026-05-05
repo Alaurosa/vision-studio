@@ -93,6 +93,10 @@ export const useLayoutStore = create(
       loading: false,
       viewMode: '2d',
       gridEnabled: true,
+      /** Studio canvas: drag segment wall joints when room.walls uses {start,end} format. */
+      roomWallsTool: false,
+      /** Studio canvas: resize room width/depth (handles on E / S / SE; origin fixed). */
+      roomResizeTool: false,
       isChatOpen: false,
       undoStack: [],
       redoStack: [],
@@ -324,6 +328,18 @@ export const useLayoutStore = create(
       // ---------- ui ----------
       setViewMode: (mode) => set({ viewMode: mode }),
       toggleGrid: () => set((s) => ({ gridEnabled: !s.gridEnabled })),
+      toggleRoomWallsTool: () =>
+        set((s) => {
+          const on = !s.roomWallsTool;
+          return { roomWallsTool: on, roomResizeTool: on ? false : s.roomResizeTool };
+        }),
+      clearRoomWallsTool: () => set({ roomWallsTool: false }),
+      toggleRoomResizeTool: () =>
+        set((s) => {
+          const on = !s.roomResizeTool;
+          return { roomResizeTool: on, roomWallsTool: on ? false : s.roomWallsTool };
+        }),
+      clearRoomResizeTool: () => set({ roomResizeTool: false }),
       toggleChat: () => set((s) => ({ isChatOpen: !s.isChatOpen })),
 
       undo: () => {

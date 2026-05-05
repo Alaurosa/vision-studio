@@ -690,6 +690,32 @@ export default function Studio() {
               later from the hub).
             </p>
 
+            {(project.previewImageUrl || project.detectedDimensions?.width) && (
+              <section className="mt-10 rounded-[22px] border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] overflow-hidden shadow-[0_18px_40px_rgba(4,12,46,0.06)]">
+                {project.previewImageUrl && (
+                  <div className="aspect-[16/9] bg-[#eef4f7] overflow-hidden">
+                    <img
+                      src={project.previewImageUrl}
+                      alt={`Floorplan preview for ${project.name}`}
+                      className="w-full h-full object-contain"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                    />
+                  </div>
+                )}
+                <div className="p-6 border-t border-[rgba(0,0,0,0.06)] flex flex-wrap items-baseline justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-vs-accent mb-1">Detected floorplan</div>
+                    <div className="font-display text-lg text-[#171717]">{project.name}</div>
+                  </div>
+                  {project.detectedDimensions?.width && project.detectedDimensions?.depth && (
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b]">
+                      {inchesToFeet(project.detectedDimensions.width)} × {inchesToFeet(project.detectedDimensions.depth)}
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
             <div className="grid lg:grid-cols-2 gap-8 mt-10">
               <section className="panel p-6">
                 <div className="mb-4 flex items-center justify-between gap-3">
@@ -808,8 +834,17 @@ export default function Studio() {
       });
 
       setEditorEntryIssue(null);
-      navigate(`/studio/project/${projectId}/editor`);
+      const target =
+        (project.spaces || []).find((s) => s.type === 'interior') ||
+        (project.spaces || [])[0];
+      if (target?.id) {
+        navigate(`/studio/project/${projectId}/editor/${target.id}`);
+      } else {
+        navigate(`/studio/project/${projectId}/editor`);
+      }
     };
+
+    const fromHub = searchParams.get('from') === 'hub';
 
     return (
       <>
@@ -823,11 +858,38 @@ export default function Studio() {
             ← Back to Project Hub
           </button>
           <p className="text-[10px] font-semibold uppercase tracking-[0.34em] text-vs-accent mb-3">Confirmation</p>
-          <h1 className="display-lg mb-2">Confirm project direction</h1>
+          <h1 className="display-lg mb-2">Your room is ready.</h1>
           <p className="mt-2 text-sm text-[#5b5b5b] max-w-2xl leading-relaxed">
-            Review your whole-property vision summary, spaces, and assumptions before moving into the editor.
-            Next, you will enter the editor directly. Inside the editor, use the Space Assistant for room-specific changes.
+            We've mapped your floorplan, set your spaces, and captured your project vision. Review the
+            summary below, then jump into the editor to start designing — or open the project hub to
+            see everything at a glance.
           </p>
+
+          {(project.previewImageUrl || project.detectedDimensions?.width) && (
+            <section className="mt-10 rounded-[22px] border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] overflow-hidden shadow-[0_18px_40px_rgba(4,12,46,0.06)]">
+              {project.previewImageUrl && (
+                <div className="aspect-[16/9] bg-[#eef4f7] overflow-hidden">
+                  <img
+                    src={project.previewImageUrl}
+                    alt={`Floorplan preview for ${project.name}`}
+                    className="w-full h-full object-contain"
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
+                </div>
+              )}
+              <div className="p-6 border-t border-[rgba(0,0,0,0.06)] flex flex-wrap items-baseline justify-between gap-3">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-vs-accent mb-1">Detected floorplan</div>
+                  <div className="font-display text-lg text-[#171717]">{project.name}</div>
+                </div>
+                {project.detectedDimensions?.width && project.detectedDimensions?.depth && (
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b]">
+                    {inchesToFeet(project.detectedDimensions.width)} × {inchesToFeet(project.detectedDimensions.depth)}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
 
           <div className="grid lg:grid-cols-3 gap-6 mt-10">
             <section className="panel p-6 lg:col-span-1">
@@ -919,10 +981,25 @@ export default function Studio() {
               className="btn-ink px-8 py-3 text-[11px] uppercase tracking-[0.12em]"
               onClick={openEditorAfterConfirmation}
             >
-              Open Editor
+              Continue to Editor →
             </button>
-            <button type="button" className="btn-ghost text-[11px] uppercase tracking-[0.15em]" onClick={() => navigate(`/studio/project/${projectId}`)}>
+            <button
+              type="button"
+              className="btn-ghost text-[11px] uppercase tracking-[0.15em] px-6 py-3"
+              onClick={() => navigate(`/studio/project/${projectId}`)}
+            >
               Back to Project Hub
+            </button>
+            <button
+              type="button"
+              className="text-[11px] uppercase tracking-editorial text-[#5b5b5b] hover:text-[#171717] transition px-2 py-3"
+              onClick={() =>
+                fromHub
+                  ? navigate(`/studio/project/${projectId}`)
+                  : navigate(`/studio/project/${projectId}/vision`)
+              }
+            >
+              {fromHub ? '← Return to project' : '← Back to vision'}
             </button>
           </div>
           {editorEntryIssue && (
@@ -1567,6 +1644,7 @@ export default function Studio() {
           contextLabel={assistantContextLabel}
           projectTitle={resolvedProjectTitle}
           projectMode={isProjectEditorMode}
+          wallPointsCanvasActive={!isProjectEditorMode || showRoomScopedCanvas}
         />
         <div className="flex-1 flex overflow-hidden relative min-h-0">
           <AnimatePresence>

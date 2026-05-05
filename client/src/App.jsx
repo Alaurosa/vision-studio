@@ -9,7 +9,6 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 // Lazy-loaded pages for code-splitting
 const Home = lazy(() => import('@/pages/Home'));
 const Login = lazy(() => import('@/pages/Login'));
-const Upload = lazy(() => import('@/pages/Upload'));
 const Studio = lazy(() => import('@/pages/Studio'));
 const StudioNewWizard = lazy(() => import('@/pages/StudioNewWizard'));
 const Chat = lazy(() => import('@/pages/Chat'));

@@ -73,21 +73,6 @@ function resolveSpaceByEditorId(project, editorSpaceId) {
   return spaces.find((s) => s.zoneId === legacyZoneId) || null;
 }
 
-function getEditableSpaces(project, rooms = []) {
-  const allSpaces = Array.isArray(project?.spaces) ? project.spaces : [];
-  const roomIdSet = new Set((Array.isArray(rooms) ? rooms : []).map((r) => r.id));
-  const withLinkedRoom = allSpaces.filter((space) => {
-    const rid = getSpaceRoomId(space);
-    if (!rid) return false;
-    // If room list is loaded, only treat spaces as editable when the linked room actually exists.
-    if (roomIdSet.size > 0) return roomIdSet.has(rid);
-    return true;
-  });
-  const interior = withLinkedRoom.filter((s) => s.type !== 'exterior');
-  const exterior = withLinkedRoom.filter((s) => s.type === 'exterior');
-  return [...interior, ...exterior];
-}
-
 /** Align API snake_case + localStorage shapes; map room_id → roomId for spaces */
 function normalizeProjectPayload(project) {
   if (!project) return null;

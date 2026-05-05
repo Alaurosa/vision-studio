@@ -93,6 +93,7 @@ export default function Upload({ embedInWizard = false }) {
             name: type === 'interior' ? `Interior ${prev.spaces.length + 1}` : `Exterior ${prev.spaces.length + 1}`,
             type,
             zoneId: null,
+            geometry: null,
           },
         ],
       };
@@ -120,11 +121,31 @@ export default function Upload({ embedInWizard = false }) {
       const maxX = Math.max(...finalZones.map(z => z.bbox[2]));
       const maxY = Math.max(...finalZones.map(z => z.bbox[3]));
 
-      normalizedZones = finalZones.map(z => ({
-        ...z,
-        bbox: [z.bbox[0] - minX, z.bbox[1] - minY, z.bbox[2] - minX, z.bbox[3] - minY],
-        polygon: z.polygon.map(([x, y]) => [x - minX, y - minY]),
-      }));
+      normalizedZones = finalZones.map((z) => {
+        const relBbox = [z.bbox[0] - minX, z.bbox[1] - minY, z.bbox[2] - minX, z.bbox[3] - minY];
+        const relPolygon = z.polygon.map(([x, y]) => [x - minX, y - minY]);
+        const relGeometry = z.geometry
+          ? {
+              ...z.geometry,
+              bbox: {
+                x: Math.max(0, z.geometry.bbox.x - minX),
+                y: Math.max(0, z.geometry.bbox.y - minY),
+                width: z.geometry.bbox.width,
+                height: z.geometry.bbox.height,
+              },
+              points: (z.geometry.points || []).map((pt) => ({
+                x: pt.x - minX,
+                y: pt.y - minY,
+              })),
+            }
+          : null;
+        return {
+          ...z,
+          bbox: relBbox,
+          polygon: relPolygon,
+          geometry: relGeometry,
+        };
+      });
 
       roomWidth = (maxX - minX) / scale;
       roomDepth = (maxY - minY) / scale;
@@ -133,17 +154,13 @@ export default function Upload({ embedInWizard = false }) {
       roomDepth = editorData.parseResult.boundary.h / scale;
     }
 
-    const spaces = [
-      ...normalizedZones.map((zone) => ({
+    const spaces = normalizedZones.map((zone) => ({
         id: `space-${zone.id}`,
         name: zone.name,
-        type: 'interior',
+        type: zone.type === 'exterior' ? 'exterior' : 'interior',
         zoneId: zone.id,
-      })),
-      { id: `space-${Date.now().toString(36)}-front`, name: 'Front Yard', type: 'exterior', zoneId: null },
-      { id: `space-${Date.now().toString(36)}-back`, name: 'Backyard', type: 'exterior', zoneId: null },
-      { id: `space-${Date.now().toString(36)}-entry`, name: 'Entry', type: 'exterior', zoneId: null },
-    ];
+        geometry: zone.geometry || null,
+      }));
     setSpaceReview({
       sourceRoomId: editorData.room.id,
       imageUrl: editorData.imageUrl || null,
@@ -209,8 +226,8 @@ export default function Upload({ embedInWizard = false }) {
       ...space,
       roomId,
       placeholderMode: space.type === 'exterior',
+      geometry: space.geometry || null,
     }));
-    const firstSpace = mergedSpaces[0] || null;
     project.spaces = mergedSpaces;
     project.theme = theme;
     project.floorplan = {

@@ -105,12 +105,6 @@ export default function Home() {
   const heroItemVariants = makeVariant(16, 1);
   const sectionReveal = makeVariant(22, 0.75);
 
-  const scrollToShowcase = () => {
-    document.getElementById('showcase')?.scrollIntoView({
-      behavior: prefersReducedMotion ? 'auto' : 'smooth',
-    });
-  };
-
   return (
     <div className="bg-vs-warm text-vs-charcoal">
       <Helmet>
@@ -171,18 +165,17 @@ export default function Home() {
             </motion.p>
             <motion.div variants={heroItemVariants} className="mt-10 flex flex-wrap gap-3">
               <Link
-                to="/upload"
+                to="/studio/new"
                 className="inline-flex items-center justify-center rounded-full bg-vs-accent px-8 py-3 text-sm font-semibold text-white shadow-lg shadow-black/25 transition hover:brightness-110 active:scale-[0.98]"
               >
                 Start Designing
               </Link>
-              <button
-                type="button"
-                onClick={scrollToShowcase}
+              <Link
+                to="/studio"
                 className="inline-flex items-center justify-center rounded-full border border-white/45 bg-white/12 px-8 py-3 text-sm font-semibold text-[rgba(255,255,255,0.96)] backdrop-blur-md transition hover:border-white/55 hover:bg-white/18 active:scale-[0.98]"
               >
                 Explore Studio
-              </button>
+              </Link>
             </motion.div>
           </div>
         </motion.div>
@@ -559,7 +552,7 @@ export default function Home() {
           </h2>
           <div className="mt-12 flex flex-wrap justify-center gap-4">
             <Link
-              to="/upload"
+              to="/studio/new"
               className="inline-flex min-w-[180px] items-center justify-center rounded-full bg-vs-accent px-10 py-3.5 text-sm font-semibold text-white shadow-xl shadow-black/25 transition hover:brightness-110 active:scale-[0.98]"
             >
               Start Designing

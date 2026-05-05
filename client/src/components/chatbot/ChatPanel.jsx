@@ -6,7 +6,13 @@ import { useLayoutStore } from '@/store/layoutStore';
 import MessageBubble from './MessageBubble';
 import StylePrompts from './StylePrompts';
 
-export default function ChatPanel() {
+export default function ChatPanel({
+  projectId: projectIdProp = null,
+  spaceId: spaceIdProp = null,
+  spaceBranchType = null,
+  globalVision: globalVisionProp = null,
+  spaceVision: spaceVisionProp = null,
+} = {}) {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const scrollRef = useRef(null);
@@ -40,9 +46,23 @@ export default function ChatPanel() {
     setInput('');
     setSending(true);
     try {
+      const spaceVisionOut =
+        spaceBranchType
+          ? {
+              ...(spaceVisionProp && typeof spaceVisionProp === 'object' ? spaceVisionProp : {}),
+              space_type: spaceBranchType,
+            }
+          : spaceVisionProp && typeof spaceVisionProp === 'object'
+            ? spaceVisionProp
+            : null;
       const { data } = await api.post('/api/chat/message', {
         room_id: room.id,
         message: text,
+        context_type: 'current_space',
+        ...(projectIdProp && { project_id: projectIdProp }),
+        ...(spaceIdProp && { space_id: spaceIdProp }),
+        ...(globalVisionProp && typeof globalVisionProp === 'object' && { global_vision: globalVisionProp }),
+        ...(spaceVisionOut && { space_vision: spaceVisionOut }),
         // For draft rooms, send room context since the server doesn't have it
         ...(room.id?.startsWith?.('draft-') && {
           room_context: {
@@ -237,7 +257,7 @@ export default function ChatPanel() {
               <span className="text-xs text-paper-50 font-bold">V</span>
             </div>
             <div>
-              <div className="font-display text-base leading-tight">Studio Assistant</div>
+              <div className="font-display text-base leading-tight">Space Assistant</div>
               <div className="text-[10px] uppercase tracking-editorial text-ink-500 mt-0.5">
                 {sending ? 'Thinking…' : 'Online'}
               </div>
@@ -254,7 +274,7 @@ export default function ChatPanel() {
           )}
         </div>
         <p className="text-xs text-ink-500 leading-relaxed mt-2">
-          Describe your space goals, style preferences, or ask to move, add, and arrange furniture — all by chatting.
+          Edit the selected room or exterior area.
         </p>
       </div>
 

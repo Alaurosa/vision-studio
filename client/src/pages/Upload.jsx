@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -10,7 +10,7 @@ import AnalysisWorkflow from '@/components/upload/AnalysisWorkflow';
 import RoomEditor from '@/components/upload/RoomEditor';
 import { createProjectDraft, getProjectById, upsertProject } from '@/utils/projectCompat';
 
-export default function Upload() {
+export default function Upload({ embedInWizard = false }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
@@ -155,12 +155,16 @@ export default function Upload() {
     if (!spaceReview) return;
     const projectIdParam = searchParams.get('projectId');
     let project = projectIdParam ? getProjectById(projectIdParam) : null;
+    const nameFromWizard =
+      resolvedProjectTitle || searchParams.get('projectName') || projectName?.trim();
     if (!project) {
       project = createProjectDraft({
-        name: searchParams.get('projectName') || projectName || 'Untitled Project',
+        name: nameFromWizard || 'Untitled Project',
         propertyType: searchParams.get('propertyType') || 'House',
         startMode: 'upload',
       });
+    } else if (nameFromWizard && (!project.name || project.name === 'Untitled Project')) {
+      project = { ...project, name: nameFromWizard };
     }
 
     const theme = {
@@ -178,9 +182,11 @@ export default function Upload() {
       depth: spaceReview.roomDepth,
     };
 
+    const displayProjectName = resolvedProjectTitle || projectName?.trim();
+
     if (isGuest) {
       const draft = createDraftRoom({
-        name: projectName || `${project.name} - Floorplan`,
+        name: displayProjectName || `${project.name} - Floorplan`,
         width: spaceReview.roomWidth,
         depth: spaceReview.roomDepth,
         scale_px_per_inch: spaceReview.scale,
@@ -206,12 +212,7 @@ export default function Upload() {
     project.updatedAt = new Date().toISOString();
     upsertProject(project);
 
-    if (firstSpace) {
-      const params = new URLSearchParams({ projectId: project.id, spaceId: firstSpace.id });
-      navigate(`/studio/${roomId}?${params.toString()}`);
-    } else {
-      navigate('/studio');
-    }
+    navigate(`/studio/project/${project.id}/confirm?phase=spaces`);
   };
 
   const onEditorCancel = () => {
@@ -224,16 +225,27 @@ export default function Upload() {
         <title>Upload Floorplan — Vision Studio</title>
         <meta name="description" content="Upload a PNG, JPEG, or PDF floorplan. Our AI vision pipeline detects walls, segments rooms, and measures dimensions automatically." />
       </Helmet>
-      <section className="mx-auto max-w-7xl px-6 pb-10 pt-20 md:px-8">
+      <section className={`mx-auto max-w-7xl px-6 md:px-8 ${embedInWizard ? 'pb-6 pt-10' : 'pb-10 pt-20'}`}>
+        {embedInWizard && (
+          <button
+            type="button"
+            onClick={() => navigate('/studio/new')}
+            className="text-[11px] uppercase tracking-editorial text-[#5b5b5b] hover:text-[#171717] mb-6"
+          >
+            ← Back to new project
+          </button>
+        )}
         <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-vs-accent">Upload Floorplan</p>
-        <h1 className="display-lg max-w-4xl">
-          Start with the space you already have.
+        <h1 className={`${embedInWizard ? 'display-md' : 'display-lg'} max-w-4xl`}>
+          {embedInWizard ? 'Add your floorplan to this project.' : 'Start with the space you already have.'}
         </h1>
-        <p className="mt-8 max-w-3xl leading-relaxed text-[#2d2d2d]">
-          Upload a floorplan, sketch, or room photo. Vision Studio reads the room structure,
-          scale, and spatial zones so the design process begins with real geometry.
-        </p>
-        {isGuest && (
+        {!embedInWizard && (
+          <p className="mt-8 max-w-3xl leading-relaxed text-[#2d2d2d]">
+            Upload a floorplan, sketch, or room photo. Vision Studio reads the room structure,
+            scale, and spatial zones so the design process begins with real geometry.
+          </p>
+        )}
+        {isGuest && !embedInWizard && (
           <p className="text-ink-500 text-sm mt-4 max-w-2xl">
             You're designing as a guest — no sign-in needed. When you're happy
             with your layout, hit <span className="font-medium text-ink-900">Save to account</span> in
@@ -286,15 +298,22 @@ export default function Upload() {
           <div className="md:col-span-4">
             <div className="sticky top-24 rounded-[22px] border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] p-8 shadow-[0_18px_40px_rgba(4,12,46,0.06)]">
               <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-vs-accent mb-6">Project Details</div>
-              <label className="block mb-6">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] mb-2 text-[#5b5b5b]">Project name</div>
-                <input
-                  className="input-field bg-[#fffdf9]"
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  placeholder="Untitled project"
-                />
-              </label>
+              {embedInWizard && resolvedProjectTitle ? (
+                <div className="mb-6 rounded-xl border border-[rgba(0,0,0,0.08)] bg-[#fffdf9] px-4 py-3">
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-1">Project</div>
+                  <div className="font-display text-lg text-[#171717]">{resolvedProjectTitle}</div>
+                </div>
+              ) : (
+                <label className="block mb-6">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] mb-2 text-[#5b5b5b]">Project name</div>
+                  <input
+                    className="input-field bg-[#fffdf9]"
+                    value={projectName}
+                    onChange={(e) => setProjectName(e.target.value)}
+                    placeholder="Untitled project"
+                  />
+                </label>
+              )}
 
               <div className="text-[11px] font-semibold uppercase tracking-[0.22em] mb-2 text-[#5b5b5b]">What happens next</div>
               <ol className="text-sm text-[#2d2d2d] space-y-2 mb-8">
@@ -316,17 +335,21 @@ export default function Upload() {
               >
                 {analyzing ? 'Uploading…' : 'Upload Floorplan'}
               </button>
-              <button
-                type="button"
-                onClick={() => navigate('/studio')}
-                className="btn-ghost mt-3 w-full"
-              >
-                Use Sample Project
-              </button>
-              <p className="text-[11px] text-ink-400 mt-4 leading-relaxed">
-                No floorplan handy? Skip the upload and start from a blank template
-                in the Studio.
-              </p>
+              {!embedInWizard && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/studio')}
+                    className="btn-ghost mt-3 w-full"
+                  >
+                    Use Sample Project
+                  </button>
+                  <p className="text-[11px] text-ink-400 mt-4 leading-relaxed">
+                    No floorplan handy? Skip the upload and start from a blank template
+                    in the Studio.
+                  </p>
+                </>
+              )}
             </div>
           </div>
         </div>

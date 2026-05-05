@@ -5,7 +5,7 @@ import { useAuth } from '@/hooks/useAuth';
 
 const navLinks = [
   { to: '/', label: 'Home' },
-  { to: '/upload', label: 'Upload' },
+  { to: '/studio/new?startMode=upload', label: 'New project' },
   { to: '/studio', label: 'Studio' },
   { to: '/chat', label: 'Chat' },
 ];

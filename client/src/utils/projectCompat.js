@@ -48,6 +48,7 @@ export function createProjectDraft({ name, propertyType, startMode }) {
     startMode: startMode || 'blank',
     status: 'in_progress',
     globalVision: {
+      propertyVision: '',
       styleKeywords: [],
       moodVibe: '',
       budgetRange: '',
@@ -57,6 +58,8 @@ export function createProjectDraft({ name, propertyType, startMode }) {
     },
     theme: null,
     spaces: [],
+    confirmationCompletedAt: null,
+    visionIntakeCompletedAt: null,
     updatedAt: now,
     createdAt: now,
   };

@@ -37,8 +37,8 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
-                <Link to="/upload" className={linkClass}>
-                  Upload Floorplan
+                <Link to="/studio/new?startMode=upload" className={linkClass}>
+                  New project
                 </Link>
               </li>
               <li>

@@ -1522,6 +1522,7 @@ export default function Studio() {
           contextLabel={assistantContextLabel}
           projectTitle={resolvedProjectTitle}
           projectMode={isProjectEditorMode}
+          wallPointsCanvasActive={!isProjectEditorMode || showRoomScopedCanvas}
         />
         <div className="flex-1 flex overflow-hidden relative min-h-0">
           <AnimatePresence>

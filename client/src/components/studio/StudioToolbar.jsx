@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { useLayoutStore } from '@/store/layoutStore';
 import { useAuth } from '@/hooks/useAuth';
 import { inchesToFeet } from '@/utils/scale';
+import { isPolygonWallsFormat } from '@/utils/roomWallMath';
 import api from '@/lib/api';
 import LoginModal from '@/components/auth/LoginModal';
 import KeyboardShortcutsPopover from '@/components/studio/KeyboardShortcutsPopover';
@@ -17,9 +18,12 @@ export default function StudioToolbar({
   contextLabel,
   projectTitle,
   projectMode = false,
+  /** False on full-floorplan project canvas — wall handles only exist in room-scoped view. */
+  wallPointsCanvasActive = true,
 }) {
   const {
     room, viewMode, setViewMode, gridEnabled, toggleGrid,
+    roomWallsTool, toggleRoomWallsTool,
     isChatOpen, toggleChat, undo, redo, validate,
     selectedId, furniture, rotateFurniture, removeFurniture,
     saveProject,
@@ -34,6 +38,18 @@ export default function StudioToolbar({
   const selectedItem = furniture.find((item) => item.id === selectedId);
 
   const draft = isDraftId(room?.id);
+  const polygonWallsOnly = isPolygonWallsFormat(room?.walls);
+  const canUseWallPoints =
+    wallPointsCanvasActive &&
+    room?.width > 0 &&
+    room?.depth > 0 &&
+    !polygonWallsOnly;
+  const wallPointsDisabled = !canUseWallPoints;
+  const wallPointsTitle = !wallPointsCanvasActive
+    ? 'Open a linked space from the bottom bar (room view) to edit wall points'
+    : polygonWallsOnly
+      ? 'Wall points apply to rectangular or segment walls; this room uses a scanned polygon outline'
+      : 'Drag wall joints — rectangular rooms use the perimeter from width × depth until you save edits';
 
   const doValidate = () => {
     const { valid, errors } = validate();
@@ -168,6 +184,17 @@ export default function StudioToolbar({
       <ToolbarBtn onClick={undo}>Undo</ToolbarBtn>
       <ToolbarBtn onClick={redo}>Redo</ToolbarBtn>
       <ToolbarBtn onClick={toggleGrid} active={gridEnabled}>Grid</ToolbarBtn>
+      {room?.width > 0 && room?.depth > 0 && viewMode === '2d' && (
+        <ToolbarBtn
+          onClick={toggleRoomWallsTool}
+          active={roomWallsTool}
+          disabled={wallPointsDisabled}
+          title={wallPointsTitle}
+          className="hidden sm:inline-flex"
+        >
+          Wall points
+        </ToolbarBtn>
+      )}
       <ToolbarBtn onClick={doValidate} className="hidden sm:inline-flex">Validate</ToolbarBtn>
       <ToolbarBtn onClick={autoPlace} className="hidden sm:inline-flex">Auto-Arrange</ToolbarBtn>
       {selectedId && (

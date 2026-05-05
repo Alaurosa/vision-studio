@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Stage, Layer, Rect, Group, Text, Line, Circle } from 'react-konva';
 import { useLayoutStore } from '@/store/layoutStore';
 import { computeRotation, snapToGrid, inchesToFeet } from '@/utils/scale';
 import FurnitureItem from './FurnitureItem';
 import GridOverlay from './GridOverlay';
 import WallOutline from './WallOutline';
+import WallJointHandles from './WallJointHandles';
+import { isPolygonWallsFormat, isSegmentWallsFormat, roomRectangleOutline } from '@/utils/roomWallMath';
 
 function getZoneBox(zone) {
   if (Array.isArray(zone?.bbox) && zone.bbox.length === 4) {
@@ -37,10 +39,13 @@ export default function RoomCanvas() {
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [placementWarning, setPlacementWarning] = useState('');
+  const [wallDragPreview, setWallDragPreview] = useState(null);
 
   const {
     room, furniture, selectedId, detections, zones, activeZoneId, gridEnabled,
+    roomWallsTool,
     selectFurniture, clearSelection, updateFurniture, removeFurniture, setActiveZone, updateZone, getVisibleFurniture,
+    updateRoom,
   } = useLayoutStore();
 
   // Resize observer
@@ -104,8 +109,10 @@ export default function RoomCanvas() {
       return;
     }
 
-    // Escape deselects
+    // Escape exits wall-point edit mode, then deselects furniture
     if (e.key === 'Escape') {
+      const { roomWallsTool, clearRoomWallsTool } = useLayoutStore.getState();
+      if (roomWallsTool) clearRoomWallsTool();
       clearSelection();
       return;
     }
@@ -132,6 +139,34 @@ export default function RoomCanvas() {
   useEffect(() => {
     setViewport({ x: 0, y: 0, scale: 1 });
   }, [room?.id, activeZoneId]);
+
+  useEffect(() => {
+    setWallDragPreview(null);
+  }, [room?.id]);
+
+  useEffect(() => {
+    if (!roomWallsTool) setWallDragPreview(null);
+  }, [roomWallsTool]);
+
+  /** Rooms created from templates often have width/depth but no walls JSON — use a rectangular perimeter in inch segments. */
+  const rectangleWallSegments =
+    room?.width > 0 &&
+    room?.depth > 0 &&
+    !isPolygonWallsFormat(room?.walls)
+      ? roomRectangleOutline(room.width, room.depth)
+      : null;
+
+  const wallsForOutline = (() => {
+    if (isSegmentWallsFormat(room?.walls)) return wallDragPreview ?? room.walls;
+    if (isPolygonWallsFormat(room?.walls)) return room.walls;
+    return wallDragPreview ?? rectangleWallSegments;
+  })();
+
+  const wallsEditableAsSegments =
+    Boolean(wallsForOutline) &&
+    isSegmentWallsFormat(wallsForOutline) &&
+    room?.width > 0 &&
+    room?.depth > 0;
 
   const roomPxW = (room?.width || 0) * pxPerInch;
   const roomPxH = (room?.depth || 0) * pxPerInch;
@@ -216,11 +251,11 @@ export default function RoomCanvas() {
           )}
         </Layer>
 
-        {/* Walls (from parser) */}
+        {/* Walls (from parser or live drag preview) */}
         <Layer listening={false}>
-          {room?.walls && (
+          {wallsForOutline && (
             <WallOutline
-              walls={room.walls}
+              walls={wallsForOutline}
               pxPerInch={pxPerInch}
               offsetX={roomOffsetX}
               offsetY={roomOffsetY}
@@ -376,6 +411,29 @@ export default function RoomCanvas() {
             />
           ))}
         </Layer>
+
+        {/* Draggable wall joints — above furniture for pointer priority */}
+        {roomWallsTool && wallsEditableAsSegments && (
+          <Layer>
+            <WallJointHandles
+              walls={wallsForOutline}
+              roomWidth={room.width}
+              roomDepth={room.depth}
+              roomOffsetX={roomOffsetX}
+              roomOffsetY={roomOffsetY}
+              pxPerInch={pxPerInch}
+              viewOriginX={focusBox[0]}
+              viewOriginY={focusBox[1]}
+              viewportScale={viewport.scale}
+              enabled={roomWallsTool}
+              onPreviewChange={setWallDragPreview}
+              onCommit={(nextWalls) => {
+                updateRoom({ walls: nextWalls });
+                setWallDragPreview(null);
+              }}
+            />
+          </Layer>
+        )}
       </Stage>
 
       {!room?.width && (

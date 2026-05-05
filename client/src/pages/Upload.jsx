@@ -155,10 +155,12 @@ export default function Upload({ embedInWizard = false }) {
     }
 
     const spaces = normalizedZones.map((zone) => ({
-        id: `space-${zone.id}`,
-        name: zone.name,
-        type: zone.type === 'exterior' ? 'exterior' : 'interior',
-        zoneId: zone.id,
+      id: `space-${zone.id}`,
+      name: zone.name,
+      type: zone.type === 'exterior' ? 'exterior' : 'interior',
+      zoneId: zone.id,
+      geometry: zone.geometry || null,
+    }));
 
     // Capture imageUrl + parseResult so the confirmation page can show the
     // floorplan preview and exact server-stored URL even after editorData clears.
@@ -167,7 +169,7 @@ export default function Upload({ embedInWizard = false }) {
 
     setSpaceReview({
       sourceRoomId: editorData.room.id,
-      imageUrl: editorData.imageUrl || null,
+      imageUrl: previewImageUrl,
       normalizedZones,
       roomWidth: Math.round(roomWidth),
       roomDepth: Math.round(roomDepth),
@@ -248,11 +250,10 @@ export default function Upload({ embedInWizard = false }) {
       width: spaceReview.roomWidth,
       depth: spaceReview.roomDepth,
     };
-    project.visionIntakeCompletedAt = new Date().toISOString();
     project.updatedAt = new Date().toISOString();
     upsertProject(project);
 
-    navigate(`/studio/project/${project.id}/confirm?phase=spaces`);
+    navigate(`/studio/project/${project.id}/confirm?mode=adjust`);
   };
 
   const onEditorCancel = () => {

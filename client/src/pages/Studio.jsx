@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate, useSearchParams, useMatch, useLocation } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, useMatch, useLocation, Navigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -60,6 +60,14 @@ const STATUS_OPTIONS = ['in_progress', 'draft', 'completed'];
 
 function getSpaceRoomId(space) {
   return space?.roomId ?? space?.room_id ?? null;
+}
+
+/** First interior space with a linked room, else any space with a room (for editor entry). */
+function getFirstEditableEditorSpace(project) {
+  const spaces = Array.isArray(project?.spaces) ? project.spaces : [];
+  const interior = spaces.find((s) => s.type === 'interior' && getSpaceRoomId(s));
+  if (interior) return interior;
+  return spaces.find((s) => getSpaceRoomId(s)) || null;
 }
 
 function resolveSpaceByEditorId(project, editorSpaceId) {
@@ -217,6 +225,7 @@ export default function Studio() {
   const [editingProjectId, setEditingProjectId] = useState(null);
   const [editingProjectName, setEditingProjectName] = useState('');
   const [editorEntryIssue, setEditorEntryIssue] = useState(null);
+  const [adjustConfirmIssue, setAdjustConfirmIssue] = useState(null);
   const draftRoom = useLayoutStore((s) => (isDraftId(s.room?.id) ? s.room : null));
 
   const matchDashboard = useMatch({ path: '/studio', end: true });
@@ -519,6 +528,55 @@ export default function Studio() {
     }
   };
 
+  /** Ensures each interior project space has a linked room record (API or local draft). */
+  const resolveInteriorRoomLinks = async (proj) => {
+    const base = normalizeProjectPayload({ ...proj });
+    if (!base?.id) return base;
+    const nextSpaces = [];
+    for (const space of base.spaces || []) {
+      if (space.type === 'exterior' || getSpaceRoomId(space)) {
+        nextSpaces.push(space);
+        continue;
+      }
+      try {
+        const { data } = await api.post(`/api/projects/${base.id}/spaces`, {
+          type: 'interior',
+          name: space.name || 'Room',
+          category: space.category || 'Living Room',
+          placeholder_mode: false,
+          space_vision: space.spaceVision || {},
+          room_payload: {
+            name: `${base.name} - ${space.name || 'Room'}`,
+            width: 240,
+            depth: 180,
+            height: 96,
+          },
+        });
+        const normalizedSpace = normalizeProjectPayload({ spaces: [data] })?.spaces?.[0];
+        nextSpaces.push({
+          ...space,
+          ...(normalizedSpace || {}),
+          zoneId: space.zoneId ?? space.zone_id ?? normalizedSpace?.zoneId ?? normalizedSpace?.zone_id,
+          roomId: normalizedSpace?.roomId ?? normalizedSpace?.room_id ?? space.roomId,
+        });
+      } catch {
+        try {
+          const payload = {
+            name: `${base.name} - ${space.name || 'Room'}`,
+            width: 240,
+            depth: 180,
+            height: 96,
+          };
+          const created = user ? await createRoom(payload) : createDraftRoom(payload);
+          nextSpaces.push({ ...space, roomId: created.id });
+        } catch {
+          nextSpaces.push(space);
+        }
+      }
+    }
+    return { ...base, spaces: nextSpaces };
+  };
+
   const openSpaceTypeModal = (project, type) => {
     setSpaceTypeTarget({ project, type });
     const defaults = type === 'interior' ? INTERIOR_SPACE_TYPES[0] : EXTERIOR_AREA_TYPES[0];
@@ -547,6 +605,7 @@ export default function Studio() {
       category: finalCategory,
       navigateToEditor: !(matchConfirm || matchVision),
     });
+    setAdjustConfirmIssue(null);
     closeSpaceTypeModal();
   };
 
@@ -590,6 +649,10 @@ export default function Studio() {
     const floorplanImageUrl = project?.floorplan?.imageUrl || null;
     const scalePxPerInch = project?.floorplan?.scalePxPerInch || 1;
 
+    if (confirmPhase === 'spaces') {
+      return <Navigate replace to={`/studio/project/${projectId}/confirm?mode=adjust`} />;
+    }
+
     if (confirmMode === 'adjust') {
       const hasGeometry = adjustZones.length > 0;
       const imageW = hasGeometry
@@ -599,7 +662,8 @@ export default function Studio() {
         ? Math.max(...adjustZones.map((z) => z.bbox?.[3] || 0), 1)
         : 0;
 
-      const persistAdjustedSpaces = (finalZones) => {
+      const persistAdjustedSpaces = async (finalZones) => {
+        setAdjustConfirmIssue(null);
         const nextProject = { ...project };
         const finalById = new Map(finalZones.map((z) => [z.id, z]));
         const existingSpaces = Array.isArray(project?.spaces) ? project.spaces : [];
@@ -628,143 +692,103 @@ export default function Studio() {
           updatedAt: new Date().toISOString(),
         };
         nextProject.updatedAt = new Date().toISOString();
-        upsertProject(nextProject);
-        setProjects((prev) => prev.map((p) => (p.id === nextProject.id ? normalizeProjectPayload(nextProject) : p)));
-        toast.success('Spaces updated');
-        navigate(`/studio/project/${project.id}`);
+        nextProject.confirmationCompletedAt = new Date().toISOString();
+
+        let resolved = await resolveInteriorRoomLinks(nextProject);
+        resolved = normalizeProjectPayload(resolved);
+        upsertProject(resolved);
+        setProjects((prev) => prev.map((p) => (p.id === resolved.id ? resolved : p)));
+
+        const target = getFirstEditableEditorSpace(resolved);
+        if (!target?.id || !getSpaceRoomId(target)) {
+          setAdjustConfirmIssue('Add at least one editable space before opening the editor.');
+          return;
+        }
+        toast.success('Opening editor');
+        navigate(`/studio/project/${project.id}/editor/${target.id}`);
+      };
+
+      const confirmAdjustSkipFloorplan = async () => {
+        setAdjustConfirmIssue(null);
+        let resolved = await resolveInteriorRoomLinks(project);
+        resolved = normalizeProjectPayload(resolved);
+        const target = getFirstEditableEditorSpace(resolved);
+        if (!target?.id || !getSpaceRoomId(target)) {
+          setAdjustConfirmIssue('Add at least one editable space before opening the editor.');
+          return;
+        }
+        resolved.confirmationCompletedAt = new Date().toISOString();
+        resolved.updatedAt = new Date().toISOString();
+        upsertProject(resolved);
+        setProjects((prev) => prev.map((p) => (p.id === resolved.id ? resolved : p)));
+        toast.success('Opening editor');
+        navigate(`/studio/project/${project.id}/editor/${target.id}`);
       };
 
       if (!floorplanImageUrl || !hasGeometry) {
         return (
-          <div className="mx-auto max-w-4xl px-6 py-20">
-            <div className="panel p-6">
-              <div className="font-display text-2xl mb-2">No confirmed floorplan geometry yet</div>
-              <p className="text-sm text-ink-600">
-                Add spaces or upload a floorplan to begin.
-              </p>
-              <div className="mt-4 flex gap-2">
-                <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project.id}`)}>
-                  Back to Project Hub
-                </button>
-                <button type="button" className="btn-ink text-[10px]" onClick={() => navigate('/studio/new?startMode=upload')}>
-                  Upload Floorplan
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      }
-
-      return (
-        <RoomEditor
-          imageUrl={floorplanImageUrl}
-          imageWidth={Math.max(800, imageW + 80)}
-          imageHeight={Math.max(600, imageH + 80)}
-          initialZones={adjustZones}
-          boundary={null}
-          scalePxPerInch={scalePxPerInch}
-          onConfirm={persistAdjustedSpaces}
-          onCancel={() => navigate(`/studio/project/${project.id}`)}
-        />
-      );
-    }
-
-    /** Upload-first path: confirm detected spaces before Project Vision Assistant. */
-    if (confirmPhase === 'spaces') {
-      return (
-        <>
-          <Helmet><title>Confirm spaces — {project?.name || 'Project'}</title></Helmet>
-          <div className="mx-auto max-w-7xl bg-[#f6f3ee] px-6 py-16 text-[#171717] md:px-8 pb-24">
-            <button
-              type="button"
-              className="text-[11px] uppercase tracking-editorial text-[#5b5b5b] hover:text-[#171717] mb-6"
-              onClick={() => navigate('/studio')}
-            >
-              ← Back to projects
-            </button>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.34em] text-vs-accent mb-3">Floorplan intake</p>
-            <h1 className="display-lg mb-2">Confirm your spaces</h1>
-            <p className="mt-2 text-sm text-[#5b5b5b] max-w-2xl leading-relaxed">
-              Review interior rooms and exterior areas detected from your upload. Next, open the Project Vision Assistant
-              with guided setup — after vision and confirmation you will land on the project hub (you can always return here
-              later from the hub).
-            </p>
-
-            {(project.previewImageUrl || project.detectedDimensions?.width) && (
-              <section className="mt-10 rounded-[22px] border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] overflow-hidden shadow-[0_18px_40px_rgba(4,12,46,0.06)]">
-                {project.previewImageUrl && (
-                  <div className="aspect-[16/9] bg-[#eef4f7] overflow-hidden">
-                    <img
-                      src={project.previewImageUrl}
-                      alt={`Floorplan preview for ${project.name}`}
-                      className="w-full h-full object-contain"
-                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                    />
-                  </div>
+          <>
+            <Helmet>
+              <title>Adjust spaces — {project?.name || 'Project'}</title>
+            </Helmet>
+            <div className="mx-auto max-w-4xl px-6 py-20">
+              <button
+                type="button"
+                className="text-[11px] uppercase tracking-editorial text-[#5b5b5b] hover:text-[#171717] mb-6"
+                onClick={() => navigate('/studio')}
+              >
+                ← Back to projects
+              </button>
+              <div className="panel p-6">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.34em] text-vs-accent mb-3">Adjust spaces</p>
+                <div className="font-display text-2xl mb-2">Start by adding spaces or uploading a floorplan.</div>
+                <p className="text-sm text-ink-600 leading-relaxed">
+                  Upload a floorplan to align rooms on the canvas, or add at least one interior space with a linked editable
+                  room before opening the editor.
+                </p>
+                {adjustConfirmIssue && (
+                  <p className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200/80 rounded-lg px-4 py-3">
+                    {adjustConfirmIssue}
+                  </p>
                 )}
-                <div className="p-6 border-t border-[rgba(0,0,0,0.06)] flex flex-wrap items-baseline justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-vs-accent mb-1">Detected floorplan</div>
-                    <div className="font-display text-lg text-[#171717]">{project.name}</div>
-                  </div>
-                  {project.detectedDimensions?.width && project.detectedDimensions?.depth && (
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b]">
-                      {inchesToFeet(project.detectedDimensions.width)} × {inchesToFeet(project.detectedDimensions.depth)}
-                    </div>
-                  )}
-                </div>
-              </section>
-            )}
-
-            <div className="grid lg:grid-cols-2 gap-8 mt-10">
-              <section className="panel p-6">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div className="eyebrow text-vs-accent">Interior Spaces</div>
+                <div className="mt-6 flex flex-wrap gap-2">
                   <button
                     type="button"
-                    className="text-[10px] uppercase tracking-[0.2em] text-vs-accent"
+                    className="btn-ink text-[10px]"
+                    onClick={() => confirmAdjustSkipFloorplan()}
+                  >
+                    Confirm and open editor
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost text-[10px]"
+                    onClick={() =>
+                      navigate(
+                        `/studio/new?projectId=${encodeURIComponent(project.id)}&step=upload&projectName=${encodeURIComponent(project.name || '')}`,
+                      )
+                    }
+                  >
+                    Upload floorplan
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost text-[10px]"
                     onClick={() => openSpaceTypeModal(project, 'interior')}
                     disabled={creatingInteriorSpace || !project}
                   >
-                    Add Interior Space
+                    Add interior space
                   </button>
-                </div>
-                <div className="space-y-2">
-                  {interiorSpaces.map((space) => (
-                    <div key={space.id} className="rounded-lg border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] px-4 py-3 text-sm">
-                      {space.name}
-                    </div>
-                  ))}
-                  {interiorSpaces.length === 0 && (
-                    <p className="text-xs text-[#5b5b5b] leading-relaxed">No interior spaces yet — add one or go back to the upload step.</p>
-                  )}
-                </div>
-              </section>
-              <section className="panel p-6">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div className="eyebrow text-vs-accent">Exterior Areas</div>
                   <button
                     type="button"
-                    className="text-[10px] uppercase tracking-[0.2em] text-vs-accent"
+                    className="btn-ghost text-[10px]"
                     onClick={() => openSpaceTypeModal(project, 'exterior')}
                     disabled={creatingExteriorSpace || !project}
                   >
-                    Add Exterior Area
+                    Add exterior area
                   </button>
                 </div>
-                <div className="space-y-2">
-                  {exteriorSpaces.map((space) => (
-                    <div key={space.id} className="rounded-lg border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] px-4 py-3 text-sm">
-                      {space.name}
-                    </div>
-                  ))}
-                  {exteriorSpaces.length === 0 && (
-                    <p className="text-xs text-[#5b5b5b] leading-relaxed">No exterior areas yet — optional; add if you are planning outdoor work.</p>
-                  )}
-                </div>
-              </section>
+              </div>
             </div>
-
             <AnimatePresence>
               {showSpaceTypeModal && spaceTypeTarget && (
                 <motion.div
@@ -805,18 +829,22 @@ export default function Studio() {
                 </motion.div>
               )}
             </AnimatePresence>
+          </>
+        );
+      }
 
-            <div className="mt-12 flex flex-wrap items-center gap-4">
-              <button
-                type="button"
-                className="btn-ink px-8 py-3 text-[11px] uppercase tracking-[0.12em]"
-                onClick={() => navigate(`/studio/project/${projectId}/vision?setup=new`)}
-              >
-                Continue to Project Vision Assistant
-              </button>
-            </div>
-          </div>
-        </>
+      return (
+        <RoomEditor
+          imageUrl={floorplanImageUrl}
+          imageWidth={Math.max(800, imageW + 80)}
+          imageHeight={Math.max(600, imageH + 80)}
+          initialZones={adjustZones}
+          boundary={null}
+          scalePxPerInch={scalePxPerInch}
+          onConfirm={persistAdjustedSpaces}
+          onCancel={() => navigate('/studio')}
+          confirmError={adjustConfirmIssue}
+        />
       );
     }
 
@@ -834,10 +862,8 @@ export default function Studio() {
       });
 
       setEditorEntryIssue(null);
-      const target =
-        (project.spaces || []).find((s) => s.type === 'interior') ||
-        (project.spaces || [])[0];
-      if (target?.id) {
+      const target = getFirstEditableEditorSpace(project);
+      if (target?.id && getSpaceRoomId(target)) {
         navigate(`/studio/project/${projectId}/editor/${target.id}`);
       } else {
         navigate(`/studio/project/${projectId}/editor`);
@@ -1580,7 +1606,7 @@ export default function Studio() {
               <button
                 type="button"
                 className="btn-ghost text-[10px]"
-                onClick={() => projectId && navigate(`/studio/project/${projectId}/confirm`)}
+                onClick={() => projectId && navigate(`/studio/project/${projectId}/confirm?mode=adjust`)}
                 disabled={!projectId}
               >
                 Review Spaces

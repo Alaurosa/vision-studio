@@ -143,7 +143,15 @@ function getHandles(bbox, scale) {
 }
 
 export default function RoomEditor({
-  imageUrl, imageWidth, imageHeight, initialZones, boundary, scalePxPerInch, onConfirm, onCancel,
+  imageUrl,
+  imageWidth,
+  imageHeight,
+  initialZones,
+  boundary,
+  scalePxPerInch,
+  onConfirm,
+  onCancel,
+  confirmError,
 }) {
   const [zones, setZones] = useState(() => initZones(initialZones));
   const [selectedId, setSelectedId] = useState(null);
@@ -514,8 +522,15 @@ export default function RoomEditor({
             Close Shape ✓
           </button>
         )}
-        <button onClick={handleConfirm} className="btn-ink text-[10px] px-6 py-2">Confirm & Open Studio →</button>
+        <button onClick={handleConfirm} className="btn-ink text-[10px] px-6 py-2">
+          Confirm and open editor
+        </button>
       </div>
+      {confirmError ? (
+        <div className="shrink-0 px-6 py-2 bg-red-50 border-b border-red-200 text-[11px] text-red-800">
+          {confirmError}
+        </div>
+      ) : null}
 
       {/* Main area */}
       <div ref={containerRef} className="flex-1 flex overflow-hidden">
@@ -805,7 +820,14 @@ export default function RoomEditor({
             <div className="flex items-center justify-between mb-3">
               <span className="eyebrow text-ink-500">{zones.length} spaces</span>
             </div>
-            <button onClick={handleConfirm} className="btn-ink w-full text-[10px] py-2.5">Confirm & Open Studio →</button>
+            {confirmError ? (
+              <p className="text-xs text-red-700 bg-red-50 border border-red-200/80 rounded-lg px-3 py-2 mb-3">
+                {confirmError}
+              </p>
+            ) : null}
+            <button onClick={handleConfirm} className="btn-ink w-full text-[10px] py-2.5">
+              Confirm and open editor
+            </button>
           </div>
         </aside>
       </div>

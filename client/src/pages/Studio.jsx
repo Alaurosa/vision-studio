@@ -30,6 +30,7 @@ import {
 } from '@/utils/projectCompat';
 import { isProjectVisionComplete } from '@/utils/visionGate';
 import ProjectVisionIntake from '@/components/project/ProjectVisionIntake';
+import RoomEditor from '@/components/upload/RoomEditor';
 
 const isConfirmationDone = (project) => Boolean(project?.confirmationCompletedAt);
 
@@ -146,6 +147,45 @@ function mergeDashboardProjects(apiProjects, localProjects) {
   });
 }
 
+function buildAdjustZones(project) {
+  const floorplan = project?.floorplan || {};
+  const zones = Array.isArray(floorplan?.zones) ? floorplan.zones : [];
+  const spaces = Array.isArray(project?.spaces) ? project.spaces : [];
+  const spaceByZoneId = new Map(
+    spaces
+      .filter((space) => space?.zoneId || space?.zone_id)
+      .map((space) => [space.zoneId || space.zone_id, space]),
+  );
+  return zones.map((zone, index) => {
+    const linked = spaceByZoneId.get(zone.id);
+    const geometry = zone.geometry || linked?.geometry || null;
+    const bbox = Array.isArray(zone.bbox) && zone.bbox.length === 4
+      ? zone.bbox
+      : geometry?.bbox
+        ? [
+            geometry.bbox.x,
+            geometry.bbox.y,
+            geometry.bbox.x + geometry.bbox.width,
+            geometry.bbox.y + geometry.bbox.height,
+          ]
+        : [0, 0, 100, 100];
+    const polygon =
+      Array.isArray(zone.polygon) && zone.polygon.length >= 3
+        ? zone.polygon
+        : Array.isArray(geometry?.points) && geometry.points.length >= 3
+          ? geometry.points.map((pt) => [pt.x, pt.y])
+          : null;
+    return {
+      ...zone,
+      id: zone.id || `zone-${index}`,
+      name: linked?.name || zone.name || `Space ${index + 1}`,
+      type: linked?.type || zone.type || 'interior',
+      bbox,
+      polygon,
+    };
+  });
+}
+
 export default function Studio() {
   const { roomId, projectId, editorSpaceId } = useParams();
   const [searchParams] = useSearchParams();
@@ -188,6 +228,7 @@ export default function Studio() {
 
   const queryProjectId = searchParams.get('projectId');
   const confirmPhase = searchParams.get('phase');
+  const confirmMode = searchParams.get('mode');
   const querySpaceId = editorSpaceId || searchParams.get('spaceId');
   const currentProjectId = projectId || queryProjectId;
   const currentProject = useMemo(() => {
@@ -545,6 +586,88 @@ export default function Studio() {
     const gv = project.globalVision || {};
     const interiorSpaces = (project?.spaces || []).filter((s) => s.type === 'interior');
     const exteriorSpaces = (project?.spaces || []).filter((s) => s.type === 'exterior');
+    const adjustZones = buildAdjustZones(project);
+    const floorplanImageUrl = project?.floorplan?.imageUrl || null;
+    const scalePxPerInch = project?.floorplan?.scalePxPerInch || 1;
+
+    if (confirmMode === 'adjust') {
+      const hasGeometry = adjustZones.length > 0;
+      const imageW = hasGeometry
+        ? Math.max(...adjustZones.map((z) => z.bbox?.[2] || 0), 1)
+        : 0;
+      const imageH = hasGeometry
+        ? Math.max(...adjustZones.map((z) => z.bbox?.[3] || 0), 1)
+        : 0;
+
+      const persistAdjustedSpaces = (finalZones) => {
+        const nextProject = { ...project };
+        const finalById = new Map(finalZones.map((z) => [z.id, z]));
+        const existingSpaces = Array.isArray(project?.spaces) ? project.spaces : [];
+        const zoneSpaces = finalZones.map((zone, idx) => {
+          const existing = existingSpaces.find((s) => (s.zoneId || s.zone_id) === zone.id);
+          return {
+            ...(existing || {}),
+            id: existing?.id || `space-${zone.id || idx}`,
+            name: zone.name || existing?.name || `Space ${idx + 1}`,
+            type: zone.type === 'exterior' ? 'exterior' : 'interior',
+            zoneId: zone.id,
+            geometry: zone.geometry || null,
+            placeholderMode: zone.type === 'exterior',
+          };
+        });
+        const untouchedSpaces = existingSpaces.filter((space) => {
+          const zid = space.zoneId || space.zone_id;
+          return !zid || !finalById.has(zid);
+        });
+        nextProject.spaces = [...zoneSpaces, ...untouchedSpaces];
+        nextProject.floorplan = {
+          ...(project.floorplan || {}),
+          imageUrl: floorplanImageUrl,
+          zones: finalZones,
+          scalePxPerInch,
+          updatedAt: new Date().toISOString(),
+        };
+        nextProject.updatedAt = new Date().toISOString();
+        upsertProject(nextProject);
+        setProjects((prev) => prev.map((p) => (p.id === nextProject.id ? normalizeProjectPayload(nextProject) : p)));
+        toast.success('Spaces updated');
+        navigate(`/studio/project/${project.id}`);
+      };
+
+      if (!floorplanImageUrl || !hasGeometry) {
+        return (
+          <div className="mx-auto max-w-4xl px-6 py-20">
+            <div className="panel p-6">
+              <div className="font-display text-2xl mb-2">No confirmed floorplan geometry yet</div>
+              <p className="text-sm text-ink-600">
+                Add spaces or upload a floorplan to begin.
+              </p>
+              <div className="mt-4 flex gap-2">
+                <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project.id}`)}>
+                  Back to Project Hub
+                </button>
+                <button type="button" className="btn-ink text-[10px]" onClick={() => navigate('/studio/new?startMode=upload')}>
+                  Upload Floorplan
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <RoomEditor
+          imageUrl={floorplanImageUrl}
+          imageWidth={Math.max(800, imageW + 80)}
+          imageHeight={Math.max(600, imageH + 80)}
+          initialZones={adjustZones}
+          boundary={null}
+          scalePxPerInch={scalePxPerInch}
+          onConfirm={persistAdjustedSpaces}
+          onCancel={() => navigate(`/studio/project/${project.id}`)}
+        />
+      );
+    }
 
     /** Upload-first path: confirm detected spaces before Project Vision Assistant. */
     if (confirmPhase === 'spaces') {
@@ -886,7 +1009,7 @@ export default function Studio() {
                 <button
                   type="button"
                   className="btn-ghost text-[10px]"
-                  onClick={() => navigate(`/studio/project/${projectId}/confirm?from=hub`)}
+                  onClick={() => navigate(`/studio/project/${projectId}/confirm?mode=adjust`)}
                 >
                   Review Spaces
                 </button>
@@ -1172,7 +1295,7 @@ export default function Studio() {
     const setupIncomplete = !visionOk || !confirmed;
     const continueSetupPath = !visionOk
       ? `/studio/project/${project?.id}/vision?setup=new`
-      : `/studio/project/${project?.id}/confirm?from=hub`;
+      : `/studio/project/${project?.id}/confirm?mode=adjust`;
     return (
       <>
         <Helmet><title>{project?.name || 'Project'} — Vision Studio</title></Helmet>
@@ -1182,8 +1305,7 @@ export default function Studio() {
             <div>
               <h1 className="display-lg">{project?.name || 'Project'}</h1>
               <p className="mt-4 text-sm text-[#5b5b5b] max-w-2xl">
-                One assistant, two modes: set whole-property direction with the Project Vision Assistant, then edit each space
-                in the editor with the Space Assistant.
+                Open the editor to refine spaces, furniture layout, and geometry for this project.
               </p>
             </div>
             <div className="flex flex-col items-end gap-3">
@@ -1199,7 +1321,7 @@ export default function Studio() {
                 <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project?.id}/vision`)} disabled={!project?.id}>
                   Edit Project Vision
                 </button>
-                <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project?.id}/confirm?from=hub`)} disabled={!project?.id}>
+                <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project?.id}/confirm?mode=adjust`)} disabled={!project?.id}>
                   Review Spaces
                 </button>
                 <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project?.id}/chat`)} disabled={!project?.id}>
@@ -1218,7 +1340,7 @@ export default function Studio() {
                 <button
                   type="button"
                   className="btn-ghost text-[10px]"
-                  onClick={() => project?.id && navigate(`/studio/project/${project.id}/confirm`)}
+                  onClick={() => project?.id && navigate(`/studio/project/${project.id}/confirm?mode=adjust`)}
                 >
                   Review Spaces
                 </button>
@@ -1569,8 +1691,7 @@ export default function Studio() {
                   {viewMode === '3d' ? (
                     isProjectEditorMode && !showRoomScopedCanvas ? (
                       <ProjectViewer3D
-                        projectSpaces={projectSpaces}
-                        rooms={rooms}
+                        project={currentProject}
                         selectedSpaceId={selectedProjectSpaceId}
                       />
                     ) : (
@@ -1578,10 +1699,9 @@ export default function Studio() {
                     )
                   ) : isProjectEditorMode && !showRoomScopedCanvas ? (
                     <ProjectCanvas
+                      project={currentProject}
                       projectSpaces={projectSpaces}
-                      rooms={rooms}
                       selectedSpaceId={selectedProjectSpaceId}
-                      selectedSpace={selectedProjectSpace}
                       onSelectSpace={(spaceId) => {
                         if (!projectId || !spaceId) return;
                         navigate(`/studio/project/${projectId}/editor/${spaceId}`);
@@ -1607,7 +1727,7 @@ export default function Studio() {
                         <button
                           type="button"
                           className="btn-ghost text-[10px]"
-                          onClick={() => navigate(`/studio/project/${projectId}/confirm?from=hub`)}
+                          onClick={() => navigate(`/studio/project/${projectId}/confirm?mode=adjust`)}
                         >
                           Review Spaces
                         </button>

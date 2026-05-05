@@ -159,8 +159,12 @@ export default function Upload({ embedInWizard = false }) {
         name: zone.name,
         type: zone.type === 'exterior' ? 'exterior' : 'interior',
         zoneId: zone.id,
-        geometry: zone.geometry || null,
-      }));
+
+    // Capture imageUrl + parseResult so the confirmation page can show the
+    // floorplan preview and exact server-stored URL even after editorData clears.
+    const previewImageUrl =
+      editorData.parseResult?.floor_plan_url || editorData.imageUrl || null;
+
     setSpaceReview({
       sourceRoomId: editorData.room.id,
       imageUrl: editorData.imageUrl || null,
@@ -169,6 +173,7 @@ export default function Upload({ embedInWizard = false }) {
       roomDepth: Math.round(roomDepth),
       scale,
       spaces,
+      previewImageUrl,
     });
     setEditorData(null);
   };
@@ -237,6 +242,13 @@ export default function Upload({ embedInWizard = false }) {
       sourceRoomId: roomId || null,
       updatedAt: new Date().toISOString(),
     };
+    project.previewImageUrl =
+      spaceReview.previewImageUrl || spaceReview.imageUrl || project.previewImageUrl || null;
+    project.detectedDimensions = {
+      width: spaceReview.roomWidth,
+      depth: spaceReview.roomDepth,
+    };
+    project.visionIntakeCompletedAt = new Date().toISOString();
     project.updatedAt = new Date().toISOString();
     upsertProject(project);
 

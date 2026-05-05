@@ -1,10 +1,19 @@
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Stage, Layer, Rect, Group, Text, Line, Circle } from 'react-konva';
 import { useLayoutStore } from '@/store/layoutStore';
 import { computeRotation, snapToGrid, inchesToFeet } from '@/utils/scale';
 import FurnitureItem from './FurnitureItem';
 import GridOverlay from './GridOverlay';
 import WallOutline from './WallOutline';
+import WallJointHandles from './WallJointHandles';
+import RoomBoundsHandles from './RoomBoundsHandles';
+import WallDimensionLabels from './WallDimensionLabels';
+import {
+  isPolygonWallsFormat,
+  isSegmentWallsFormat,
+  roomRectangleOutline,
+  scaleSegmentWallsToRoomBox,
+} from '@/utils/roomWallMath';
 
 function getZoneBox(zone) {
   if (Array.isArray(zone?.bbox) && zone.bbox.length === 4) {
@@ -37,10 +46,14 @@ export default function RoomCanvas() {
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [placementWarning, setPlacementWarning] = useState('');
+  const [wallDragPreview, setWallDragPreview] = useState(null);
+  const [roomSizePreview, setRoomSizePreview] = useState(null);
 
   const {
     room, furniture, selectedId, detections, zones, activeZoneId, gridEnabled,
+    roomWallsTool, roomResizeTool,
     selectFurniture, clearSelection, updateFurniture, removeFurniture, setActiveZone, updateZone, getVisibleFurniture,
+    updateRoom,
   } = useLayoutStore();
 
   // Resize observer
@@ -56,10 +69,17 @@ export default function RoomCanvas() {
 
   // Compute scale so the room fills the canvas with margin
   const activeZone = activeZoneId ? zones.find((zone) => zone.id === activeZoneId) : null;
-  const focusBox = activeZone ? getZoneBox(activeZone) : [0, 0, room?.width || 0, room?.depth || 0];
+  const effectiveRoomW = roomSizePreview?.width ?? room?.width ?? 0;
+  const effectiveRoomD = roomSizePreview?.depth ?? room?.depth ?? 0;
+  const focusBox = activeZone
+    ? getZoneBox(activeZone)
+    : [0, 0, Math.max(1, effectiveRoomW), Math.max(1, effectiveRoomD)];
   const focusWidth = Math.max(1, focusBox[2] - focusBox[0]);
   const focusDepth = Math.max(1, focusBox[3] - focusBox[1]);
   const visibleFurniture = getVisibleFurniture();
+  const roomForLayout = room
+    ? { ...room, width: effectiveRoomW || room.width, depth: effectiveRoomD || room.depth }
+    : null;
 
   const margin = 48;
   const pxPerInchFit = focusWidth && focusDepth
@@ -104,8 +124,12 @@ export default function RoomCanvas() {
       return;
     }
 
-    // Escape deselects
+    // Escape exits room resize / wall-point modes, then deselects furniture
     if (e.key === 'Escape') {
+      const { roomWallsTool, roomResizeTool, clearRoomWallsTool, clearRoomResizeTool } =
+        useLayoutStore.getState();
+      if (roomWallsTool) clearRoomWallsTool();
+      if (roomResizeTool) clearRoomResizeTool();
       clearSelection();
       return;
     }
@@ -132,6 +156,60 @@ export default function RoomCanvas() {
   useEffect(() => {
     setViewport({ x: 0, y: 0, scale: 1 });
   }, [room?.id, activeZoneId]);
+
+  useEffect(() => {
+    setWallDragPreview(null);
+    setRoomSizePreview(null);
+  }, [room?.id]);
+
+  useEffect(() => {
+    if (!roomWallsTool) setWallDragPreview(null);
+  }, [roomWallsTool]);
+
+  useEffect(() => {
+    if (!roomResizeTool) setRoomSizePreview(null);
+  }, [roomResizeTool]);
+
+  /** Rooms created from templates often have width/depth but no walls JSON — use a rectangular perimeter in inch segments. */
+  const rectangleWallSegments =
+    effectiveRoomW > 0 &&
+    effectiveRoomD > 0 &&
+    !isPolygonWallsFormat(room?.walls)
+      ? roomRectangleOutline(effectiveRoomW, effectiveRoomD)
+      : null;
+
+  const wallsForOutline = (() => {
+    if (isPolygonWallsFormat(room?.walls)) return room.walls;
+    if (isSegmentWallsFormat(room?.walls)) {
+      const baseSegments = wallDragPreview ?? room.walls;
+      if (
+        roomResizeTool &&
+        roomSizePreview &&
+        !wallDragPreview &&
+        (room?.width || 0) > 0 &&
+        (room?.depth || 0) > 0
+      ) {
+        return scaleSegmentWallsToRoomBox(
+          baseSegments,
+          room.width,
+          room.depth,
+          effectiveRoomW,
+          effectiveRoomD,
+        );
+      }
+      return baseSegments;
+    }
+    return wallDragPreview ?? rectangleWallSegments;
+  })();
+
+  const wallsEditableAsSegments =
+    Boolean(wallsForOutline) &&
+    isSegmentWallsFormat(wallsForOutline) &&
+    effectiveRoomW > 0 &&
+    effectiveRoomD > 0;
+
+  const wallDimensionSegments =
+    wallsForOutline && isSegmentWallsFormat(wallsForOutline) ? wallsForOutline : null;
 
   const roomPxW = (room?.width || 0) * pxPerInch;
   const roomPxH = (room?.depth || 0) * pxPerInch;
@@ -160,7 +238,9 @@ export default function RoomCanvas() {
     <div ref={wrapRef} className="relative w-full h-full bg-surface-800" style={{ touchAction: 'none', userSelect: 'none' }}>
       {/* Corner metadata */}
       <div className="absolute top-4 left-4 text-xs text-surface-400 z-10 pointer-events-none font-mono">
-        {room?.width ? `${inchesToFeet(room.width)} × ${inchesToFeet(room.depth)}` : 'Untitled canvas'}
+        {room?.width
+          ? `${inchesToFeet(effectiveRoomW || room.width)} × ${inchesToFeet(effectiveRoomD || room.depth)}`
+          : 'Untitled canvas'}
       </div>
       <div className="absolute bottom-4 right-4 text-xs text-surface-400 z-10 pointer-events-none font-mono">
         Zoom {(viewport.scale * 100).toFixed(0)}%
@@ -168,6 +248,11 @@ export default function RoomCanvas() {
       {placementWarning && (
         <div className="absolute top-4 right-4 z-10 rounded-md border border-red-500 bg-surface-900/95 px-3 py-2 text-xs text-red-400 shadow-lg backdrop-blur-sm">
           {placementWarning}
+        </div>
+      )}
+      {roomResizeTool && room?.width > 0 && (
+        <div className="absolute left-1/2 top-14 z-10 -translate-x-1/2 pointer-events-none rounded-md border border-amber-500/50 bg-surface-900/90 px-3 py-1.5 text-[11px] text-amber-100/95 shadow-md max-w-[min(90vw,28rem)] text-center">
+          Resize floor: drag orange handles on the right, bottom, or corner to change width × depth (top-left stays fixed). Save to keep changes.
         </div>
       )}
 
@@ -205,7 +290,7 @@ export default function RoomCanvas() {
 
         {/* Grid */}
         <Layer listening={false}>
-          {gridEnabled && room?.width && (
+          {gridEnabled && effectiveRoomW > 0 && room?.width && (
             <GridOverlay
               originX={roomOffsetX}
               originY={roomOffsetY}
@@ -216,16 +301,16 @@ export default function RoomCanvas() {
           )}
         </Layer>
 
-        {/* Walls (from parser) */}
+        {/* Walls (from parser or live drag preview) */}
         <Layer listening={false}>
-          {room?.walls && (
+          {wallsForOutline && (
             <WallOutline
-              walls={room.walls}
+              walls={wallsForOutline}
               pxPerInch={pxPerInch}
               offsetX={roomOffsetX}
               offsetY={roomOffsetY}
-              roomWidth={room.width}
-              roomDepth={room.depth}
+              roomWidth={effectiveRoomW || room.width}
+              roomDepth={effectiveRoomD || room.depth}
               viewOriginX={focusBox[0]}
               viewOriginY={focusBox[1]}
             />
@@ -247,7 +332,7 @@ export default function RoomCanvas() {
 
               const commitBox = (nextBox) => {
                 updateZone(zone.id, {
-                  bbox: clampZoneBox(nextBox, room),
+                  bbox: clampZoneBox(nextBox, roomForLayout || room),
                 });
               };
 
@@ -325,16 +410,31 @@ export default function RoomCanvas() {
           </Layer>
         )}
 
+        {/* Per-wall length labels — above zone fills so edges stay readable */}
+        {wallDimensionSegments && (
+          <Layer listening={false}>
+            <WallDimensionLabels
+              segments={wallDimensionSegments}
+              roomOffsetX={roomOffsetX}
+              roomOffsetY={roomOffsetY}
+              pxPerInch={pxPerInch}
+              viewOriginX={focusBox[0]}
+              viewOriginY={focusBox[1]}
+              viewportScale={viewport.scale}
+            />
+          </Layer>
+        )}
+
         {/* Detections overlay */}
         <Layer listening={false}>
           {pendingDetections.map((det, i) => {
             const b = det.bbox || [];
             if (b.length !== 4) return null;
             const [x1, y1, x2, y2] = b;
-            const px1 = toCanvasX(x1 * (room?.width || 0));
-            const py1 = toCanvasY(y1 * (room?.depth || 0));
-            const px2 = toCanvasX(x2 * (room?.width || 0));
-            const py2 = toCanvasY(y2 * (room?.depth || 0));
+            const px1 = toCanvasX(x1 * (effectiveRoomW || room?.width || 0));
+            const py1 = toCanvasY(y1 * (effectiveRoomD || room?.depth || 0));
+            const px2 = toCanvasX(x2 * (effectiveRoomW || room?.width || 0));
+            const py2 = toCanvasY(y2 * (effectiveRoomD || room?.depth || 0));
             return (
               <Group key={i}>
                 <Rect
@@ -365,7 +465,7 @@ export default function RoomCanvas() {
               offsetX={roomOffsetX}
               offsetY={roomOffsetY}
               selected={selectedId === it.id}
-              room={room}
+              room={roomForLayout || room}
               allItems={visibleFurniture}
               placementBounds={placementBounds}
               viewOriginX={focusBox[0]}
@@ -376,6 +476,51 @@ export default function RoomCanvas() {
             />
           ))}
         </Layer>
+
+        {/* Resize room bounds — above furniture */}
+        {roomResizeTool && effectiveRoomW > 0 && effectiveRoomD > 0 && (
+          <Layer>
+            <RoomBoundsHandles
+              roomWidth={effectiveRoomW}
+              roomDepth={effectiveRoomD}
+              roomOffsetX={roomOffsetX}
+              roomOffsetY={roomOffsetY}
+              pxPerInch={pxPerInch}
+              viewOriginX={focusBox[0]}
+              viewOriginY={focusBox[1]}
+              viewportScale={viewport.scale}
+              enabled={roomResizeTool}
+              onPreviewChange={setRoomSizePreview}
+              onCommit={(dims) => {
+                updateRoom({ width: dims.width, depth: dims.depth });
+                setRoomSizePreview(null);
+              }}
+            />
+          </Layer>
+        )}
+
+        {/* Draggable wall joints — above furniture for pointer priority */}
+        {roomWallsTool && wallsEditableAsSegments && (
+          <Layer>
+            <WallJointHandles
+              walls={wallsForOutline}
+              roomWidth={effectiveRoomW || room.width}
+              roomDepth={effectiveRoomD || room.depth}
+              roomOffsetX={roomOffsetX}
+              roomOffsetY={roomOffsetY}
+              pxPerInch={pxPerInch}
+              viewOriginX={focusBox[0]}
+              viewOriginY={focusBox[1]}
+              viewportScale={viewport.scale}
+              enabled={roomWallsTool}
+              onPreviewChange={setWallDragPreview}
+              onCommit={(nextWalls) => {
+                updateRoom({ walls: nextWalls });
+                setWallDragPreview(null);
+              }}
+            />
+          </Layer>
+        )}
       </Stage>
 
       {!room?.width && (

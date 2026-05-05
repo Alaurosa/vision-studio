@@ -38,6 +38,8 @@ cd client && npx vite build                 # Production build (verify compiles)
 # Server (Express)
 cd server && npm install && npm run dev     # Dev on :3001 (nodemon)
 cd server && npm start                      # Production start
+cd server && npm test                       # Vitest smoke tests (save/load against live Supabase)
+cd server && npm run test:watch             # Watch mode
 
 # Setup verification (checks env, DB, seeds catalog)
 cd server && node scripts/setup.js
@@ -137,7 +139,11 @@ vision-studio/
 │
 ├── server/                       # Node.js + Express backend
 │   ├── package.json
-│   ├── index.js                  # Express entry: Helmet, CORS, rate-limit, image proxy, /health, /api/status, graceful shutdown
+│   ├── index.js                  # Entry point — imports `app` and calls .listen() with graceful SIGTERM/SIGINT shutdown
+│   ├── app.js                    # Express app factory (Helmet, CORS, rate-limit, image proxy, /health, /api/status, route mounting). Exported for tests.
+│   ├── vitest.config.js          # Vitest config (node env, in-band, 30s timeouts)
+│   ├── __tests__/
+│   │   └── saveLoad.test.js      # S2-5 save/load smoke tests — creates a real Supabase test user, exercises the full save→load→delete flow, cleans up
 │   ├── .env.example              # Template for server env vars
 │   ├── config/
 │   │   ├── env.js                # dotenv loader (root .env; must be imported first)

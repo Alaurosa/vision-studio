@@ -137,12 +137,6 @@ export default function CatalogPanel() {
             <p className="text-xs text-surface-500 leading-relaxed mb-4">
               Ask the Studio assistant to suggest furniture. It will populate this panel with curated picks you can add in one click.
             </p>
-            <button
-              onClick={() => onOpenChat?.()}
-              className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
-            >
-              Open AI Assistant
-            </button>
           </div>
         )}
       </div>

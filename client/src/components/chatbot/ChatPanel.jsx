@@ -12,6 +12,8 @@ export default function ChatPanel({
   spaceBranchType = null,
   globalVision: globalVisionProp = null,
   spaceVision: spaceVisionProp = null,
+  contextLabel = null,
+  projectWideContext = false,
 } = {}) {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -274,7 +276,9 @@ export default function ChatPanel({
           )}
         </div>
         <p className="text-xs text-ink-500 leading-relaxed mt-2">
-          Edit the selected room or exterior area.
+          {projectWideContext
+            ? 'Context: Full Floorplan. Guidance is project-level while you refine space structure.'
+            : `Context: ${contextLabel || room?.name || 'Current Space'}`}
         </p>
       </div>
 
@@ -317,7 +321,7 @@ export default function ChatPanel({
             <textarea
               ref={textareaRef}
               className="w-full bg-paper-100 border border-ink-900/10 rounded-xl px-4 py-3 pr-12 text-sm text-ink-900 placeholder:text-ink-400 resize-none focus:outline-none focus:border-ink-900/30 focus:ring-1 focus:ring-ink-900/10 transition min-h-[44px] max-h-[120px]"
-              placeholder={room ? 'Describe your space goals…' : 'Select a space first'}
+              placeholder={room ? 'Describe your space goals…' : 'Select a linked space first'}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -347,7 +351,11 @@ export default function ChatPanel({
         </div>
         <div className="flex items-center justify-between mt-2 px-1">
           <span className="text-[10px] text-ink-400">
-            {room ? `Space: ${room.name}` : 'No space selected'}
+            {projectWideContext
+              ? 'Context: Full Floorplan'
+              : room
+                ? `Context: ${contextLabel || room.name}`
+                : 'No linked space selected'}
           </span>
           <span className="text-[10px] text-ink-400 hidden sm:inline">
             Enter to send · Shift+Enter for new line

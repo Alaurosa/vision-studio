@@ -9,7 +9,7 @@ const TABS = [
   { id: 'furniture', label: 'Furniture' },
   { id: 'materials', label: 'Materials' },
   { id: 'layers', label: 'Layers' },
-  { id: 'validation', label: 'Validation' },
+  { id: 'views', label: 'Views' },
   { id: 'export', label: 'Export' },
 ];
 
@@ -61,6 +61,14 @@ export default function EditorWorkspaceSidebar({ project, onNavigateToSpace }) {
       <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
         {tab === 'spaces' && (
           <div className="p-4 space-y-4 text-sm">
+            <button
+              type="button"
+              disabled={!onNavigateToSpace}
+              onClick={() => onNavigateToSpace?.(null)}
+              className="w-full text-left rounded-lg border border-[rgba(0,0,0,0.06)] bg-[#eef4f7] px-3 py-2 text-xs hover:border-[#004aad]/35 disabled:opacity-40"
+            >
+              All Spaces
+            </button>
             <p className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b]">Interior spaces</p>
             {!project?.spaces?.length ? (
               <p className="text-xs text-[#5b5b5b]">No linked spaces in this project yet.</p>
@@ -127,13 +135,13 @@ export default function EditorWorkspaceSidebar({ project, onNavigateToSpace }) {
           </div>
         )}
 
-        {tab === 'validation' && (
+        {tab === 'views' && (
           <div className="p-4 space-y-4">
             <p className="text-xs text-[#5b5b5b] leading-relaxed">
-              Check overlaps, clearance, and room bounds for the current layout.
+              Switch between full-floorplan and focused space views from the bottom bar; run validation for the active space.
             </p>
             <button type="button" className="btn-ink w-full text-[10px] py-2" onClick={runValidatePanel}>
-              Run validation
+              Validate active layout
             </button>
           </div>
         )}

@@ -30,6 +30,55 @@ const STYLE_CHIPS = [
   'Natural materials',
 ];
 
+const GUIDED_QUESTIONS = [
+  'What feeling should guests have when they enter?',
+  'Which spaces matter most day to day?',
+  'Should the exterior match the interior direction?',
+  'Who uses this property most often, and how?',
+  'Are there budget, furniture, or layout constraints to honor?',
+];
+
+function buildDeterministicVisionSuggestions(globalVision) {
+  const styles = Array.isArray(globalVision?.styleKeywords) ? globalVision.styleKeywords : [];
+  const vibe = globalVision?.moodVibe ? `Focus on a ${globalVision.moodVibe} mood` : 'Define one clear mood';
+  const styleLine =
+    styles.length > 0
+      ? `Use this style direction consistently: ${styles.slice(0, 3).join(', ')}.`
+      : 'Pick 2-3 style keywords (for example: warm minimal, coastal, Japandi).';
+  const budget =
+    globalVision?.budgetRange
+      ? `Keep selections aligned to budget: ${globalVision.budgetRange}.`
+      : 'Set a budget range to guide furniture and material tradeoffs.';
+  return [vibe, styleLine, budget];
+}
+
+function getVisionReadiness(globalVision, scope = 'interior_exterior') {
+  const text = (globalVision?.propertyVision || '').trim();
+  const hasVisionText = text.length >= 60;
+  const hasStyleMood =
+    (Array.isArray(globalVision?.styleKeywords) && globalVision.styleKeywords.length > 0) ||
+    Boolean((globalVision?.moodVibe || '').trim());
+  const hasPurposeSignal = /(family|guest|kids|host|rental|work|live|lifestyle|daily)/i.test(text);
+  const hasInteriorGoal =
+    Boolean((globalVision?.interiorGoals || '').trim()) ||
+    /(living|kitchen|bedroom|bathroom|office|interior|room)/i.test(text);
+  const hasExteriorGoal =
+    Boolean((globalVision?.exteriorGoals || '').trim()) ||
+    /(yard|patio|balcony|garden|entry|curb|facade|exterior|outdoor)/i.test(text);
+
+  const wantsInterior = scope !== 'exterior_only';
+  const wantsExterior = scope === 'exterior_only' || scope === 'interior_exterior';
+
+  const missing = [];
+  if (!hasVisionText) missing.push('Add more detail about the overall property concept.');
+  if (!hasStyleMood) missing.push('Add style or mood direction (chips or text).');
+  if (!hasPurposeSignal) missing.push('Describe who uses the property and its purpose.');
+  if (wantsInterior && !hasInteriorGoal) missing.push('Mention at least one interior goal.');
+  if (wantsExterior && !hasExteriorGoal) missing.push('Mention at least one exterior goal.');
+
+  return { ready: missing.length === 0, missing };
+}
+
 /** Draft room binding so chat API accepts vision-only projects with no space yet. */
 export function getVisionChatRoomBinding(project) {
   const rid =
@@ -197,15 +246,12 @@ export default function ProjectVisionIntake({ project, onPersist }) {
         visionIntakeAssistantSummary: assistantText.slice(0, 2000),
       });
     } catch {
-      toast.error(
-        'Vision saved. We could not generate AI suggestions right now, but you can still review and continue.',
-        { duration: 5000 },
-      );
+      toast('Vision saved. Using quick planning suggestions while AI is unavailable.', { duration: 4500 });
+      const bullets = buildDeterministicVisionSuggestions(nextGv);
       const fallbackMsg = {
         id: `a-${Date.now()}`,
         role: 'assistant',
-        content:
-          'Your direction is saved. Continue adding detail, or go to Review project and spaces when you are ready.',
+        content: `Your direction is saved. Here are quick suggestions to keep moving:\n\n- ${bullets.join('\n- ')}\n\nContinue adding detail, or go to Review project and spaces when you are ready.`,
       };
       const withFb = [...nextMessages, fallbackMsg];
       setMessages(withFb);
@@ -223,11 +269,15 @@ export default function ProjectVisionIntake({ project, onPersist }) {
   }, [gv, messages, selectedChips]);
 
   const visionReady = isProjectVisionComplete(effectiveGv);
+  const readiness = useMemo(
+    () => getVisionReadiness(effectiveGv, project?.scope || 'interior_exterior'),
+    [effectiveGv, project?.scope],
+  );
 
   const handleReviewContinue = () => {
     if (!project) return;
-    if (!isProjectVisionComplete(effectiveGv)) {
-      toast.error('Add a bit more about your overall vision, or pick style chips so we can align the plan.');
+    if (!visionReady || !readiness.ready) {
+      toast.error('Add a bit more project context before review so the plan is actionable.');
       return;
     }
     const next = {
@@ -397,7 +447,7 @@ export default function ProjectVisionIntake({ project, onPersist }) {
                 type="button"
                 onClick={handleReviewContinue}
                 className="btn-ink px-6 py-3 text-[11px] uppercase tracking-[0.15em] disabled:opacity-40"
-                disabled={!visionReady}
+                disabled={!visionReady || !readiness.ready}
               >
                 Review project & spaces
               </button>
@@ -414,6 +464,29 @@ export default function ProjectVisionIntake({ project, onPersist }) {
                 </span>
               )}
             </div>
+            {!readiness.ready && (
+              <div className="rounded-xl border border-sienna-500/35 bg-paper-100/90 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.18em] text-sienna-700 mb-2">More context needed before confirmation</p>
+                <ul className="text-sm text-ink-700 space-y-1">
+                  {readiness.missing.map((item) => (
+                    <li key={item}>- {item}</li>
+                  ))}
+                </ul>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {GUIDED_QUESTIONS.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      onClick={() => sendUserMessage(q)}
+                      disabled={sending}
+                      className="text-[10px] uppercase tracking-editorial px-3 py-1.5 rounded-full border border-[rgba(0,0,0,0.1)] bg-[#fffdf9] hover:border-[#004aad]/35 disabled:opacity-50"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

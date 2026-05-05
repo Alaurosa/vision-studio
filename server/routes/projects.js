@@ -5,6 +5,14 @@ import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 const router = express.Router();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const hasDbUserId = (userId) => typeof userId === 'string' && UUID_RE.test(userId);
+const isMissingProjectSpaceRelationError = (error) => {
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('relation') &&
+    message.includes('does not exist') &&
+    (message.includes('projects') || message.includes('spaces'))
+  );
+};
 
 async function createCompatRoom({ userId, name, width = 240, depth = 180, unit = 'inches' }, dbEnabled) {
   if (dbEnabled) {
@@ -34,11 +42,18 @@ router.get('/', optionalAuth, async (req, res) => {
       .select('*')
       .eq('user_id', req.user.id)
       .order('updated_at', { ascending: false });
+    if (isMissingProjectSpaceRelationError(error)) {
+      return res.json(fallback.getProjects(req.user.id));
+    }
     if (error) return res.status(400).json({ error: error.message });
     const projectIds = (projects || []).map((p) => p.id);
-    const { data: spaces } = projectIds.length
+    const { data: spaces, error: spacesError } = projectIds.length
       ? await supabaseAdmin.from('spaces').select('*').in('project_id', projectIds).order('created_at', { ascending: true })
       : { data: [] };
+    if (isMissingProjectSpaceRelationError(spacesError)) {
+      return res.json(fallback.getProjects(req.user.id));
+    }
+    if (spacesError) return res.status(400).json({ error: spacesError.message });
     const grouped = new Map();
     (spaces || []).forEach((s) => {
       if (!grouped.has(s.project_id)) grouped.set(s.project_id, []);
@@ -72,6 +87,9 @@ router.post('/', optionalAuth, async (req, res) => {
       })
       .select()
       .single();
+    if (isMissingProjectSpaceRelationError(error)) {
+      return res.json(fallback.createProject(req.user.id, { name, property_type, scope, global_vision, status }));
+    }
     if (error) return res.status(400).json({ error: error.message });
     return res.json({ ...data, spaces: [] });
   }
@@ -88,12 +106,23 @@ router.get('/:id', optionalAuth, async (req, res) => {
       .eq('id', req.params.id)
       .eq('user_id', req.user.id)
       .single();
+    if (isMissingProjectSpaceRelationError(error)) {
+      const fallbackProject = fallback.getProject(req.params.id, req.user.id);
+      if (!fallbackProject) return res.status(404).json({ error: 'Project not found' });
+      return res.json(fallbackProject);
+    }
     if (error) return res.status(404).json({ error: 'Project not found' });
-    const { data: spaces } = await supabaseAdmin
+    const { data: spaces, error: spacesError } = await supabaseAdmin
       .from('spaces')
       .select('*')
       .eq('project_id', project.id)
       .order('created_at', { ascending: true });
+    if (isMissingProjectSpaceRelationError(spacesError)) {
+      const fallbackProject = fallback.getProject(req.params.id, req.user.id);
+      if (!fallbackProject) return res.status(404).json({ error: 'Project not found' });
+      return res.json(fallbackProject);
+    }
+    if (spacesError) return res.status(400).json({ error: spacesError.message });
     return res.json({ ...project, spaces: spaces || [] });
   }
   const project = fallback.getProject(req.params.id, req.user.id);
@@ -120,6 +149,11 @@ router.put('/:id', optionalAuth, async (req, res) => {
       .eq('user_id', req.user.id)
       .select()
       .single();
+    if (isMissingProjectSpaceRelationError(error)) {
+      const project = fallback.updateProject(req.params.id, req.user.id, updates);
+      if (!project) return res.status(404).json({ error: 'Project not found' });
+      return res.json(project);
+    }
     if (error) return res.status(400).json({ error: error.message });
     return res.json(data);
   }
@@ -137,6 +171,10 @@ router.delete('/:id', optionalAuth, async (req, res) => {
       .delete()
       .eq('id', req.params.id)
       .eq('user_id', req.user.id);
+    if (isMissingProjectSpaceRelationError(error)) {
+      fallback.deleteProject(req.params.id, req.user.id);
+      return res.json({ success: true });
+    }
     if (error) return res.status(400).json({ error: error.message });
     return res.json({ success: true });
   }
@@ -183,6 +221,18 @@ router.post('/:projectId/spaces', optionalAuth, async (req, res) => {
       .eq('id', req.params.projectId)
       .eq('user_id', req.user.id)
       .single();
+    if (isMissingProjectSpaceRelationError(pErr)) {
+      const space = fallback.createSpace(req.params.projectId, req.user.id, {
+        room_id: compatRoomId,
+        type,
+        name,
+        category,
+        space_vision,
+        placeholder_mode,
+      });
+      if (!space) return res.status(404).json({ error: 'Project not found' });
+      return res.json(space);
+    }
     if (pErr || !project) return res.status(404).json({ error: 'Project not found' });
     const { data, error } = await supabaseAdmin
       .from('spaces')
@@ -197,6 +247,18 @@ router.post('/:projectId/spaces', optionalAuth, async (req, res) => {
       })
       .select()
       .single();
+    if (isMissingProjectSpaceRelationError(error)) {
+      const space = fallback.createSpace(req.params.projectId, req.user.id, {
+        room_id: compatRoomId,
+        type,
+        name,
+        category,
+        space_vision,
+        placeholder_mode,
+      });
+      if (!space) return res.status(404).json({ error: 'Project not found' });
+      return res.json(space);
+    }
     if (error) return res.status(400).json({ error: error.message });
     return res.json(data);
   }
@@ -231,6 +293,11 @@ router.put('/:projectId/spaces/:spaceId', optionalAuth, async (req, res) => {
       .eq('id', req.params.projectId)
       .eq('user_id', req.user.id)
       .single();
+    if (isMissingProjectSpaceRelationError(pErr)) {
+      const space = fallback.updateSpace(req.params.projectId, req.params.spaceId, req.user.id, updates);
+      if (!space) return res.status(404).json({ error: 'Space not found' });
+      return res.json(space);
+    }
     if (pErr || !project) return res.status(404).json({ error: 'Project not found' });
     const { data, error } = await supabaseAdmin
       .from('spaces')
@@ -239,6 +306,11 @@ router.put('/:projectId/spaces/:spaceId', optionalAuth, async (req, res) => {
       .eq('project_id', req.params.projectId)
       .select()
       .single();
+    if (isMissingProjectSpaceRelationError(error)) {
+      const space = fallback.updateSpace(req.params.projectId, req.params.spaceId, req.user.id, updates);
+      if (!space) return res.status(404).json({ error: 'Space not found' });
+      return res.json(space);
+    }
     if (error) return res.status(400).json({ error: error.message });
     return res.json(data);
   }
@@ -257,12 +329,22 @@ router.delete('/:projectId/spaces/:spaceId', optionalAuth, async (req, res) => {
       .eq('id', req.params.projectId)
       .eq('user_id', req.user.id)
       .single();
+    if (isMissingProjectSpaceRelationError(pErr)) {
+      const ok = fallback.deleteSpace(req.params.projectId, req.params.spaceId, req.user.id);
+      if (!ok) return res.status(404).json({ error: 'Space not found' });
+      return res.json({ success: true });
+    }
     if (pErr || !project) return res.status(404).json({ error: 'Project not found' });
     const { error } = await supabaseAdmin
       .from('spaces')
       .delete()
       .eq('id', req.params.spaceId)
       .eq('project_id', req.params.projectId);
+    if (isMissingProjectSpaceRelationError(error)) {
+      const ok = fallback.deleteSpace(req.params.projectId, req.params.spaceId, req.user.id);
+      if (!ok) return res.status(404).json({ error: 'Space not found' });
+      return res.json({ success: true });
+    }
     if (error) return res.status(400).json({ error: error.message });
     return res.json({ success: true });
   }

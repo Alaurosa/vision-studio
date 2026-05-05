@@ -250,11 +250,10 @@ export default function Upload({ embedInWizard = false }) {
       width: spaceReview.roomWidth,
       depth: spaceReview.roomDepth,
     };
-    project.visionIntakeCompletedAt = new Date().toISOString();
     project.updatedAt = new Date().toISOString();
     upsertProject(project);
 
-    navigate(`/studio/project/${project.id}/confirm?phase=spaces`);
+    navigate(`/studio/project/${project.id}/confirm?mode=adjust`);
   };
 
   const onEditorCancel = () => {

@@ -10,7 +10,13 @@ import KeyboardShortcutsPopover from '@/components/studio/KeyboardShortcutsPopov
 
 const isDraftId = (id) => typeof id === 'string' && id.startsWith('draft-');
 
-export default function StudioToolbar({ onToggleCatalog, catalogOpen, projectIdForBack }) {
+export default function StudioToolbar({
+  onToggleCatalog,
+  catalogOpen,
+  projectIdForBack,
+  contextLabel,
+  projectMode = false,
+}) {
   const {
     room, viewMode, setViewMode, gridEnabled, toggleGrid,
     isChatOpen, toggleChat, undo, redo, validate,
@@ -121,7 +127,7 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen, projectIdF
       <Link to={backTarget} className="eyebrow text-ink-500 hover:text-ink-900 shrink-0">{backLabel}</Link>
       <div className="h-5 w-px bg-ink-900/15 shrink-0" />
       <div className="font-display text-lg truncate max-w-xs flex items-center gap-2">
-        {room?.name || 'Untitled'}
+        {contextLabel || room?.name || 'Untitled'}
         {draft && (
           <span className="text-[9px] uppercase tracking-editorial px-2 py-0.5 rounded-full bg-sienna-500/10 text-sienna-700 border border-sienna-500/30 shrink-0">
             Draft
@@ -129,7 +135,11 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen, projectIdF
         )}
       </div>
       <div className="text-xs text-ink-500 shrink-0">
-        {room?.width ? `${inchesToFeet(room.width)} × ${inchesToFeet(room.depth)}` : ''}
+        {projectMode
+          ? 'Project scope'
+          : room?.width
+            ? `${inchesToFeet(room.width)} × ${inchesToFeet(room.depth)}`
+            : ''}
       </div>
 
       <div className="flex-1 min-w-4" />

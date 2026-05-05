@@ -50,7 +50,7 @@ function normalizeProjectPayload(project) {
 
 /**
  * Full-page new project wizard — replaces dashboard modal.
- * Flow: Start → Details → (upload branch OR → confirm spaces route).
+ * Flow: Start → Details → upload branch OR blank/template → `/studio/project/:id/confirm?mode=adjust`.
  */
 export default function StudioNewWizard() {
   const navigate = useNavigate();
@@ -173,7 +173,7 @@ export default function StudioNewWizard() {
 
       project.updatedAt = new Date().toISOString();
       upsertProject(project);
-      navigate(`/studio/project/${project.id}/vision?setup=new`);
+      navigate(`/studio/project/${project.id}/confirm?mode=adjust`);
     } catch (e) {
       const message = e?.response?.data?.error || e?.message || 'Failed to create project';
       setCreateError(message);

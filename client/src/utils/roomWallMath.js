@@ -86,3 +86,21 @@ export function roomRectangleOutline(width, depth) {
     { start: [0, d], end: [0, 0] },
   ];
 }
+
+/**
+ * Scale segment endpoints from a saved room box to a new width/depth (inch space).
+ * Used while resizing floor so outlines and dimension labels track the preview box.
+ */
+export function scaleSegmentWallsToRoomBox(walls, baseWidth, baseDepth, targetWidth, targetDepth) {
+  if (!isSegmentWallsFormat(walls)) return walls;
+  const bw = Math.max(MIN_ROOM_DIM_IN, Number(baseWidth) || MIN_ROOM_DIM_IN);
+  const bd = Math.max(MIN_ROOM_DIM_IN, Number(baseDepth) || MIN_ROOM_DIM_IN);
+  const tw = Math.max(MIN_ROOM_DIM_IN, Number(targetWidth) || MIN_ROOM_DIM_IN);
+  const td = Math.max(MIN_ROOM_DIM_IN, Number(targetDepth) || MIN_ROOM_DIM_IN);
+  const sx = tw / bw;
+  const sy = td / bd;
+  return walls.map((s) => ({
+    start: [s.start[0] * sx, s.start[1] * sy],
+    end: [s.end[0] * sx, s.end[1] * sy],
+  }));
+}

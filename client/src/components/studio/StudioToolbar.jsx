@@ -48,8 +48,8 @@ export default function StudioToolbar({
   const canUseRoomCanvasTools =
     wallPointsCanvasActive && room?.width > 0 && room?.depth > 0;
   const roomResizeTitle = !wallPointsCanvasActive
-    ? 'Open a linked space (room view) to resize dimensions'
-    : 'Drag east, south, or south-east handle to resize; room origin stays at top-left';
+    ? 'Open a linked space (room view) to change floor width and depth'
+    : 'Sets this room’s saved width and depth (the floor rectangle, grid, and furniture limits). Drag the orange handles on the right, bottom, or bottom-right corner. The top-left corner stays fixed. This does not reshape wall lines—use Wall points for that. Save project to persist.';
 
   const doValidate = () => {
     const { valid, errors } = validate();
@@ -191,9 +191,10 @@ export default function StudioToolbar({
             active={roomResizeTool}
             disabled={!canUseRoomCanvasTools}
             title={roomResizeTitle}
+            aria-label="Resize floor: edit room width and depth"
             className="hidden sm:inline-flex"
           >
-            Room size
+            Resize floor
           </ToolbarBtn>
           <ToolbarBtn
             onClick={toggleRoomWallsTool}

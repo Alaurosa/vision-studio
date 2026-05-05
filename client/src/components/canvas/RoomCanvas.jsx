@@ -8,7 +8,12 @@ import WallOutline from './WallOutline';
 import WallJointHandles from './WallJointHandles';
 import RoomBoundsHandles from './RoomBoundsHandles';
 import WallDimensionLabels from './WallDimensionLabels';
-import { isPolygonWallsFormat, isSegmentWallsFormat, roomRectangleOutline } from '@/utils/roomWallMath';
+import {
+  isPolygonWallsFormat,
+  isSegmentWallsFormat,
+  roomRectangleOutline,
+  scaleSegmentWallsToRoomBox,
+} from '@/utils/roomWallMath';
 
 function getZoneBox(zone) {
   if (Array.isArray(zone?.bbox) && zone.bbox.length === 4) {
@@ -174,8 +179,26 @@ export default function RoomCanvas() {
       : null;
 
   const wallsForOutline = (() => {
-    if (isSegmentWallsFormat(room?.walls)) return wallDragPreview ?? room.walls;
     if (isPolygonWallsFormat(room?.walls)) return room.walls;
+    if (isSegmentWallsFormat(room?.walls)) {
+      const baseSegments = wallDragPreview ?? room.walls;
+      if (
+        roomResizeTool &&
+        roomSizePreview &&
+        !wallDragPreview &&
+        (room?.width || 0) > 0 &&
+        (room?.depth || 0) > 0
+      ) {
+        return scaleSegmentWallsToRoomBox(
+          baseSegments,
+          room.width,
+          room.depth,
+          effectiveRoomW,
+          effectiveRoomD,
+        );
+      }
+      return baseSegments;
+    }
     return wallDragPreview ?? rectangleWallSegments;
   })();
 
@@ -225,6 +248,11 @@ export default function RoomCanvas() {
       {placementWarning && (
         <div className="absolute top-4 right-4 z-10 rounded-md border border-red-500 bg-surface-900/95 px-3 py-2 text-xs text-red-400 shadow-lg backdrop-blur-sm">
           {placementWarning}
+        </div>
+      )}
+      {roomResizeTool && room?.width > 0 && (
+        <div className="absolute left-1/2 top-14 z-10 -translate-x-1/2 pointer-events-none rounded-md border border-amber-500/50 bg-surface-900/90 px-3 py-1.5 text-[11px] text-amber-100/95 shadow-md max-w-[min(90vw,28rem)] text-center">
+          Resize floor: drag orange handles on the right, bottom, or corner to change width × depth (top-left stays fixed). Save to keep changes.
         </div>
       )}
 

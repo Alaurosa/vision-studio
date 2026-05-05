@@ -93,22 +93,52 @@ export const useLayoutStore = create(
       loading: false,
       viewMode: '2d',
       gridEnabled: true,
-      isChatOpen: true,
+      isChatOpen: false,
       undoStack: [],
       redoStack: [],
+      loadRoomFailed: false,
 
       // ---------- room ----------
       loadRoom: async (roomId) => {
-        // Draft rooms are purely client-side — just set them from persisted state
+        set({ loadRoomFailed: false });
+        // Draft rooms are purely client-side — set from Zustand persist (may rehydrate after first tick)
         if (isDraftId(roomId)) {
-          const { room } = get();
-          if (room?.id === roomId) {
-            // Already loaded from persist
-            set({ loading: false });
-          }
+          const tryDraft = () => {
+            const { room } = get();
+            if (room?.id === roomId) {
+              set({ loading: false, loadRoomFailed: false });
+              return true;
+            }
+            return false;
+          };
+          if (tryDraft()) return;
+          set({ loading: true });
+          let attempts = 0;
+          const tick = () => {
+            attempts += 1;
+            if (tryDraft()) return;
+            if (attempts >= 24) {
+              set({ loading: false, loadRoomFailed: true });
+              return;
+            }
+            setTimeout(tick, 40);
+          };
+          queueMicrotask(() => tick());
           return;
         }
-        set({ loading: true });
+        set((s) => {
+          const patch = { loading: true };
+          if (s.room?.id !== roomId) {
+            patch.room = null;
+            patch.furniture = [];
+            patch.selectedId = null;
+            patch.detections = [];
+            patch.zones = [];
+            patch.activeZoneId = null;
+            patch.recommendedItems = [];
+          }
+          return patch;
+        });
         try {
           const { data } = await api.get(`/api/rooms/${roomId}`);
           const fallbackZones = normalizeZoneObjects(data);
@@ -119,10 +149,23 @@ export const useLayoutStore = create(
             zones: fallbackZones,
             activeZoneId: fallbackZones[0]?.id || null,
             loading: false,
+            loadRoomFailed: false,
           });
         } catch (e) {
           console.error('loadRoom', e);
-          set({ loading: false });
+          set({
+            loading: false,
+            loadRoomFailed: true,
+            room: null,
+            furniture: [],
+            selectedId: null,
+            detections: [],
+            zones: [],
+            activeZoneId: null,
+            recommendedItems: [],
+            undoStack: [],
+            redoStack: [],
+          });
         }
       },
 

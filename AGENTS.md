@@ -82,15 +82,20 @@ vision-studio/
 │       │   ├── supabaseClient.js # Supabase client singleton (graceful placeholder when keys missing)
 │       │   └── api.js            # Axios instance + auth interceptor (Supabase JWT or fallback test token)
 │       ├── hooks/
-│       │   └── useAuth.js        # Auth state (signInWithPassword, signUp, signOut) + fallback test account (test@visionstudio.dev / test1234)
+│       │   ├── useAuth.js        # Auth state (signInWithPassword, signUp, signOut) + fallback test account (test@visionstudio.dev / test1234)
+│       │   └── useRoomExport.js  # JSON/SVG/DXF export for current room (draft + persisted), shared by EditorWorkspaceSidebar
 │       ├── store/
 │       │   └── layoutStore.js    # Zustand: room, furniture, zones, detections, chat, view state, undo/redo, draft mode
 │       ├── utils/
 │       │   ├── constants.js      # Grid snap, clearance, category colors/labels, room templates, zone colors (16 presets + random generator)
 │       │   ├── scale.js          # px↔inches conversion, snap-to-grid, rotation helpers, inchesToFeet formatter
 │       │   ├── collision.js      # AABB detection (arbitrary rotation), overlap check, room bounds validation
-│       │   └── projectCompat.js  # Frontend-only project compatibility layer (localStorage `vs-projects-v1`) + helper metadata for Phase 2 schema planning
+│       │   ├── projectCompat.js  # Frontend-only project compatibility layer (localStorage `vs-projects-v1`) + helper metadata for Phase 2 schema planning
+│       │   ├── chatRouting.js    # Global `/chat` intent routing helper (project/space name matching → Studio routes or suggestion options)
+│       │   └── visionGate.js    # Client-side check that whole-property vision (`globalVision.propertyVision` + style/mood rules) is complete
 │       ├── components/
+│       │   ├── project/
+│       │   │   └── ProjectVisionIntake.jsx   # Project Vision Assistant (`/studio/project/:id/vision`); `whole_project` chat → `globalVision`
 │       │   ├── ErrorBoundary.jsx      # React class error boundary with polished fallback UI
 │       │   ├── ConfirmModal.jsx       # Animated confirmation modal with Framer Motion (replaces window.confirm)
 │       │   ├── auth/
@@ -107,7 +112,9 @@ vision-studio/
 │       │   │   ├── AnalysisWorkflow.jsx # 6-step animated floor-plan pipeline overlay (guest + authed paths)
 │       │   │   └── RoomEditor.jsx     # Full-screen SVG zone editor: drag/resize/draw rooms (rectangle + polygon), edit names/dimensions/colors, native color picker, decoupled dimensions
 │       │   ├── studio/
-│       │   │   ├── StudioToolbar.jsx  # Undo/Redo/Grid/Validate/Auto-Arrange/2D/3D/Export/Chat/Shortcuts
+│       │   │   ├── StudioToolbar.jsx  # Undo/Redo/Grid/Validate/Auto-Arrange/2D/3D/Assistant panel toggle; keyboard shortcuts (? → portal); back link to project hub when scoped
+│       │   │   ├── KeyboardShortcutsPopover.jsx  # Body portal for shortcuts (high z-index, avoids editor clipping)
+│       │   │   ├── EditorWorkspaceSidebar.jsx  # IDE-style left tabs: Spaces / Furniture (CatalogPanel) / Materials / Layers / Validation / Export (useRoomExport)
 │       │   │   ├── RoomSetupModal.jsx # Template + dimensions picker
 │       │   │   └── ZoneBottomBar.jsx  # Bottom room switcher + room box inspector/add-remove actions
 │       │   ├── catalog/
@@ -122,9 +129,10 @@ vision-studio/
 │       └── pages/
 │           ├── Home.jsx              # Editorial landing (Batako-inspired: hero, process, quote band, services, CTA, smooth staggered reveals)
 │           ├── Login.jsx             # Email/password auth with Helmet SEO
-│           ├── Chat.jsx              # Full-page AI design assistant with minimize-to-editor toggle, style chips, quick prompts, draft room support
+│           ├── Chat.jsx              # `/chat` = Design Inspiration Assistant (local-only transcript; `draft-global-inspiration` + `room_context`, no project fields). `/studio/project/:id/chat` = Project Assistant (room + project context)
 │           ├── Upload.jsx            # Floorplan intake → AI analysis → room-zone editor → space confirmation (interior/exterior typing) → project vision onboarding → Studio
-│           ├── Studio.jsx            # Project-first dashboard (/studio) + project workspace routes (/studio/project/:projectId[/spaceId]) + existing room editor route (/studio/:roomId)
+│           ├── Studio.jsx            # Dashboard (/studio), hub + confirm + vision + editor under /studio/project/..., legacy /studio/:roomId
+│           ├── StudioNewWizard.jsx   # Full-page new project wizard (/studio/new)
 │           └── NotFound.jsx          # Polished 404 page with animated entry
 │
 ├── server/                       # Node.js + Express backend
@@ -227,9 +235,10 @@ Store in `client/src/store/layoutStore.js` (wrapped with `zustand/persist` for d
 | `loading`               | `boolean`         | Global loading state                         |
 | `viewMode`              | `string`          | '2d' or '3d'                                 |
 | `gridEnabled`           | `boolean`         | Snap grid visibility                         |
-| `isChatOpen`            | `boolean`         | Chat panel visibility                        |
+| `isChatOpen`            | `boolean`         | Chat panel visibility (defaults closed in editor) |
 | `undoStack`             | `array`           | Furniture state snapshots for undo           |
 | `redoStack`             | `array`           | Furniture state snapshots for redo           |
+| `loadRoomFailed`        | `boolean`         | Last `loadRoom` failed (invalid id, API error, or missing draft); Studio redirects to `/studio` |
 
 Actions: `loadRoom`, `createRoom`, `createDraftRoom`, `clearDraft`, `saveDraftToAccount`, `saveRoomGeometry`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setProjectTheme`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`.
 
@@ -390,14 +399,19 @@ All tables use Row Level Security — users can only access their own data. The 
 - The server includes an image proxy endpoint (`/api/proxy-image`) that serves external product images with proper CORS headers for WebGL textures, restricted to whitelisted domains (IKEA, Ashley).
 - Both Supabase clients (server admin + client anon) gracefully handle missing/placeholder credentials — they create a client pointing at a placeholder URL so the app boots without crashing, and operations fail at request time with clear warnings.
 - The `zone_id` column on placements and `zones` column on rooms use additive migrations (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`) for backward compatibility with existing deployments. Routes retry without these columns if the DB rejects them.
+- **`loadRoom` recovery**: Failed server fetch or missing draft after rehydration sets `loadRoomFailed`; `Studio.jsx` toasts and replaces the route to `/studio` so the editor never spins forever. Switching to another server room clears stale `room`/placements until the new fetch completes.
 - **Guest / Draft Mode**: Upload and Studio pages are accessible without authentication. Guests create local "draft" rooms stored in localStorage via Zustand `persist`. The `StudioToolbar` shows a "Save to account" button that opens a `LoginModal` inline. On save, `saveDraftToAccount()` pushes the room, zones, and placements to the server. The guest upload path uses `/api/public/parse-floorplan` to avoid auth. 401 responses from the API are silently handled (no redirect).
+- When Supabase **public** URL/key are missing in the client (`client` env / `VITE_` + `NEXT_PUBLIC_` aliases), the app skips Supabase Auth network calls and uses the guest/test-token path only — avoiding failed session requests to placeholder hosts. `fetchRoomsListOnce()` dedupes concurrent `GET /api/rooms` during React StrictMode double-mount.
+- Project space rows from the API normalize `type` to `interior` \| `exterior` (string casing + optional `placeholder_mode` fallback) so exterior spaces stay in the Exterior section after refresh.
 - The chat endpoint runs a multi-turn tool execution loop (up to 5 rounds). After each round of tool calls, it re-fetches placements from the DB before executing the next tool, ensuring tools always operate on current state.
-- Studio now presents a **project-first dashboard** at `/studio`, with localStorage-backed compatibility objects that group existing backend room records into floorplan projects.
-- New frontend-only routes `/studio/project/:projectId` and `/studio/project/:projectId/:spaceId` provide project workspace navigation while preserving existing backend room CRUD and `/studio/:roomId` editor behavior.
-- Upload flow now includes two additional frontend steps after room-zone editing: (1) **space confirmation** (rename/add/delete/set interior/exterior type) and (2) **whole-property vision onboarding** (style chips, prompt, inspiration image filename), before entering Studio.
+- Studio now presents a **project-first dashboard** at `/studio`, with localStorage-backed compatibility objects that group existing backend room records into floorplan projects. When the same project exists in both `GET /api/projects` and `vs-projects-v1`, **Studio merges API + local**: spaces and room IDs prefer the API, while **`globalVision` fields from local overlay** the API so vision progress is not lost when the backend does not yet persist property vision text.
+- **Guided new-project flow** (only when user goes through `/studio/new` or upload intake): **`/studio/new`** → **`/studio/project/:id/vision?setup=new`** → **`/confirm`** → **`/studio/project/:id` (hub)** → **editor**. **Upload-first** can use **`/confirm?phase=spaces`** then **`/vision?setup=new`**. Opening an **existing** project from `/studio` goes **directly to the project hub** — no automatic redirect to vision or confirm once the user can navigate freely. **`/studio/project/:id/chat`** is the full-page **Project Assistant** (project-wide Q&amp;A); **`/vision`** is the **Project Vision Assistant** structured intake. **Space Assistant** = editor `ChatPanel`. Legacy `/studio/project/:id/:spaceId` → `.../editor/:spaceId` unless `legacySpaceId` is `confirm`, `vision`, `editor`, or `chat`. `/upload` → wizard.
+- **Hub** (`/studio/project/:id`): primary **Open Editor**; optional **Edit Project Vision**, **Review Spaces** (`/confirm?from=hub`), **Ask Project Assistant** (`/chat`). **Continue guided setup** appears only while vision or confirmation is incomplete. **`Review project & spaces`** on vision routes to **confirm** only when URL has **`setup=new`**; otherwise it returns to the **hub**.
+- **Project vision** in **`ProjectVisionIntake.jsx`**: `whole_project` chat + `globalVision` persistence. **Confirmation** sets `confirmationCompletedAt` and navigates to the **hub**.
+- **`App.jsx`** hides **Navbar**/**Footer** on **editor**, **vision**, and **`/studio/project/:id/chat`**.
 - The project detail page (`/studio/project/:projectId`) acts as a floorplan hub with Interior/Exterior sections, empty-state add actions, and type pickers for creating interior/exterior spaces while still creating backend-compatible room records under the hood.
 - Project cards on `/studio` include status, space counts, last-updated metadata, and dual actions (`Open project`, `Continue editing`) with a CSS-only architectural preview placeholder.
-- The **New Project** modal submit path is resilient: project creation and navigation to `/studio/project/:projectId` remain the critical path, while initial interior seed-space setup is best-effort (non-blocking). If seeding fails, users still land on the project page and can add spaces via the visible interior/exterior add cards; creation failures surface as toast + inline modal error text.
+- **New Project** uses the full-page wizard at `/studio/new` (modal removed). Upload-intake projects navigate into embedded `Upload` on the wizard after the shell project is created; primary nav no longer promotes `/upload` as a top-level item.
 
 ## Chatbot Function Calling
 

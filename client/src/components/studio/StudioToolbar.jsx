@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useLayoutStore } from '@/store/layoutStore';
@@ -6,10 +6,11 @@ import { useAuth } from '@/hooks/useAuth';
 import { inchesToFeet } from '@/utils/scale';
 import api from '@/lib/api';
 import LoginModal from '@/components/auth/LoginModal';
+import KeyboardShortcutsPopover from '@/components/studio/KeyboardShortcutsPopover';
 
 const isDraftId = (id) => typeof id === 'string' && id.startsWith('draft-');
 
-export default function StudioToolbar({ onToggleCatalog, catalogOpen, chatFullscreen, onToggleChatFullscreen }) {
+export default function StudioToolbar({ onToggleCatalog, catalogOpen, projectIdForBack }) {
   const {
     room, viewMode, setViewMode, gridEnabled, toggleGrid,
     isChatOpen, toggleChat, undo, redo, validate,
@@ -18,45 +19,14 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen, chatFullsc
   } = useLayoutStore();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [exporting, setExporting] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const shortcutsAnchorRef = useRef(null);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
   const [showLogin, setShowLogin] = useState(false);
   const selectedItem = furniture.find((item) => item.id === selectedId);
 
   const draft = isDraftId(room?.id);
-
-  const runExport = async (format) => {
-    if (!room?.id) return;
-    setExporting(true);
-    try {
-      let blob;
-      if (draft) {
-        // Draft rooms: build export payload client-side and send to server
-        const payload = {
-          room_context: { id: room.id, name: room.name, width: room.width, depth: room.depth, height: room.height || 96, unit: room.unit || 'inches', walls: room.walls || [] },
-          placements_context: furniture.map(f => ({ id: f.id, name: f.name, category: f.category, provider: f.provider, provider_id: f.provider_id, width: f.width, depth: f.depth, height: f.height, x_inches: f.x_inches, y_inches: f.y_inches, rotation: f.rotation, color: f.color, custom: f.custom, model_url: f.model_url })),
-        };
-        const res = await api.post(`/api/export/${format}/draft`, payload, { responseType: 'blob' });
-        blob = res.data;
-      } else {
-        const res = await api.post(`/api/export/${format}/${room.id}`, {}, { responseType: 'blob' });
-        blob = res.data;
-      }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${(room.name || 'layout').replace(/\s+/g, '_')}.${format}`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast.success(`Exported ${format.toUpperCase()} successfully`);
-    } catch (e) {
-      toast.error(`Export failed — ${e?.response?.data?.error || e.message}`);
-    } finally {
-      setExporting(false);
-    }
-  };
 
   const doValidate = () => {
     const { valid, errors } = validate();
@@ -143,9 +113,12 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen, chatFullsc
       ? (user ? 'Save Project' : 'Sign in & Save')
       : 'Save Project';
 
+  const backTarget = projectIdForBack ? `/studio/project/${projectIdForBack}` : '/studio';
+  const backLabel = projectIdForBack ? '← Project' : '← Studio';
+
   return (
     <div className="h-14 border-b border-ink-900/10 bg-paper-50 flex items-center px-4 md:px-6 gap-2 md:gap-4 overflow-x-auto">
-      <Link to="/studio" className="eyebrow text-ink-500 hover:text-ink-900 shrink-0">← Rooms</Link>
+      <Link to={backTarget} className="eyebrow text-ink-500 hover:text-ink-900 shrink-0">{backLabel}</Link>
       <div className="h-5 w-px bg-ink-900/15 shrink-0" />
       <div className="font-display text-lg truncate max-w-xs flex items-center gap-2">
         {room?.name || 'Untitled'}
@@ -179,7 +152,7 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen, chatFullsc
       )}
 
       {/* Catalog toggle (visible on mobile) */}
-      <ToolbarBtn onClick={onToggleCatalog} active={catalogOpen} className="md:hidden">Catalog</ToolbarBtn>
+      <ToolbarBtn onClick={onToggleCatalog} active={catalogOpen} className="md:hidden">Workspace</ToolbarBtn>
 
       <ToolbarBtn onClick={undo}>Undo</ToolbarBtn>
       <ToolbarBtn onClick={redo}>Redo</ToolbarBtn>
@@ -197,35 +170,18 @@ export default function StudioToolbar({ onToggleCatalog, catalogOpen, chatFullsc
       <div className="h-5 w-px bg-ink-900/15 shrink-0" />
       <ToolbarBtn onClick={() => setViewMode('2d')} active={viewMode === '2d'}>2D</ToolbarBtn>
       <ToolbarBtn onClick={() => setViewMode('3d')} active={viewMode === '3d'}>3D</ToolbarBtn>
-      <div className="h-5 w-px bg-ink-900/15 shrink-0 hidden sm:block" />
-      <ToolbarBtn onClick={() => runExport('json')} disabled={exporting} className="hidden sm:inline-flex">JSON</ToolbarBtn>
-      <ToolbarBtn onClick={() => runExport('svg')} disabled={exporting} className="hidden sm:inline-flex">SVG</ToolbarBtn>
-      <ToolbarBtn onClick={() => runExport('dxf')} disabled={exporting} className="hidden sm:inline-flex">DXF</ToolbarBtn>
       <div className="h-5 w-px bg-ink-900/15 shrink-0" />
-      <ToolbarBtn onClick={toggleChat} active={isChatOpen && !chatFullscreen} className="hidden md:inline-flex">Chat</ToolbarBtn>
-      {onToggleChatFullscreen && (
-        <ToolbarBtn onClick={onToggleChatFullscreen} active={chatFullscreen} className="hidden md:inline-flex">
-          {chatFullscreen ? 'Editor' : 'AI Full'}
-        </ToolbarBtn>
-      )}
+      <ToolbarBtn onClick={toggleChat} active={isChatOpen} className="hidden md:inline-flex">Space Assistant</ToolbarBtn>
 
-      {/* Keyboard shortcuts */}
       <div className="relative shrink-0">
-        <ToolbarBtn onClick={() => setShowShortcuts(!showShortcuts)} className="hidden md:inline-flex">?</ToolbarBtn>
-        {showShortcuts && (
-          <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-ink-900/10 shadow-lg rounded-lg p-4 z-50">
-            <div className="eyebrow mb-3">Keyboard Shortcuts</div>
-            <ul className="text-xs text-ink-700 space-y-2">
-              <li className="flex justify-between"><span>Undo</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">⌘Z</kbd></li>
-              <li className="flex justify-between"><span>Redo</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">⌘⇧Z</kbd></li>
-              <li className="flex justify-between"><span>Rotate selected</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">R</kbd></li>
-              <li className="flex justify-between"><span>Delete selected</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">Del</kbd></li>
-              <li className="flex justify-between"><span>Deselect</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">Esc</kbd></li>
-              <li className="flex justify-between"><span>Zoom</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">Scroll</kbd></li>
-              <li className="flex justify-between"><span>Pan canvas</span> <kbd className="text-ink-500 bg-paper-100 px-1.5 py-0.5 rounded text-[10px]">Drag bg</kbd></li>
-            </ul>
-          </div>
-        )}
+        <span ref={shortcutsAnchorRef} className="inline-flex">
+          <ToolbarBtn onClick={() => setShowShortcuts((s) => !s)} className="hidden md:inline-flex">?</ToolbarBtn>
+        </span>
+        <KeyboardShortcutsPopover
+          open={showShortcuts}
+          onClose={() => setShowShortcuts(false)}
+          anchorRef={shortcutsAnchorRef}
+        />
       </div>
 
       {showLogin && (

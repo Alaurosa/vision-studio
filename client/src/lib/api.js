@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { supabase } from './supabaseClient';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001',
@@ -13,12 +13,15 @@ api.interceptors.request.use(async (config) => {
     config.headers.Authorization = `Bearer ${testToken}`;
     return config;
   }
+  if (!isSupabaseConfigured) {
+    return config;
+  }
   try {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
     if (token) config.headers.Authorization = `Bearer ${token}`;
   } catch {
-    // Supabase not configured — skip auth header
+    // Supabase session unavailable — proceed without auth header
   }
   return config;
 });

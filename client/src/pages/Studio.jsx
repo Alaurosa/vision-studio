@@ -237,6 +237,13 @@ export default function Studio() {
   );
   const selectedProjectSpaceId = activeSpace?.id || null;
   const selectedProjectSpace = activeSpace || null;
+  const projectForTitle = projectId ? getProjectById(projectId) : null;
+  const resolvedProjectTitle =
+    projectForTitle?.name
+    || currentProject?.name
+    || getProjectById(currentProjectId || '')?.name
+    || searchParams.get('projectName')
+    || 'Untitled project';
 
   useEffect(() => {
     if (!matchEditorRoot || !currentProject?.id || editorSpaceId) return;
@@ -1410,7 +1417,7 @@ export default function Studio() {
     );
   }
 
-  if (isProjectEditorMode && selectedSpaceHasLinkedRoom && !room) {
+  if (isProjectEditorMode && selectedSpaceHasLinkedRoom && !room && !loadRoomFailed) {
     return (
       <div className="h-[calc(100vh-4rem)] grid place-items-center">
         <div className="flex flex-col items-center gap-4">
@@ -1436,6 +1443,7 @@ export default function Studio() {
           catalogOpen={catalogOpen}
           projectIdForBack={projectId}
           contextLabel={assistantContextLabel}
+          projectTitle={resolvedProjectTitle}
           projectMode={isProjectEditorMode}
         />
         <div className="flex-1 flex overflow-hidden relative min-h-0">
@@ -1495,6 +1503,7 @@ export default function Studio() {
                       projectSpaces={projectSpaces}
                       rooms={rooms}
                       selectedSpaceId={selectedProjectSpaceId}
+                      selectedSpace={selectedProjectSpace}
                       onSelectSpace={(spaceId) => {
                         if (!projectId || !spaceId) return;
                         navigate(`/studio/project/${projectId}/editor/${spaceId}`);

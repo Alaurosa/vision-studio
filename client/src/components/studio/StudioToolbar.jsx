@@ -15,6 +15,7 @@ export default function StudioToolbar({
   catalogOpen,
   projectIdForBack,
   contextLabel,
+  projectTitle,
   projectMode = false,
 }) {
   const {
@@ -136,7 +137,7 @@ export default function StudioToolbar({
       </div>
       <div className="text-xs text-ink-500 shrink-0">
         {projectMode
-          ? 'Project scope'
+          ? (projectTitle || 'Untitled project')
           : room?.width
             ? `${inchesToFeet(room.width)} × ${inchesToFeet(room.depth)}`
             : ''}

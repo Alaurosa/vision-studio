@@ -1,42 +1,14 @@
 import { Suspense, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
+import { projectFloorplanOverlays, toBboxArray } from '@/utils/floorplanGeometry';
 
 const IN_TO_M = 0.0254;
 
-function getSpaceRoomId(space) {
-  return space?.roomId ?? space?.room_id ?? null;
-}
-
-function getZoneBBox(zone) {
-  if (Array.isArray(zone?.bbox) && zone.bbox.length === 4) return zone.bbox;
-  return null;
-}
-
-function resolveFloorplanSource(projectSpaces, roomsById) {
-  const candidates = [];
-  for (const space of Array.isArray(projectSpaces) ? projectSpaces : []) {
-    const rid = getSpaceRoomId(space);
-    if (rid && roomsById[rid]) candidates.push(roomsById[rid]);
-  }
-  const uniq = [];
-  const seen = new Set();
-  for (const room of candidates) {
-    if (!room?.id || seen.has(room.id)) continue;
-    seen.add(room.id);
-    uniq.push(room);
-  }
-  return uniq.find((room) => Array.isArray(room?.zones) && room.zones.length > 0) || null;
-}
-
-function buildBlocksFromZones(projectSpaces = [], sourceRoom = null) {
-  const zones = Array.isArray(sourceRoom?.zones) ? sourceRoom.zones : [];
-  const zoneById = new Map(zones.map((z) => [z.id, z]));
-  const blocks = (Array.isArray(projectSpaces) ? projectSpaces : []).map((space, index) => {
-    const zone = zoneById.get(space.zoneId) || zoneById.get(space.zone_id) || null;
-    const bbox = getZoneBBox(zone);
-    if (!bbox) return null;
-    const [x1, y1, x2, y2] = bbox;
+function buildBlocksFromGeometry(overlays = []) {
+  const blocks = overlays.map((space, index) => {
+    // Polygon extrusion can be added later; for now, use confirmed polygon bbox as stable MVP.
+    const [x1, y1, x2, y2] = toBboxArray(space.geometry);
     return {
       id: space.id || `space-${index}`,
       type: space.type === 'exterior' ? 'exterior' : 'interior',
@@ -44,31 +16,20 @@ function buildBlocksFromZones(projectSpaces = [], sourceRoom = null) {
       y: y1,
       width: Math.max(24, x2 - x1),
       depth: Math.max(24, y2 - y1),
-      height: space.type === 'exterior' ? 48 : 84,
+      height: space.type === 'exterior' ? 42 : 78,
     };
-  }).filter(Boolean);
+  });
   if (blocks.length === 0) return { blocks: [], maxX: 0, maxY: 0 };
   const maxX = Math.max(...blocks.map((b) => b.x + b.width));
   const maxY = Math.max(...blocks.map((b) => b.y + b.depth));
   return { blocks, maxX, maxY };
 }
 
-export default function ProjectViewer3D({ projectSpaces = [], rooms = [], selectedSpaceId = null }) {
-  const roomsById = useMemo(
-    () =>
-      (Array.isArray(rooms) ? rooms : []).reduce((acc, room) => {
-        acc[room.id] = room;
-        return acc;
-      }, {}),
-    [rooms],
-  );
-  const sourceRoom = useMemo(
-    () => resolveFloorplanSource(projectSpaces, roomsById),
-    [projectSpaces, roomsById],
-  );
+export default function ProjectViewer3D({ project = null, selectedSpaceId = null }) {
+  const { overlays } = useMemo(() => projectFloorplanOverlays(project), [project]);
   const { blocks, maxX, maxY } = useMemo(
-    () => buildBlocksFromZones(projectSpaces, sourceRoom),
-    [projectSpaces, sourceRoom],
+    () => buildBlocksFromGeometry(overlays),
+    [overlays],
   );
   const worldW = Math.max(6, maxX * IN_TO_M);
   const worldD = Math.max(6, maxY * IN_TO_M);

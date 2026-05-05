@@ -79,16 +79,24 @@ export default function CatalogPanel() {
 
   return (
     <div className="flex flex-col h-full bg-surface-800">
-      <div className="p-6 border-b border-surface-700 bg-surface-800">
-        <div className="flex gap-4 mb-4 text-[11px] uppercase tracking-editorial">
+      <div className="border-b border-surface-700 bg-surface-800 px-5 pb-3 pt-3">
+        <div className="mb-3 flex gap-2 text-[11px] uppercase tracking-[0.14em]">
           <button
-            className={tab === 'catalog' ? 'text-surface-100 border-b border-blue-400 pb-1' : 'text-surface-400'}
+            className={
+              tab === 'catalog'
+                ? 'border-b border-blue-400 pb-1 text-surface-100'
+                : 'text-surface-400'
+            }
             onClick={() => setTab('catalog')}
           >
             Catalog
           </button>
           <button
-            className={tab === 'recommended' ? 'text-surface-100 border-b border-blue-400 pb-1' : 'text-surface-400'}
+            className={
+              tab === 'recommended'
+                ? 'border-b border-blue-400 pb-1 text-surface-100'
+                : 'text-surface-400'
+            }
             onClick={() => setTab('recommended')}
           >
             Recommended {recommendedItems.length > 0 && `(${recommendedItems.length})`}
@@ -98,7 +106,7 @@ export default function CatalogPanel() {
         {tab === 'catalog' && (
           <>
             <input
-              className="w-full border border-surface-600 rounded px-3 py-2 text-sm bg-surface-700 text-surface-100 placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="mb-2 w-full rounded border border-surface-600 bg-surface-700 px-3 py-1.5 text-sm text-surface-100 placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Search furniture…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -106,7 +114,7 @@ export default function CatalogPanel() {
             <div className="flex flex-wrap gap-1.5">
               <button
                 onClick={() => setCategory('')}
-                className={`text-[10px] uppercase tracking-editorial rounded-full px-3 py-1 border transition ${
+                className={`text-[10px] uppercase tracking-[0.12em] rounded-full px-2.5 py-1 border transition ${
                   category === '' ? 'bg-blue-600 text-surface-50 border-blue-600' : 'border-surface-600 text-surface-300 hover:border-surface-400 hover:text-surface-200'
                 }`}
               >All</button>
@@ -114,7 +122,7 @@ export default function CatalogPanel() {
                 <button
                   key={c}
                   onClick={() => setCategory(c)}
-                  className={`text-[10px] uppercase tracking-editorial rounded-full px-3 py-1 border transition ${
+                  className={`text-[10px] uppercase tracking-[0.12em] rounded-full px-2.5 py-1 border transition ${
                     category === c ? 'bg-blue-600 text-surface-50 border-blue-600' : 'border-surface-600 text-surface-300 hover:border-surface-400 hover:text-surface-200'
                   }`}
                 >{c.replace(/_/g, ' ')}</button>
@@ -133,7 +141,7 @@ export default function CatalogPanel() {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+      <div className="flex-1 overflow-y-auto px-5 py-3 pr-4 space-y-2">
         {loading && tab === 'catalog' && (
           <div className="space-y-2">
             {[1, 2, 3].map(i => (

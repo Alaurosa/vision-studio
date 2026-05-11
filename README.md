@@ -7,6 +7,7 @@ Vision Studio is a full-stack spatial layout design application for uploading ro
 - Frontend: React + Vite + React Router + Tailwind CSS
 - Canvas: Konva + react-konva
 - 3D Viewer: React Three Fiber + drei
+- 3D Assets: Kenney Furniture Kit (CC0 / public domain, low-poly GLBs)
 - Backend: Express
 - AI Service: FastAPI
 - Data/Auth/Storage: Supabase
@@ -117,3 +118,7 @@ cd server && npm run generate-models
 
 - The repository includes a legacy `app/` reference in documentation only; the active frontend lives in `client/`.
 - `.next/`, local env files, and dependency folders are ignored and should not be committed.
+
+## Credits / 3D Assets
+
+3D furniture models are from **Kenney's Furniture Kit** (https://kenney.nl/assets/furniture-kit), released under **CC0 / public domain**. Files live in `client/public/models/kenney/`. Per-item mappings from catalog rows to specific Kenney GLBs live in `server/services/kenneyMapping.js` (category defaults + per-item overrides). Run `node server/services/kenneyMapping.js` to verify every mapping resolves to a real file on disk.

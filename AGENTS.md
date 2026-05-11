@@ -23,7 +23,7 @@ Full-stack implementation — monorepo with React client, Express server, and Fa
 | AI/LLM        | OpenAI gpt-5.4 (function calling) |
 | Python AI     | FastAPI 0.115 + OpenAI Vision gpt-5.4 (20×20 grid + wall-snap room segmentation, gpt-4o fallback) + Replicate (Grounding DINO + SAM 3 for room photos) + OpenCV fallback |
 | Database      | Supabase (PostgreSQL + Auth + Storage)         |
-| 3D Models     | Meshy AI v2 (image-to-3D GLB generation via `/openapi/v2`) + catalog GLB URLs |
+| 3D Models     | Kenney Furniture Kit (CC0 low-poly GLBs bundled under `client/public/models/kenney/`) resolved per item via `server/services/kenneyMapping.js`, with optional catalog `model_url` overrides. Legacy Meshy v2 route remains for future image-to-3D generation. |
 | 3D Viewer     | React Three Fiber 8.18 + @react-three/drei 9.122 + GLTFLoader |
 | SEO           | react-helmet-async 3.0                        |
 | Notifications | react-hot-toast 2.6                           |
@@ -76,6 +76,10 @@ vision-studio/
 │   ├── postcss.config.js
 │   ├── index.html                # Google Fonts (Fraunces + Inter), entry point
 │   ├── .env.local                # Client env vars (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, VITE_API_URL)
+│   ├── public/
+│   │   ├── images/                 # Static image assets (logo, portfolio photos)
+│   │   └── models/                 # CC0 3D assets bundled with the client
+│   │       └── kenney/             # Kenney Furniture Kit (140 low-poly GLBs, CC0 / public domain)
 │   └── src/
 │       ├── main.jsx              # ReactDOM.createRoot + StrictMode + BrowserRouter
 │       ├── App.jsx               # Route shell with lazy-loaded pages, ErrorBoundary, HelmetProvider, Toaster
@@ -124,7 +128,8 @@ vision-studio/
 │       │   │   └── CatalogPanel.jsx   # Search + category chips + product images + Recommended tab
 │       │   ├── viewer/
 │       │   │   ├── RoomViewer3D.jsx   # React Three Fiber — floor/walls/GLB furniture + OrbitControls + Suspense loading
-│       │   │   └── SmartFurnitureModel.jsx # Loads model_url GLBs or backfills via Meshy from product images
+│       │   │   ├── SmartFurnitureModel.jsx # Loads real GLBs from model_url; falls back to ProceduralFurniture when none exists
+│       │   │   └── ProceduralFurniture.jsx # Category-specific Three.js primitive models (sofa, bed, desk, chair, table, bookshelf, dresser, tv_stand, etc.) — no external API needed
 │       │   └── chatbot/
 │       │       ├── ChatPanel.jsx      # Enhanced agentic chat sidebar — rich messages, style prompts, textarea input, auto-refresh
 │       │       ├── MessageBubble.jsx  # Rich message renderer — inline markdown, action result cards, assistant avatar
@@ -167,6 +172,7 @@ vision-studio/
 │   │   ├── db.js                 # Shared useDb() + re-exports supabaseAdmin/fallback
 │   │   ├── fallbackStore.js      # In-memory store when Supabase unavailable (27 embedded catalog items)
 │   │   ├── fileStorage.js        # Shared local file storage helper (saves to uploads/)
+│   │   ├── kenneyMapping.js      # Category defaults + per-item overrides → /models/kenney/*.glb (used by seedFurniture + fallbackStore)
 │   │   ├── overlapResolver.js    # Shared overlap resolver (greedy spiral + linear scan) + layout validator
 │   │   ├── normalizeZones.js    # Shared zone normalization (boundary-relative coordinates)
 │   │   ├── chatFunctions.js      # 15 chat tool definitions + executeFunction() dispatch
@@ -388,7 +394,8 @@ All tables use Row Level Security — users can only access their own data. The 
 ## Notable Behaviors
 
 - Furniture can be rotated freely in the 2D editor via the Konva transformer handle, 15° toolbar nudges, or the in-canvas rotation slider.
-- The 3D viewer prefers real GLB assets from `model_url` and will request Meshy generation from `image_url` when a placement has no model yet.
+- The 3D viewer renders furniture using `SmartFurnitureModel`, which now **defaults to loading a Kenney CC0 GLB** resolved from each catalog item's `model_url` (populated at seed time by `resolveModelUrl` in `server/services/kenneyMapping.js`). Models are uniform-scaled to 95% of the item's declared `width × depth × height`, centered on the group origin so they sit on the floor, and support a `model_rotation_y` override for one-off facing fixes. `ProceduralFurniture` — category-specific 3D models built from Three.js primitives (sofas have cushions + arms, beds have headboards + pillows, bookshelves have shelves, desks have side panels, TVs sit on stands, etc.) — remains the graceful fallback whenever `model_url` is null or GLB loading fails.
+- The legacy Meshy v2 image-to-3D route (`/api/models/*`) remains available for future GLB generation but is no longer invoked by the client; the procedural approach covers all catalog items by category, and it now sits two layers removed from the default render path behind real Kenney GLBs.
 - Floorplan upload uses a 3-stage pipeline: (1) 20×20 grid overlay drawn on image, (2) GPT-5.4 identifies rooms using grid coordinates — returns rectangular bboxes for simple rooms and polygon vertices for L-shaped/irregular rooms (only real habitable rooms — no hallways, stairs, or entries), (3) OpenCV wall-snap aligns each bbox edge to the nearest architectural wall. Results are normalized into editable `zones` stored in room-local coordinates.
 - The RoomEditor (`upload/RoomEditor.jsx`) supports both rectangular and polygon room shapes. Users can draw rectangles (click-drag) or polygons (click vertices, close by clicking first vertex or "Close Shape" button). AI-detected polygons are rendered as SVG polygons with vertex handles. Room dimensions are decoupled from the visual shape.
 - The pre-editor adjust/confirm step is the geometry source of truth: confirmed spaces persist normalized geometry on `project.floorplan.zones[]` and `project.spaces[].geometry` (`type`, `bbox`, optional polygon `points`, `source`) before entering the editor.
@@ -460,6 +467,7 @@ The chat endpoint supports 15 layout manipulation functions via LLM tool use:
 - Run `cd client && npx vite build` to verify client compiles
 - The LLM model is hardcoded to `gpt-5.4` across all services (server llmRouter, Python floorplan parser)
 - The `server/routes/models.js` route handles Meshy v2 image-to-3D generation with in-memory caching and background polling
+- When adding new catalog items, wire their Kenney GLB in `server/services/kenneyMapping.js` (add a `PROVIDER_OVERRIDES` entry if a closer match than the `CATEGORY_DEFAULTS` exists). Run `node server/services/kenneyMapping.js` to verify every mapping resolves to a real file under `client/public/models/kenney/`.
 - The `server/scripts/applySchema.js` script can auto-apply the DB schema via pg-meta or psql — useful for CI/setup
 - `marketing/` is a separate Next.js app used for landing/experiments (runs with `cd marketing && npm run dev`)
 - Marketing Supabase SSR helpers live in:

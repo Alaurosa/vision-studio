@@ -86,7 +86,8 @@ vision-studio/
 │       ├── index.css             # Tailwind directives + editorial theme + component classes + a11y focus-visible + reduced-motion
 │       ├── lib/
 │       │   ├── supabaseClient.js # Supabase client singleton (graceful placeholder when keys missing)
-│       │   └── api.js            # Axios instance + auth interceptor (Supabase JWT or fallback test token)
+│       │   ├── api.js            # Axios instance + auth interceptor (Supabase JWT or fallback test token)
+│       │   └── roomsFetchOnce.js # Dedupes concurrent GET /api/rooms (React StrictMode double-mount + multi-page)
 │       ├── hooks/
 │       │   ├── useAuth.js        # Auth state (signInWithPassword, signUp, signOut) + fallback test account (test@visionstudio.dev / test1234)
 │       │   └── useRoomExport.js  # JSON/SVG/DXF export for current room (draft + persisted), shared by EditorWorkspaceSidebar
@@ -99,6 +100,7 @@ vision-studio/
 │       │   ├── floorplanGeometry.js # Shared floorplan geometry normalization for project-level 2D/3D overlays (rect + polygon)
 │       │   ├── projectCompat.js  # Frontend-only project compatibility layer (localStorage `vs-projects-v1`) + helper metadata for Phase 2 schema planning
 │       │   ├── chatRouting.js    # Global `/chat` intent routing helper (project/space name matching → Studio routes or suggestion options)
+│       │   ├── roomWallMath.js   # Wall geometry helpers (snap/clamp/move wall joints, rectangle perimeter, segment scaling, polygon vs segment detection)
 │       │   └── visionGate.js    # Client-side check that whole-property vision (`globalVision.propertyVision` + style/mood rules) is complete
 │       ├── components/
 │       │   ├── project/
@@ -111,23 +113,29 @@ vision-studio/
 │       │   │   ├── Navbar.jsx         # Top nav (Home/Upload/Studio/Chat), scroll-aware blur, mobile hamburger, skip-to-content
 │       │   │   └── Footer.jsx         # Editorial 4-column footer with semantic HTML (hidden on /studio routes)
 │       │   ├── canvas/
-│       │   │   ├── RoomCanvas.jsx     # Konva Stage with zoom/pan, white background (no floorplan image), room-zone overlays, snap guides
+│       │   │   ├── RoomCanvas.jsx     # Konva Stage with zoom/pan, room-zone overlays, snap guides, draggable wall joints and resize-floor handles when toggled
+│       │   │   ├── ProjectCanvas.jsx  # Full-floorplan SVG preview for project mode (interior/exterior overlays, Color Overlay toggle, click-to-select)
 │       │   │   ├── FurnitureItem.jsx  # Draggable/rotatable Konva Group with Transformer, hover states, staggered fade-in animation (_animDelay)
 │       │   │   ├── WallOutline.jsx    # Wall polygon/segment renderer
+│       │   │   ├── WallJointHandles.jsx # Drag wall-joint circles when the Wall points tool is on (segment-walls only)
+│       │   │   ├── WallDimensionLabels.jsx # Per-segment feet/inches labels rendered along each wall midpoint
+│       │   │   ├── RoomBoundsHandles.jsx # East / south / SE corner handles that resize the floor rectangle (origin fixed) with grid-snap previews
 │       │   │   └── GridOverlay.jsx    # 6" snap grid (memoized)
 │       │   ├── upload/
 │       │   │   ├── AnalysisWorkflow.jsx # 6-step animated floor-plan pipeline overlay (guest + authed paths)
 │       │   │   └── RoomEditor.jsx     # Full-screen SVG zone editor: drag/resize/draw rooms (rectangle + polygon), edit names/dimensions/colors, native color picker, decoupled dimensions
 │       │   ├── studio/
-│       │   │   ├── StudioToolbar.jsx  # Undo/Redo/Grid/Validate/Auto-Arrange/2D/3D/Assistant panel toggle; keyboard shortcuts (? → portal); back link to project hub when scoped; project mode subtitle shows resolved project name
+│       │   │   ├── StudioToolbar.jsx  # Save / Undo / Redo / Grid / Resize floor / Wall points / Validate / Auto-Arrange / 2D-3D / Space Assistant; keyboard shortcuts (? → portal); back link to project hub when scoped
 │       │   │   ├── KeyboardShortcutsPopover.jsx  # Body portal for shortcuts (high z-index, avoids editor clipping)
-│       │   │   ├── EditorWorkspaceSidebar.jsx  # IDE-style two-part sidebar: far-left activity bar (icon navigation) + collapsible content panel for Spaces/Furniture/Materials/Layers/Views/Export (useRoomExport)
+│       │   │   ├── EditorWorkspaceSidebar.jsx  # IDE-style two-part sidebar: far-left activity bar (icon navigation) + collapsible content panel for Spaces/Furniture/Materials/Layers/Export (useRoomExport)
+│       │   │   ├── ProjectSpaceBottomBar.jsx # Project-editor bottom bar: All Spaces + interior/exterior chips + add-interior/exterior shortcuts
 │       │   │   ├── RoomSetupModal.jsx # Template + dimensions picker
 │       │   │   └── ZoneBottomBar.jsx  # Bottom room switcher + room box inspector/add-remove actions
 │       │   ├── catalog/
 │       │   │   └── CatalogPanel.jsx   # Search + category chips + product images + Recommended tab
 │       │   ├── viewer/
 │       │   │   ├── RoomViewer3D.jsx   # React Three Fiber — floor/walls/GLB furniture + OrbitControls + Suspense loading
+│       │   │   ├── ProjectViewer3D.jsx # Project-level 3D fallback preview: places linked rooms in relative bounding boxes (no per-space layout)
 │       │   │   ├── SmartFurnitureModel.jsx # Loads real GLBs from model_url; falls back to ProceduralFurniture when none exists
 │       │   │   └── ProceduralFurniture.jsx # Category-specific Three.js primitive models (sofa, bed, desk, chair, table, bookshelf, dresser, tv_stand, etc.) — no external API needed
 │       │   └── chatbot/
@@ -163,6 +171,7 @@ vision-studio/
 │   │   ├── furniture.js          # Catalog search + single item lookup + placements CRUD (with zone_id support)
 │   │   ├── layout.js             # LLM auto-placement + validation (uses shared overlapResolver)
 │   │   ├── chat.js               # Agentic chat route (15 tools via chatFunctions.js, multi-turn up to 5 rounds, guest/draft support)
+│   │   ├── projects.js           # CRUD for `projects` + `spaces`; auto-creates compatible `rooms` rows when a space has no `room_id`; in-memory fallback when project tables are missing
 │   │   ├── publicParse.js        # POST /api/public/parse-floorplan — stateless guest parse, no auth, no DB writes
 │   │   ├── models.js             # Meshy API v2 image-to-3D GLB generation with in-memory cache + background polling
 │   │   ├── recognition.js        # Room photo → DINO detection + SAM click-segment
@@ -220,9 +229,10 @@ All three services read from the root `.env` file.
 - `LOG_LEVEL` (debug/info/warn/error, default: `info`)
 
 Current hosted DB status (expected baseline):
-- Tables present: `providers`, `furniture_catalog`, `rooms`, `placements`, `layout_exports`, `chat_messages`
+- Tables present: `providers`, `furniture_catalog`, `rooms`, `placements`, `layout_exports`, `chat_messages`, `projects`, `spaces`
 - Catalog seed: 27 items
 - Providers seed: 4
+- `/api/status` checks all eight tables and reports per-table connectivity.
 
 ### Python (`python/.env`)
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
@@ -251,11 +261,15 @@ Store in `client/src/store/layoutStore.js` (wrapped with `zustand/persist` for d
 | `isChatOpen`            | `boolean`         | Chat panel visibility (defaults closed in editor) |
 | `undoStack`             | `array`           | Furniture state snapshots for undo           |
 | `redoStack`             | `array`           | Furniture state snapshots for redo           |
+| `roomWallsTool`         | `boolean`         | Studio canvas: draggable joints for segment-format `room.walls` (mutually exclusive with `roomResizeTool`) |
+| `roomResizeTool`        | `boolean`         | Studio canvas: resize floor handles on E/S/SE (origin fixed; mutually exclusive with `roomWallsTool`) |
 | `loadRoomFailed`        | `boolean`         | Last `loadRoom` failed (invalid id, API error, or missing draft); Studio redirects to `/studio` |
 
-Actions: `loadRoom`, `createRoom`, `createDraftRoom`, `clearDraft`, `saveDraftToAccount`, `saveRoomGeometry`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setProjectTheme`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`.
+Actions: `loadRoom`, `createRoom`, `createDraftRoom`, `clearDraft`, `saveDraftToAccount`, `saveProject`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setProjectTheme`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleRoomWallsTool`, `clearRoomWallsTool`, `toggleRoomResizeTool`, `clearRoomResizeTool`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `getActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`, `findOpenSlot`, `validate`.
 
 Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furnitureBelongsToZone`, `normalizeDetectedObjects`, `normalizeZoneObjects` — handle various zone/detection data shapes from the server.
+
+`saveProject` is an explicit-save action: it flushes pending debounced edits, then `PUT /api/rooms/:id` + `PUT /api/furniture/placements/:id` for every placement. Drafts delegate to `saveDraftToAccount` (caller is responsible for auth).
 
 ## API Routes
 
@@ -264,7 +278,7 @@ Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furn
 | Method | Route | Description |
 | --- | --- | --- |
 | GET | `/health` | Server health check (status, version, uptime, environment) |
-| GET | `/api/status` | Database connectivity check (table-by-table status, setup hints) |
+| GET | `/api/status` | Database connectivity check — short-circuits to `unconfigured` when env vars are missing/placeholder; otherwise probes all 8 tables in parallel with a 3.5s timeout each |
 | GET | `/api/proxy-image?url=` | CORS image proxy for WebGL textures (whitelisted domains: IKEA, Ashley) |
 
 ### Auth Routes
@@ -401,6 +415,8 @@ All tables use Row Level Security — users can only access their own data. The 
 - The pre-editor adjust/confirm step is the geometry source of truth: confirmed spaces persist normalized geometry on `project.floorplan.zones[]` and `project.spaces[].geometry` (`type`, `bbox`, optional polygon `points`, `source`) before entering the editor.
 - The studio canvas (`RoomCanvas.jsx`) renders polygon zones using Konva `Line` with the actual polygon points, not just bounding boxes. This allows non-rectangular rooms to display correctly in the editor.
 - The studio canvas supports room-focused editing: selecting a zone zooms the center pane to that room, constrains furniture placement to the selected room, and exposes draggable/resizable color-coded room boxes plus a bottom room inspector.
+- **Wall + floor editing in `RoomCanvas`** (gated by toolbar toggles in 2D mode): `Wall points` reveals draggable Konva joint handles for segment-format `room.walls` (snap to 6" grid, clamped to floor); `Resize floor` reveals orange E/S/SE handles that resize the floor rectangle (origin fixed, segment walls scale to the new box for preview). Toggles are mutually exclusive; `Esc` clears both. Wall edits commit via `updateRoom({ walls })`; floor edits commit via `updateRoom({ width, depth })`. `WallDimensionLabels` shows feet/inches along each segment.
+- **Explicit save**: `StudioToolbar` always exposes a `Save Project` button (`saveProject()` flushes pending debounced edits and persists every placement). Drafts route through `LoginModal` first, then run `saveDraftToAccount()`.
 - Client-side route changes reset the window scroll position to the top so navigation between Home, Upload, and Studio never preserves mid-page scroll offsets.
 - The homepage uses eased, staggered Framer Motion reveals with reduced-motion fallbacks so sections enter smoothly without abrupt jumps.
 - Toast notifications (`react-hot-toast`) are used throughout for all user-facing feedback (export success, validation results, add-to-room, etc.). Toasts use dark pill style matching the editorial theme.

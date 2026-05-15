@@ -1,124 +1,111 @@
 # Vision Studio
 
-Vision Studio is a full-stack spatial layout design application for uploading room photos or floor plans, generating AI-assisted room geometry, placing real furniture, previewing layouts in 2D and 3D, and exporting finished designs.
+Full-stack AI-assisted spatial layout: floor plans and room photos → detected geometry → IKEA/Ashley catalog furniture in a 2D Konva editor → 3D preview → JSON/SVG/DXF export. Capstone (CSE 115A, UCSC). For maintainers and agents, **[AGENTS.md](./AGENTS.md)** is the source of truth for structure, APIs, env vars, and behaviors.
 
-## Stack
+## Stack (summary)
 
-- Frontend: React + Vite + React Router + Tailwind CSS
-- Canvas: Konva + react-konva
-- 3D Viewer: React Three Fiber + drei
-- 3D Assets: Kenney Furniture Kit (CC0 / public domain, low-poly GLBs)
-- Backend: Express
-- AI Service: FastAPI
-- Data/Auth/Storage: Supabase
+| Area | Tech |
+|------|------|
+| App UI | React 18 + Vite 5 + React Router 6 + Tailwind 3 |
+| Canvas | Konva + react-konva |
+| State | Zustand (persist for guest drafts) |
+| 3D | React Three Fiber + drei; Kenney CC0 GLBs under `client/public/models/kenney/` via `server/services/kenneyMapping.js` |
+| API | Express 4 (ESM), Helmet, rate limits, `/api/proxy-image` |
+| AI (Node) | OpenAI `gpt-5.4` + tool calling (`server/services/llmRouter.js`) |
+| AI (Python) | FastAPI — floorplan parse, DINO+SAM room photo flow (`python/`) |
+| Data | Supabase (Postgres, Auth, Storage); in-memory fallback when DB/credentials unavailable |
 
-## Repo Layout
+Optional **marketing** site: Next.js in `marketing/` (see AGENTS.md).
+
+## Repo layout
 
 ```text
 vision-studio/
 ├── README.md
-├── AGENTS.md
-├── CLAUDE.md
-├── client/     # React + Vite frontend
-├── server/     # Express API
-├── python/     # FastAPI AI service
-└── supabase/   # SQL schema and setup assets
+├── AGENTS.md              # Full monorepo map, routes, env, DB, conventions
+├── client/                # React + Vite (:5173)
+├── server/                # Express API (:3001)
+├── python/                # FastAPI (:5001)
+├── marketing/             # Next.js landing (:3000)
+├── supabase/schema.sql    # Apply in Supabase SQL Editor (or server/scripts/applySchema.js)
+└── docs/
 ```
 
-## App Routes
+## Local setup
 
-- `/` — marketing / landing page
-- `/upload` — upload and analysis flow
-- `/studio` — design workspace
-- `/studio/:roomId` — room-specific studio session
-
-## Local Development
-
-### 1. Install dependencies
+### 1. Install
 
 ```bash
 cd client && npm install
 cd ../server && npm install
-cd ../python && pip install -r requirements.txt
+cd ../marketing && npm install   # optional
+cd ../python && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
 ```
 
-### 2. Configure environment variables
+### 2. Environment
 
-Create these files before running the app:
+- **Server + Python** load the **root** `.env` (copy from `.env.example`). Real `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` are required for persisted data; placeholder values (e.g. `your-project.supabase.co`) skip remote DB and run **in-memory demo mode** with fast `/api/status`.
+- **Client**: `client/.env.local` — `NEXT_PUBLIC_SUPABASE_*` (or `VITE_*` aliases), `VITE_API_URL=http://localhost:3001`.
+- **Marketing**: `marketing/.env.local` if you run the Next app.
 
-- `client/.env.local`
-- `root/.env`
-- `python/.env`
+### 3. Database (optional for full persistence)
 
-Typical values:
+Apply `supabase/schema.sql` in the Supabase SQL Editor, or:
 
 ```bash
-# client/.env.local
-NEXT_PUBLIC_SUPABASE_URL=...
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
-VITE_API_URL=http://localhost:3001
-
-# root/.env
-NEXT_PUBLIC_SUPABASE_URL=...
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
-SUPABASE_PUBLIC_ANON_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...
-OPENAI_API_KEY=...
-REPLICATE_API_TOKEN=...
-MESHY_API_KEY=...
-PORT=3001
-PYTHON_SERVICE_URL=http://localhost:5001
-
-# python/.env
-SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
-OPENAI_API_KEY=...
-REPLICATE_API_TOKEN=...
-PORT=5001
+node server/scripts/applySchema.js [DB_PASSWORD]
+cd server && node scripts/seedFurniture.js
 ```
 
-### 3. Run the services
+Verify: `cd server && node scripts/setup.js`
+
+### 4. Run (three processes)
 
 ```bash
-# frontend
-cd client && npm run dev
-
-# backend
+# Terminal 1 — API
 cd server && npm run dev
 
-# python AI service
-cd python && uvicorn app:app --host 0.0.0.0 --port 5001
+# Terminal 2 — UI
+cd client && npm run dev
+
+# Terminal 3 — Python AI (floorplan upload / recognition chain)
+cd python && source venv/bin/activate && uvicorn app:app --host 0.0.0.0 --port 5001 --reload
 ```
 
-Default local addresses:
+URLs: **5173** (client), **3001** (API), **5001** (Python). Health: `GET /health`, `GET http://localhost:5001/health`, `GET /api/status`.
 
-- Frontend: `http://localhost:5173`
-- Backend: `http://localhost:3001`
-- Python AI service: `http://localhost:5001`
+## Main app routes (client)
 
-## Core Features
+| Path | Purpose |
+|------|---------|
+| `/` | Landing |
+| `/login` | Auth |
+| `/upload` | Redirects to `/studio/new?startMode=upload` (wizard) |
+| `/studio/new` | New project wizard |
+| `/studio` | Project dashboard |
+| `/studio/:roomId` | Legacy single-room editor |
+| `/studio/project/:projectId` | Project hub |
+| `/studio/project/:id/vision` | Project vision intake |
+| `/studio/project/:id/confirm` | Confirmation / adjust spaces (`?mode=adjust`) |
+| `/studio/project/:id/editor` | Full-floorplan editor |
+| `/studio/project/:id/editor/:spaceId` | Editor scoped to a space |
+| `/studio/project/:id/chat` | Project assistant (full page) |
+| `/chat` | Global design inspiration chat |
 
-- Upload floor plans and room photos
-- AI-assisted floorplan parsing and object detection
-- Furniture catalog browsing and placement
-- 2D room editing with grid, snapping, and collision checks
-- 3D room preview with generated or catalog-backed models
-- Chat-driven layout assistance
-- Export to JSON, DXF, and SVG
+Navbar/footer are hidden on editor, vision, and project chat (see `client/src/App.jsx`).
 
-## Useful Commands
+## Useful commands
 
 ```bash
-cd server && npm run setup
-cd server && npm run seed
-cd server && npm run generate-models
+cd client && npx vite build              # production build check
+cd server && npm test                    # Vitest (needs real Supabase for full save/load)
+cd server && npm run test:watch
+cd marketing && npm run build && npm run lint
+node server/services/kenneyMapping.js    # verify catalog → Kenney GLB paths
 ```
 
-## Notes
+There is **no** `npm run generate-models` in this repo; optional 3D generation is the Meshy route under `/api/models` (see AGENTS.md).
 
-- The repository includes a legacy `app/` reference in documentation only; the active frontend lives in `client/`.
-- `.next/`, local env files, and dependency folders are ignored and should not be committed.
+## Credits — 3D assets
 
-## Credits / 3D Assets
-
-3D furniture models are from **Kenney's Furniture Kit** (https://kenney.nl/assets/furniture-kit), released under **CC0 / public domain**. Files live in `client/public/models/kenney/`. Per-item mappings from catalog rows to specific Kenney GLBs live in `server/services/kenneyMapping.js` (category defaults + per-item overrides). Run `node server/services/kenneyMapping.js` to verify every mapping resolves to a real file on disk.
+**Kenney Furniture Kit** — [kenney.nl/assets/furniture-kit](https://kenney.nl/assets/furniture-kit) (CC0 / public domain). Bundled under `client/public/models/kenney/`.

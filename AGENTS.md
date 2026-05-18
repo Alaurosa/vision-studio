@@ -33,6 +33,7 @@ Full-stack implementation — monorepo with React client, Express server, and Fa
 ```bash
 # Client (React + Vite)
 cd client && npm install && npm run dev     # Dev on :5173
+cd client && npm test                       # Vitest unit tests (catalog data, etc.)
 cd client && npx vite build                 # Production build (verify compiles)
 
 # Server (Express)
@@ -96,6 +97,8 @@ vision-studio/
 │       │   ├── projectCompat.js  # Frontend-only project compatibility layer (localStorage `vs-projects-v1`) + helper metadata for Phase 2 schema planning
 │       │   ├── chatRouting.js    # Global `/chat` intent routing helper (project/space name matching → Studio routes or suggestion options)
 │       │   └── visionGate.js    # Client-side check that whole-property vision (`globalVision.propertyVision` + style/mood rules) is complete
+│       ├── data/
+│       │   └── furnitureCatalog.js # Starter catalog: `FURNITURE_CATEGORIES`, `STARTER_FURNITURE_CATALOG`, lookup helpers (for future `FurnitureCatalogPanel`)
 │       ├── components/
 │       │   ├── project/
 │       │   │   └── ProjectVisionIntake.jsx   # Project Vision Assistant (`/studio/project/:id/vision`); `whole_project` chat → `globalVision`

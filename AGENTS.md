@@ -34,6 +34,7 @@ Full-stack implementation — monorepo with React/Vite client, separate Next.js 
 ```bash
 # Client (React + Vite)
 cd client && npm install && npm run dev     # Dev on :5173
+cd client && npm test                       # Vitest unit tests (catalog data, etc.)
 cd client && npx vite build                 # Production build (verify compiles)
 
 # Marketing app (Next.js)
@@ -108,6 +109,8 @@ vision-studio/
 │       │   ├── chatRouting.js    # Global `/chat` intent routing helper (project/space name matching → Studio routes or suggestion options)
 │       │   ├── roomWallMath.js   # Wall geometry helpers (snap/clamp/move wall joints, rectangle perimeter, segment scaling, polygon vs segment detection)
 │       │   └── visionGate.js    # Client-side check that whole-property vision (`globalVision.propertyVision` + style/mood rules) is complete
+│       ├── data/
+│       │   └── furnitureCatalog.js # Starter catalog: `FURNITURE_CATEGORIES`, `STARTER_FURNITURE_CATALOG`, lookup helpers (for future `FurnitureCatalogPanel`)
 │       ├── components/
 │       │   ├── project/
 │       │   │   └── ProjectVisionIntake.jsx   # Project Vision Assistant (`/studio/project/:id/vision`); `whole_project` chat → `globalVision`

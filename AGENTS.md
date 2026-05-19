@@ -63,6 +63,24 @@ cd server && node scripts/seedFurniture.js  # Seed IKEA + Ashley data
 cd server && node scripts/applySchema.js    # Apply schema.sql to Supabase
 ```
 
+## Client testing — starter furniture catalog
+
+Automated coverage lives under `client/src/**/__tests__/` (catalog data, filters, `FurnitureCatalogPanel`, `FurnitureCard`, `furniturePlacement`, `layoutStore` catalog selection, sidebar hint/clear).
+
+**Manual QA checklist (Furniture tab → RoomCanvas placement):**
+
+1. Open a project space in the editor (`RoomCanvas`, not project floorplan SVG mode).
+2. Open the **Furniture** tab in the left workspace sidebar.
+3. Search for an item (e.g. `queen`, `lamp`, or `vision`).
+4. Filter by category (e.g. **Tables**) and confirm the result count updates.
+5. Select a catalog card; confirm the sidebar shows **Selected: … Click the canvas to place.**
+6. Click inside the room canvas; confirm furniture appears at the click (grid-snapped, centered).
+7. Click again with the same item still selected; confirm repeat placement works.
+8. Press **Esc**; confirm catalog selection clears (canvas hint disappears).
+9. Use **Clear selection** in the sidebar; confirm the card is no longer highlighted.
+
+`RoomCanvas` click-to-place is covered by unit tests on placement helpers and store draft `addFurniture`; full Konva canvas interaction is manual-only.
+
 ## Monorepo Structure
 
 ```

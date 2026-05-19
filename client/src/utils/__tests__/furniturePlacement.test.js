@@ -37,6 +37,13 @@ describe('furniturePlacement', () => {
     expect(STARTER_FURNITURE_CATALOG[0]).toEqual(sample);
   });
 
+  it('assigns unique ids for repeated placements', () => {
+    const first = createPlacedFurnitureFromCatalogItem(sample, { x_inches: 12, y_inches: 12 });
+    const second = createPlacedFurnitureFromCatalogItem(sample, { x_inches: 48, y_inches: 48 });
+    expect(first.id).not.toBe(second.id);
+    expect(first.catalogItemId).toBe(second.catalogItemId);
+  });
+
   it('centers placement on the click position (grid-snapped)', () => {
     const placed = createPlacedFurnitureFromCatalogItem(
       sample,

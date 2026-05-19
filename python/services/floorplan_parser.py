@@ -598,9 +598,8 @@ async def parse_floorplan(image_bytes: bytes, content_type: str) -> dict:
     Parse a floor plan image to detect and segment individual rooms.
 
     Pipeline (priority order):
-    1. OpenAI Vision (gpt-5.4 → gpt-4o fallback) — best accuracy, grid + wall-snap
-    2. Grounding DINO + SAM 3 via Replicate — good but irregular polygons
-    3. OpenCV fallback — works offline but least accurate
+    1. OpenAI Vision (gpt-5.4) — best accuracy, grid + wall-snap
+    2. OpenCV fallback — works offline but least accurate
     """
     try:
         image_bytes = _prepare_floorplan_bytes(image_bytes, content_type)

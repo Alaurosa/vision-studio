@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import CatalogPanel from '@/components/catalog/CatalogPanel';
+import FurnitureCatalogPanel from '@/components/catalog/FurnitureCatalogPanel';
 import { useLayoutStore } from '@/store/layoutStore';
 import { useRoomExport } from '@/hooks/useRoomExport';
 
@@ -108,7 +108,7 @@ export default function EditorWorkspaceSidebar({ project, onNavigateToSpace }) {
               </div>
             )}
 
-            {tab === 'furniture' && <CatalogPanel />}
+            {tab === 'furniture' && <FurnitureCatalogPanel />}
 
             {tab === 'materials' && (
               <div className="p-5 text-sm text-[#5b5b5b] leading-relaxed">

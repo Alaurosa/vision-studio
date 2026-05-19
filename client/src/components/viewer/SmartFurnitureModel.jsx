@@ -3,17 +3,16 @@ import { useLoader } from '@react-three/fiber';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as THREE from 'three';
 import ProceduralFurniture from './ProceduralFurniture';
+import { resolveFurnitureModelUrl, resolveProceduralCategory } from '@/utils/furniture3d';
 
 /**
  * SmartFurnitureModel — renders a furniture item in 3D.
  *
  * Priority:
- *   1. If item.model_url is set, load and scale the GLB.
- *   2. Otherwise, use a category-specific procedural 3D model (sofa, bed, desk, etc.)
- *      built from Three.js primitives. No external API needed.
+ *   1. If model_url / modelUrl is set, load and scale the GLB (errors → procedural).
+ *   2. Otherwise, dimensionally accurate procedural shape from category + metadata.
  *
- * GLBs from item.model_url come from the catalog or Meshy generation; the procedural
- * fallback ensures we always have a recognizable shape without requiring paid APIs.
+ * External 3D generation APIs are not used here; catalog GLBs and primitives only.
  */
 
 function GLBModel({ url, w, d, h, rotationY = 0 }) {
@@ -71,18 +70,19 @@ class ModelErrorBoundary extends React.PureComponent {
 }
 
 export default function SmartFurnitureModel({ item, w, d, h, color }) {
+  const proceduralCategory = resolveProceduralCategory(item);
   const fallback = (
-    <ProceduralFurniture category={item.category} w={w} d={d} h={h} color={color} />
+    <ProceduralFurniture category={proceduralCategory} w={w} d={d} h={h} color={color} />
   );
 
-  // If no real GLB, use procedural directly (no loading, no network calls).
-  if (!item.model_url) return fallback;
+  const modelUrl = resolveFurnitureModelUrl(item);
+  if (!modelUrl) return fallback;
 
   return (
     <ModelErrorBoundary fallback={fallback}>
       <Suspense fallback={fallback}>
         <GLBModel
-          url={item.model_url}
+          url={modelUrl}
           w={w}
           d={d}
           h={h}

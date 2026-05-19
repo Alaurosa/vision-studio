@@ -248,6 +248,43 @@ function Loveseat({ w, d, h, color = '#d4b48c' }) {
   return <Sofa w={w} d={d} h={h} color={color} />;
 }
 
+/* ---- Floor lamp (starter "lighting" category) ---- */
+function Lamp({ w, d, h, color = '#c8b87a' }) {
+  const baseH = Math.max(h * 0.08, 0.04);
+  const poleH = h - baseH - h * 0.22;
+  const shadeH = h * 0.22;
+  const poleR = Math.min(w, d) * 0.06;
+  return (
+    <group>
+      <mesh castShadow receiveShadow position={[0, baseH / 2, 0]}>
+        <cylinderGeometry args={[w * 0.2, w * 0.22, baseH, 12]} />
+        <meshStandardMaterial color="#3a2f26" roughness={0.5} metalness={0.15} />
+      </mesh>
+      <mesh castShadow position={[0, baseH + poleH / 2, 0]}>
+        <cylinderGeometry args={[poleR, poleR, poleH, 8]} />
+        <meshStandardMaterial color={color} roughness={0.45} metalness={0.2} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[0, baseH + poleH + shadeH / 2, 0]}>
+        <cylinderGeometry args={[w * 0.28, w * 0.32, shadeH, 16, 1, true]} />
+        <meshStandardMaterial color={color} roughness={0.65} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  );
+}
+
+/* ---- Decor / rug (starter "decor" category) ---- */
+function Decor({ w, d, h, color = '#9c8b7a' }) {
+  const profileH = Math.max(h, 0.02);
+  return (
+    <group>
+      <mesh castShadow receiveShadow position={[0, profileH / 2, 0]}>
+        <boxGeometry args={[w, profileH, d]} />
+        <meshStandardMaterial color={color} roughness={0.85} />
+      </mesh>
+    </group>
+  );
+}
+
 const CATEGORY_MAP = {
   sofa: Sofa,
   loveseat: Loveseat,
@@ -262,6 +299,10 @@ const CATEGORY_MAP = {
   nightstand: Nightstand,
   tv_stand: TVStand,
   cabinet: Cabinet,
+  lamp: Lamp,
+  floor_lamp: Lamp,
+  decor: Decor,
+  rug: Decor,
 };
 
 /**

@@ -5,9 +5,12 @@ import { useLayoutStore } from '@/store/layoutStore';
 import { CATEGORY_COLORS } from '@/utils/constants';
 import { getRotatedBoundingBox } from '@/utils/scale';
 import SmartFurnitureModel from './SmartFurnitureModel';
+import {
+  getFurnitureRenderDimensionsInches,
+  INCHES_TO_METERS,
+} from '@/utils/furniture3d';
 
-// Inches → meters
-const IN_TO_M = 0.0254;
+const IN_TO_M = INCHES_TO_METERS;
 
 function LoadingOverlay() {
   return (
@@ -67,10 +70,11 @@ export default function RoomViewer3D() {
 
         {/* Furniture */}
         {furniture.map((it) => {
-          const fw = it.width * IN_TO_M;
-          const fd = it.depth * IN_TO_M;
-          const fh = (it.height || 30) * IN_TO_M;
-          const bbox = getRotatedBoundingBox(it.width || 0, it.depth || 0, it.rotation || 0);
+          const dimsIn = getFurnitureRenderDimensionsInches(it);
+          const fw = dimsIn.width * IN_TO_M;
+          const fd = dimsIn.depth * IN_TO_M;
+          const fh = dimsIn.height * IN_TO_M;
+          const bbox = getRotatedBoundingBox(dimsIn.width, dimsIn.depth, it.rotation || 0);
           const x = (it.x_inches + bbox.width / 2) * IN_TO_M;
           const z = (it.y_inches + bbox.depth / 2) * IN_TO_M;
           const color = it.color || CATEGORY_COLORS[it.category] || CATEGORY_COLORS.default;

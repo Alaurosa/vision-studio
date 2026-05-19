@@ -20,7 +20,7 @@ describe('FurnitureCatalogPanel', () => {
     }
   });
 
-  it('filters items by search query', () => {
+  it('filters items by search query (name)', () => {
     render(<FurnitureCatalogPanel />);
 
     fireEvent.change(screen.getByLabelText('Search furniture'), {
@@ -29,6 +29,40 @@ describe('FurnitureCatalogPanel', () => {
 
     expect(screen.getByText('Starter Queen Bed')).toBeInTheDocument();
     expect(screen.queryByText('Starter 3-Seat Sofa')).not.toBeInTheDocument();
+    expect(screen.getByText('1 piece')).toBeInTheDocument();
+  });
+
+  it('filters items by provider search', () => {
+    render(<FurnitureCatalogPanel />);
+
+    fireEvent.change(screen.getByLabelText('Search furniture'), {
+      target: { value: 'vision studio' },
+    });
+
+    expect(screen.getByText(`${STARTER_FURNITURE_CATALOG.length} pieces`)).toBeInTheDocument();
+  });
+
+  it('filters items by tag search', () => {
+    render(<FurnitureCatalogPanel />);
+
+    fireEvent.change(screen.getByLabelText('Search furniture'), {
+      target: { value: 'lamp' },
+    });
+
+    expect(screen.getByText('Starter Floor Lamp')).toBeInTheDocument();
+    expect(screen.getByText('1 piece')).toBeInTheDocument();
+  });
+
+  it('filters by category and search together', () => {
+    render(<FurnitureCatalogPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tables' }));
+    fireEvent.change(screen.getByLabelText('Search furniture'), {
+      target: { value: 'coffee' },
+    });
+
+    expect(screen.getByText('Starter Coffee Table')).toBeInTheDocument();
+    expect(screen.queryByText('Starter Dining Table')).not.toBeInTheDocument();
     expect(screen.getByText('1 piece')).toBeInTheDocument();
   });
 
@@ -65,6 +99,13 @@ describe('FurnitureCatalogPanel', () => {
     expect(card).toHaveAttribute('aria-pressed', 'true');
     expect(onSelectItem).toHaveBeenCalledTimes(1);
     expect(onSelectItem).toHaveBeenCalledWith(sample);
+    expect(onSelectItem.mock.calls[0][0]).toMatchObject({
+      id: sample.id,
+      dimensions: sample.dimensions,
+      footprint: sample.footprint,
+      modelStatus: sample.modelStatus,
+      tags: sample.tags,
+    });
   });
 
   it('uses controlled selectedItemId from the parent', () => {

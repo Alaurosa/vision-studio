@@ -24,4 +24,44 @@ describe('filterStarterFurnitureCatalog', () => {
     expect(results.length).toBeGreaterThan(0);
     expect(results.some((item) => item.tags.includes('living room'))).toBe(true);
   });
+
+  it('filters by furniture name', () => {
+    const results = filterStarterFurnitureCatalog(STARTER_FURNITURE_CATALOG, {
+      searchQuery: 'armchair',
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe('starter-armchair');
+  });
+
+  it('filters by provider label', () => {
+    const results = filterStarterFurnitureCatalog(STARTER_FURNITURE_CATALOG, {
+      searchQuery: 'vision studio',
+    });
+    expect(results).toHaveLength(STARTER_FURNITURE_CATALOG.length);
+  });
+
+  it('filters by tag text', () => {
+    const results = filterStarterFurnitureCatalog(STARTER_FURNITURE_CATALOG, {
+      searchQuery: 'bedroom',
+    });
+    expect(results.some((item) => item.id === 'starter-queen-bed')).toBe(true);
+    expect(results.some((item) => item.id === 'starter-dresser')).toBe(true);
+    expect(results.some((item) => item.id === 'starter-sofa-3seat')).toBe(false);
+  });
+
+  it('applies category and search together', () => {
+    const results = filterStarterFurnitureCatalog(STARTER_FURNITURE_CATALOG, {
+      categoryId: 'tables',
+      searchQuery: 'coffee',
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe('starter-coffee-table');
+  });
+
+  it('handles items with missing tags', () => {
+    const items = [{ ...STARTER_FURNITURE_CATALOG[0], tags: undefined }];
+    expect(
+      filterStarterFurnitureCatalog(items, { searchQuery: 'sofa' }),
+    ).toHaveLength(1);
+  });
 });

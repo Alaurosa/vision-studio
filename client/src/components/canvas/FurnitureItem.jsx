@@ -40,6 +40,13 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
     return () => clearTimeout(timer);
   }, []);
 
+  // Last rotation known to be valid during an in-progress gesture. Lets us
+  // snap back to the most-recent valid angle when the user tries to rotate
+  // past a wall or into another item, instead of letting the visual run free
+  // until release.
+  const lastValidRotationRef = useRef(rot);
+  useEffect(() => { lastValidRotationRef.current = rot; }, [rot]);
+
   const revertNode = () => {
     const node = groupRef.current;
     if (!node) return;
@@ -50,11 +57,11 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
     node.getLayer()?.batchDraw();
   };
 
-  const canCommitPatch = (patch) => {
+  const canCommitPatch = (patch, { silent = false } = {}) => {
     const nextItem = { ...item, ...patch };
     const box = getAABB(nextItem);
     if (!withinRoom(box, room)) {
-      onInvalidPlacement?.(`${item.name || 'Item'} would extend outside the room.`);
+      if (!silent) onInvalidPlacement?.(`${item.name || 'Item'} would extend outside the room.`);
       return false;
     }
 
@@ -64,7 +71,7 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
     });
 
     if (conflicts) {
-      onInvalidPlacement?.(`${item.name || 'Item'} would overlap another furniture item.`);
+      if (!silent) onInvalidPlacement?.(`${item.name || 'Item'} would overlap another furniture item.`);
       return false;
     }
 
@@ -74,12 +81,23 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
         && box.right <= placementBounds.right
         && box.bottom <= placementBounds.bottom;
       if (!insideZone) {
-        onInvalidPlacement?.(`${item.name || 'Item'} must stay inside the selected room.`);
+        if (!silent) onInvalidPlacement?.(`${item.name || 'Item'} must stay inside the selected room.`);
         return false;
       }
     }
 
     return true;
+  };
+
+  // Read the node's current visual state and produce a candidate patch with
+  // the rotation + recomputed top-left, without any silent clamping. Used by
+  // both the live transform handler and the final commit.
+  const proposePatchFromNode = (node) => {
+    const rotation = normalizeRotation(node.rotation());
+    const rotatedBox = getRotatedBoundingBox(item.width || 0, item.depth || 0, rotation);
+    const xInches = (node.x() - offsetX) / pxPerInch - rotatedBox.width / 2 + viewOriginX;
+    const yInches = (node.y() - offsetY) / pxPerInch - rotatedBox.depth / 2 + viewOriginY;
+    return { rotation, x_inches: xInches, y_inches: yInches };
   };
 
   const handleDragStart = (e) => {
@@ -140,20 +158,36 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
     setDragState({ isDragging: false, snapX: null, snapY: null });
   };
 
+  // Live rotation guard. Konva fires `transform` continuously while the user
+  // drags the rotate handle; here we reject any tick that would push the item
+  // outside the room or into another piece of furniture, snapping the node
+  // back to the last-known-valid rotation. Without this, an invalid rotation
+  // is visible mid-gesture and only snaps back on release (or, worse, gets
+  // silently shifted to fit by Math.max clamping on the position).
+  const handleTransform = (e) => {
+    e.cancelBubble = true;
+    const node = groupRef.current;
+    if (!node) return;
+    const patch = proposePatchFromNode(node);
+    if (canCommitPatch(patch, { silent: true })) {
+      lastValidRotationRef.current = patch.rotation;
+    } else {
+      node.rotation(lastValidRotationRef.current);
+      node.getLayer()?.batchDraw();
+    }
+  };
+
   const handleTransformEnd = (e) => {
     e.cancelBubble = true;
     const node = groupRef.current;
     if (!node) return;
-    const rotation = normalizeRotation(node.rotation());
-    const rotatedBox = getRotatedBoundingBox(item.width || 0, item.depth || 0, rotation);
-    const xInches = Math.max(0, (node.x() - offsetX) / pxPerInch - rotatedBox.width / 2 + viewOriginX);
-    const yInches = Math.max(0, (node.y() - offsetY) / pxPerInch - rotatedBox.depth / 2 + viewOriginY);
     node.scaleX(1);
     node.scaleY(1);
+    const raw = proposePatchFromNode(node);
     const patch = {
-      rotation,
-      x_inches: snapToGrid(xInches, GRID_SNAP_INCHES),
-      y_inches: snapToGrid(yInches, GRID_SNAP_INCHES),
+      rotation: raw.rotation,
+      x_inches: snapToGrid(raw.x_inches, GRID_SNAP_INCHES),
+      y_inches: snapToGrid(raw.y_inches, GRID_SNAP_INCHES),
     };
     if (!canCommitPatch(patch)) {
       revertNode();
@@ -176,6 +210,7 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
         onDragStart={handleDragStart}
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
+        onTransform={handleTransform}
         onTransformEnd={handleTransformEnd}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}

@@ -33,6 +33,7 @@ Full-stack implementation — monorepo with React client, Express server, and Fa
 ```bash
 # Client (React + Vite)
 cd client && npm install && npm run dev     # Dev on :5173
+cd client && npm test                       # Vitest unit tests (catalog data, etc.)
 cd client && npx vite build                 # Production build (verify compiles)
 
 # Server (Express)
@@ -91,11 +92,14 @@ vision-studio/
 │       ├── utils/
 │       │   ├── constants.js      # Grid snap, clearance, category colors/labels, room templates, zone colors (16 presets + random generator)
 │       │   ├── scale.js          # px↔inches conversion, snap-to-grid, rotation helpers, inchesToFeet formatter
+│       │   ├── furnitureDisplay.js # formatFurnitureDimensions, provider/model status labels for catalog cards
 │       │   ├── collision.js      # AABB detection (arbitrary rotation), overlap check, room bounds validation
 │       │   ├── floorplanGeometry.js # Shared floorplan geometry normalization for project-level 2D/3D overlays (rect + polygon)
 │       │   ├── projectCompat.js  # Frontend-only project compatibility layer (localStorage `vs-projects-v1`) + helper metadata for Phase 2 schema planning
 │       │   ├── chatRouting.js    # Global `/chat` intent routing helper (project/space name matching → Studio routes or suggestion options)
 │       │   └── visionGate.js    # Client-side check that whole-property vision (`globalVision.propertyVision` + style/mood rules) is complete
+│       ├── data/
+│       │   └── furnitureCatalog.js # Starter catalog: `FURNITURE_CATEGORIES`, `STARTER_FURNITURE_CATALOG`, lookup helpers (for future `FurnitureCatalogPanel`)
 │       ├── components/
 │       │   ├── project/
 │       │   │   └── ProjectVisionIntake.jsx   # Project Vision Assistant (`/studio/project/:id/vision`); `whole_project` chat → `globalVision`
@@ -121,7 +125,8 @@ vision-studio/
 │       │   │   ├── RoomSetupModal.jsx # Template + dimensions picker
 │       │   │   └── ZoneBottomBar.jsx  # Bottom room switcher + room box inspector/add-remove actions
 │       │   ├── catalog/
-│       │   │   └── CatalogPanel.jsx   # Search + category chips + product images + Recommended tab
+│       │   │   ├── CatalogPanel.jsx   # Search + category chips + product images + Recommended tab (API-backed)
+│       │   │   └── FurnitureCard.jsx  # Reusable starter-catalog card (name, category, dimensions, preview; for future panel)
 │       │   ├── viewer/
 │       │   │   ├── RoomViewer3D.jsx   # React Three Fiber — floor/walls/GLB furniture + OrbitControls + Suspense loading
 │       │   │   └── SmartFurnitureModel.jsx # Loads model_url GLBs or backfills via Meshy from product images

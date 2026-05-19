@@ -17,6 +17,9 @@ const TABS = [
 export default function EditorWorkspaceSidebar({ project, onNavigateToSpace }) {
   const [tab, setTab] = useState('furniture');
   const furnitureItems = useLayoutStore((s) => s.furniture);
+  const selectedCatalogItem = useLayoutStore((s) => s.selectedCatalogItem);
+  const setSelectedCatalogItem = useLayoutStore((s) => s.setSelectedCatalogItem);
+  const clearSelectedCatalogItem = useLayoutStore((s) => s.clearSelectedCatalogItem);
   const { runExport, exporting, roomReady } = useRoomExport();
 
   const spacesInterior = useMemo(
@@ -108,7 +111,29 @@ export default function EditorWorkspaceSidebar({ project, onNavigateToSpace }) {
               </div>
             )}
 
-            {tab === 'furniture' && <FurnitureCatalogPanel />}
+            {tab === 'furniture' && (
+              <div className="flex min-h-0 flex-1 flex-col">
+                {selectedCatalogItem && (
+                  <div className="shrink-0 border-b border-[rgba(0,0,0,0.08)] bg-[#eef4f7] px-4 py-2.5">
+                    <p className="text-[11px] leading-relaxed text-[#004aad]">
+                      <span className="font-medium text-[#171717]">Selected:</span>{' '}
+                      {selectedCatalogItem.name}. Click the canvas to place.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={clearSelectedCatalogItem}
+                      className="mt-1.5 text-[10px] uppercase tracking-[0.12em] text-[#5b5b5b] underline hover:text-[#171717]"
+                    >
+                      Clear selection
+                    </button>
+                  </div>
+                )}
+                <FurnitureCatalogPanel
+                  selectedItemId={selectedCatalogItem?.id ?? null}
+                  onSelectItem={setSelectedCatalogItem}
+                />
+              </div>
+            )}
 
             {tab === 'materials' && (
               <div className="p-5 text-sm text-[#5b5b5b] leading-relaxed">

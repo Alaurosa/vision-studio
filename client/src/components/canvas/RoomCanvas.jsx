@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Stage, Layer, Rect, Group, Text, Line, Circle } from 'react-konva';
 import { useLayoutStore } from '@/store/layoutStore';
 import { computeRotation, snapToGrid, inchesToFeet } from '@/utils/scale';
+import { getAABB, overlaps, withinRoom } from '@/utils/collision';
+import { createPlacedFurnitureFromCatalogItem } from '@/utils/furniturePlacement';
 import FurnitureItem from './FurnitureItem';
 import GridOverlay from './GridOverlay';
 import WallOutline from './WallOutline';
@@ -54,6 +56,7 @@ export default function RoomCanvas() {
     roomWallsTool, roomResizeTool,
     selectFurniture, clearSelection, updateFurniture, removeFurniture, setActiveZone, updateZone, getVisibleFurniture,
     updateRoom,
+    selectedCatalogItem,
   } = useLayoutStore();
 
   // Resize observer
@@ -126,8 +129,19 @@ export default function RoomCanvas() {
 
     // Escape exits room resize / wall-point modes, then deselects furniture
     if (e.key === 'Escape') {
-      const { roomWallsTool, roomResizeTool, clearRoomWallsTool, clearRoomResizeTool } =
-        useLayoutStore.getState();
+      const {
+        selectedCatalogItem,
+        clearSelectedCatalogItem,
+        roomWallsTool,
+        roomResizeTool,
+        clearRoomWallsTool,
+        clearRoomResizeTool,
+        clearSelection,
+      } = useLayoutStore.getState();
+      if (selectedCatalogItem) {
+        clearSelectedCatalogItem();
+        return;
+      }
       if (roomWallsTool) clearRoomWallsTool();
       if (roomResizeTool) clearRoomResizeTool();
       clearSelection();
@@ -234,6 +248,66 @@ export default function RoomCanvas() {
     warningTimeoutRef.current = window.setTimeout(() => setPlacementWarning(''), 2200);
   }, []);
 
+  const handleCatalogPlacementClick = useCallback(
+    async (e) => {
+      const cat = useLayoutStore.getState().selectedCatalogItem;
+      const currentRoom = useLayoutStore.getState().room;
+      if (!cat || !currentRoom || e.evt.button !== 0) return;
+
+      const stage = stageRef.current;
+      if (!stage) return;
+      const pointer = stage.getRelativePointerPosition();
+      if (pointer == null) return;
+
+      const inchX = focusBox[0] + (pointer.x - roomOffsetX) / pxPerInch;
+      const inchY = focusBox[1] + (pointer.y - roomOffsetY) / pxPerInch;
+
+      const draftPlacement = createPlacedFurnitureFromCatalogItem(cat, {
+        x_inches: inchX,
+        y_inches: inchY,
+      });
+
+      const box = getAABB(draftPlacement);
+      const layoutRoom = roomForLayout || currentRoom;
+      if (!withinRoom(box, layoutRoom)) {
+        showPlacementWarning(`${draftPlacement.name || 'Item'} would extend outside the room.`);
+        return;
+      }
+
+      if (placementBounds) {
+        const insideZone =
+          box.left >= placementBounds.left
+          && box.top >= placementBounds.top
+          && box.right <= placementBounds.right
+          && box.bottom <= placementBounds.bottom;
+        if (!insideZone) {
+          showPlacementWarning('Place inside the selected room area.');
+          return;
+        }
+      }
+
+      const clash = visibleFurniture.some((f) => overlaps(box, getAABB(f)));
+      if (clash) {
+        showPlacementWarning('That spot overlaps another furniture item.');
+        return;
+      }
+
+      e.cancelBubble = true;
+      const placed = await useLayoutStore.getState().addFurniture(draftPlacement);
+      if (placed?.id) useLayoutStore.getState().selectFurniture(placed.id);
+    },
+    [
+      focusBox,
+      roomOffsetX,
+      roomOffsetY,
+      pxPerInch,
+      placementBounds,
+      visibleFurniture,
+      roomForLayout,
+      showPlacementWarning,
+    ],
+  );
+
   return (
     <div ref={wrapRef} className="relative w-full h-full bg-surface-800" style={{ touchAction: 'none', userSelect: 'none' }}>
       {/* Corner metadata */}
@@ -248,6 +322,12 @@ export default function RoomCanvas() {
       {placementWarning && (
         <div className="absolute top-4 right-4 z-10 rounded-md border border-red-500 bg-surface-900/95 px-3 py-2 text-xs text-red-400 shadow-lg backdrop-blur-sm">
           {placementWarning}
+        </div>
+      )}
+      {selectedCatalogItem && (
+        <div className="absolute top-14 left-4 z-10 max-w-[min(90vw,20rem)] rounded-md border border-[#004aad]/35 bg-[#eef4f7]/95 px-3 py-2 text-[11px] text-[#004aad] shadow-sm backdrop-blur-sm pointer-events-none">
+          Selected: <span className="font-medium text-[#171717]">{selectedCatalogItem.name}</span>. Click the canvas to place.
+          <span className="block text-[10px] text-[#5b5b5b] mt-1">Esc clears catalog selection.</span>
         </div>
       )}
       {roomResizeTool && room?.width > 0 && (
@@ -454,6 +534,20 @@ export default function RoomCanvas() {
             );
           })}
         </Layer>
+
+        {/* Click-to-place starter catalog (under furniture so placed items stay draggable) */}
+        {selectedCatalogItem && focusWidth > 0 && focusDepth > 0 && (
+          <Layer>
+            <Rect
+              x={roomOffsetX}
+              y={roomOffsetY}
+              width={focusPxW}
+              height={focusPxH}
+              fill="transparent"
+              onMouseDown={handleCatalogPlacementClick}
+            />
+          </Layer>
+        )}
 
         {/* Furniture */}
         <Layer>

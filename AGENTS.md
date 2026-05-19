@@ -94,6 +94,7 @@ vision-studio/
 │       │   ├── scale.js          # px↔inches conversion, snap-to-grid, rotation helpers, inchesToFeet formatter
 │       │   ├── furnitureDisplay.js # formatFurnitureDimensions, provider/model status labels for catalog cards
 │       │   ├── furnitureCatalogFilters.js # filterStarterFurnitureCatalog for FurnitureCatalogPanel search/category
+│       │   ├── furniturePlacement.js   # createPlacedFurnitureFromCatalogItem, getFurnitureFootprintSize (catalog → placement)
 │       │   ├── collision.js      # AABB detection (arbitrary rotation), overlap check, room bounds validation
 │       │   ├── floorplanGeometry.js # Shared floorplan geometry normalization for project-level 2D/3D overlays (rect + polygon)
 │       │   ├── projectCompat.js  # Frontend-only project compatibility layer (localStorage `vs-projects-v1`) + helper metadata for Phase 2 schema planning
@@ -253,8 +254,9 @@ Store in `client/src/store/layoutStore.js` (wrapped with `zustand/persist` for d
 | `undoStack`             | `array`           | Furniture state snapshots for undo           |
 | `redoStack`             | `array`           | Furniture state snapshots for redo           |
 | `loadRoomFailed`        | `boolean`         | Last `loadRoom` failed (invalid id, API error, or missing draft); Studio redirects to `/studio` |
+| `selectedCatalogItem`   | `object \| null`  | Starter catalog template queued for click-to-place on `RoomCanvas` (session-only, not persisted) |
 
-Actions: `loadRoom`, `createRoom`, `createDraftRoom`, `clearDraft`, `saveDraftToAccount`, `saveRoomGeometry`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setProjectTheme`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`.
+Actions: `loadRoom`, `createRoom`, `createDraftRoom`, `clearDraft`, `saveDraftToAccount`, `saveRoomGeometry`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setSelectedCatalogItem`, `clearSelectedCatalogItem`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setProjectTheme`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`.
 
 Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furnitureBelongsToZone`, `normalizeDetectedObjects`, `normalizeZoneObjects` — handle various zone/detection data shapes from the server.
 

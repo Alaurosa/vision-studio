@@ -66,4 +66,26 @@ describe('FurnitureCatalogPanel', () => {
     expect(onSelectItem).toHaveBeenCalledTimes(1);
     expect(onSelectItem).toHaveBeenCalledWith(sample);
   });
+
+  it('uses controlled selectedItemId from the parent', () => {
+    const sample = STARTER_FURNITURE_CATALOG[1];
+    const { rerender } = render(
+      <FurnitureCatalogPanel selectedItemId={sample.id} onSelectItem={() => {}} />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: `Select ${sample.name}` }),
+    ).toHaveAttribute('aria-pressed', 'true');
+
+    rerender(
+      <FurnitureCatalogPanel
+        selectedItemId={STARTER_FURNITURE_CATALOG[0].id}
+        onSelectItem={() => {}}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: `Select ${STARTER_FURNITURE_CATALOG[0].name}` }),
+    ).toHaveAttribute('aria-pressed', 'true');
+  });
 });

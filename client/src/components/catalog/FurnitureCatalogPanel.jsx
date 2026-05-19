@@ -10,12 +10,14 @@ import { filterStarterFurnitureCatalog } from '@/utils/furnitureCatalogFilters';
 /**
  * @param {{
  *   onSelectItem?: (item: import('@/data/furnitureCatalog.js').FurnitureCatalogItem) => void,
+ *   selectedItemId?: string | null,
  * }} props
  */
-export default function FurnitureCatalogPanel({ onSelectItem }) {
+export default function FurnitureCatalogPanel({ onSelectItem, selectedItemId: selectedItemIdProp }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryId, setCategoryId] = useState('');
-  const [selectedItemId, setSelectedItemId] = useState(null);
+  const [internalSelectedItemId, setInternalSelectedItemId] = useState(null);
+  const selectedItemId = selectedItemIdProp ?? internalSelectedItemId;
 
   const filteredItems = useMemo(
     () =>
@@ -27,7 +29,9 @@ export default function FurnitureCatalogPanel({ onSelectItem }) {
   );
 
   const handleSelect = (item) => {
-    setSelectedItemId(item.id);
+    if (selectedItemIdProp == null) {
+      setInternalSelectedItemId(item.id);
+    }
     onSelectItem?.(item);
   };
 

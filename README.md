@@ -98,7 +98,9 @@ Navbar/footer are hidden on editor, vision, and project chat (see `client/src/Ap
 
 ```bash
 cd client && npx vite build              # production build check
-cd server && npm test                    # Vitest (needs real Supabase for full save/load)
+cd server && npm install                 # Vitest + Supertest
+cd server && npm run test:e2e            # API E2E smoke (works in demo/fallback mode)
+cd server && npm test                    # E2E + save/load (save/load skips without real Supabase)
 cd server && npm run test:watch
 cd marketing && npm run build && npm run lint
 node server/services/kenneyMapping.js    # verify catalog → Kenney GLB paths

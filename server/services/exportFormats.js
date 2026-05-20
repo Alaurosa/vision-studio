@@ -28,6 +28,7 @@ export function buildLayoutJSON(room, placements) {
       rotation: p.rotation,
       color: p.color,
       custom: p.custom,
+      image_url: p.image_url || null,
       model_url: p.model_url || null,
     })),
   };

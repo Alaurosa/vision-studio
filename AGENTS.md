@@ -44,7 +44,8 @@ cd marketing && npm run lint                # ESLint
 # Server (Express)
 cd server && npm install && npm run dev     # Dev on :3001 (nodemon)
 cd server && npm start                      # Production start
-cd server && npm test                       # Vitest smoke tests (save/load against live Supabase)
+cd server && npm test                       # Vitest (save/load when real Supabase creds + E2E smoke)
+cd server && npm run test:e2e               # API E2E smoke (works in fallback/demo mode)
 cd server && npm run test:watch             # Watch mode
 
 # Setup verification (checks env, DB, seeds catalog)
@@ -119,9 +120,9 @@ vision-studio/
 │       │   │   ├── Navbar.jsx         # Top nav (Home/New project/Studio/Chat), scroll-aware blur, mobile hamburger, skip-to-content
 │       │   │   └── Footer.jsx         # Editorial 4-column footer with semantic HTML (hidden on /studio routes)
 │       │   ├── canvas/
-│       │   │   ├── RoomCanvas.jsx     # Konva Stage with zoom/pan, room-zone overlays, snap guides, draggable wall joints and resize-floor handles when toggled
+│       │   │   ├── RoomCanvas.jsx     # Konva Stage with zoom/pan, catalog drag/drop placement, selected-item move/size/rotation controls, room-zone overlays, snap guides, draggable wall joints and resize-floor handles when toggled
 │       │   │   ├── ProjectCanvas.jsx  # Full-floorplan SVG preview for project mode (interior/exterior overlays, Color Overlay toggle, click-to-select)
-│       │   │   ├── FurnitureItem.jsx  # Draggable/rotatable Konva Group with Transformer, hover states, staggered fade-in animation (_animDelay)
+│       │   │   ├── FurnitureItem.jsx  # Draggable/resizable/rotatable Konva Group with Transformer, hover states, staggered fade-in animation (_animDelay)
 │       │   │   ├── WallOutline.jsx    # Wall polygon/segment renderer
 │       │   │   ├── WallJointHandles.jsx # Drag wall-joint circles when the Wall points tool is on (segment-walls only)
 │       │   │   ├── WallDimensionLabels.jsx # Per-segment feet/inches labels rendered along each wall midpoint
@@ -138,7 +139,7 @@ vision-studio/
 │       │   │   ├── RoomSetupModal.jsx # Template + dimensions picker
 │       │   │   └── ZoneBottomBar.jsx  # Bottom room switcher + room box inspector/add-remove actions
 │       │   ├── catalog/
-│       │   │   └── CatalogPanel.jsx   # Search + category chips + product images + Recommended tab
+│       │   │   └── CatalogPanel.jsx   # Search + category chips + product images + Recommended tab; click-add or drag items into RoomCanvas
 │       │   ├── viewer/
 │       │   │   ├── RoomViewer3D.jsx   # React Three Fiber — floor/walls/GLB furniture + OrbitControls + Suspense loading
 │       │   │   ├── ProjectViewer3D.jsx # Project-level 3D fallback preview: places linked rooms in relative bounding boxes (no per-space layout)
@@ -413,7 +414,7 @@ Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furn
 - **`rooms`** — User rooms with walls (jsonb), dimensions, floor plan/photo URLs, detected_objects (jsonb), zones (jsonb array of sub-rooms); RLS: own rooms only
 - **`projects`** — User projects/floorplans with `property_type`, `scope`, `global_vision`, `status`; RLS: own projects only
 - **`spaces`** — Project-level interior/exterior space structure linked to existing `rooms` via nullable `room_id`; includes `category`, `space_vision`, `placeholder_mode`; RLS: via owning project
-- **`placements`** — Furniture placed in rooms with position, rotation, color, optional zone_id for sub-room assignment; RLS: via room ownership join
+- **`placements`** — Furniture placed in rooms with position, rotation, color, optional `image_url` / `model_url`, optional `zone_id` for sub-room assignment; GET `/api/rooms` enriches missing media URLs from `furniture_catalog` when `catalog_id` is set; RLS: via room ownership join
 - **`layout_exports`** — Archived JSON exports with schema_version; RLS: via room ownership join
 - **`chat_messages`** — Chat history per room with role, content, tool_calls (jsonb), model_used; RLS: via room ownership join
 
@@ -438,6 +439,8 @@ All tables use Row Level Security — users can only access their own data. The 
 
 ## Notable Behaviors
 
+- Furniture can be click-added from the catalog to the next open slot or dragged directly from `CatalogPanel` into `RoomCanvas`; drop coordinates respect pan/zoom and focused sub-room bounds.
+- Furniture can be moved by dragging, keyboard arrows, and selected-item nudge buttons; selected items also expose width/depth/height inputs and Konva resize handles for custom simple-block dimensions.
 - Furniture can be rotated freely in the 2D editor via the Konva transformer handle, 15° toolbar nudges, or the in-canvas rotation slider.
 - The 3D viewer renders furniture using `SmartFurnitureModel`, which now **defaults to loading a Kenney CC0 GLB** resolved from each catalog item's `model_url` (populated at seed time by `resolveModelUrl` in `server/services/kenneyMapping.js`). Models are uniform-scaled to 95% of the item's declared `width × depth × height`, centered on the group origin so they sit on the floor, and support a `model_rotation_y` override for one-off facing fixes. `ProceduralFurniture` — category-specific 3D models built from Three.js primitives (sofas have cushions + arms, beds have headboards + pillows, bookshelves have shelves, desks have side panels, TVs sit on stands, etc.) — remains the graceful fallback whenever `model_url` is null or GLB loading fails.
 - The legacy Meshy v2 image-to-3D route (`/api/models/*`) remains available for future GLB generation but is no longer invoked by the client; the procedural approach covers all catalog items by category, and it now sits two layers removed from the default render path behind real Kenney GLBs.
@@ -453,7 +456,7 @@ All tables use Row Level Security — users can only access their own data. The 
 - Toast notifications (`react-hot-toast`) are used throughout for all user-facing feedback (export success, validation results, add-to-room, etc.). Toasts use dark pill style matching the editorial theme.
 - All pages have proper `<title>` and `<meta description>` via `react-helmet-async` for SEO.
 - A 404 page is shown for unknown routes instead of a silent redirect.
-- All destructive actions (room delete) use a styled `ConfirmModal` instead of `window.confirm`.
+- Destructive confirmations use `ConfirmModal` (project dashboard delete, draft discard, room delete elsewhere).
 - The server uses `helmet` for security headers, `express-rate-limit` for rate limiting (120 req/min general, 20/15min for auth), and graceful shutdown on SIGTERM/SIGINT with 10s forced exit timeout.
 - Structured logging (`services/logger.js`) replaces raw `console.log/error` in server code. Request logging warns on slow (>2s) or error (≥400) responses.
 - The build uses manual Rollup chunks to split React, Konva, Three.js, Framer Motion, and Supabase into separate vendor bundles for optimal caching.

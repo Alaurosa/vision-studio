@@ -148,6 +148,8 @@ export const useLayoutStore = create(
       undoStack: [],
       redoStack: [],
       loadRoomFailed: false,
+      /** Starter catalog item queued for click-to-place on RoomCanvas (not persisted). */
+      selectedCatalogItem: null,
 
       // ---------- room ----------
       loadRoom: async (roomId) => {
@@ -187,6 +189,7 @@ export const useLayoutStore = create(
             patch.zones = [];
             patch.activeZoneId = null;
             patch.recommendedItems = [];
+            patch.selectedCatalogItem = null;
           }
           return patch;
         });
@@ -311,6 +314,20 @@ export const useLayoutStore = create(
           const { data } = await api.post('/api/furniture/placements', { ...item, room_id: room.id });
           const placement = {
             ...data,
+            ...(item.catalogItemId != null
+              ? {
+                  catalogItemId: item.catalogItemId,
+                  dimensions: item.dimensions,
+                  footprint: item.footprint,
+                  previewImageUrl: item.previewImageUrl,
+                  modelUrl: item.modelUrl,
+                  modelStatus: item.modelStatus,
+                  tags: item.tags,
+                  sourceUrl: item.sourceUrl,
+                  x: item.x_inches ?? item.x,
+                  y: item.y_inches ?? item.y,
+                }
+              : {}),
             image_url: item.image_url || data.image_url || null,
             model_url: item.model_url || data.model_url || null,
           };
@@ -388,6 +405,9 @@ export const useLayoutStore = create(
 
       setRecommendedItems: (items) => set({ recommendedItems: items || [] }),
       clearRecommendedItems: () => set({ recommendedItems: [] }),
+
+      setSelectedCatalogItem: (item) => set({ selectedCatalogItem: item || null }),
+      clearSelectedCatalogItem: () => set({ selectedCatalogItem: null }),
 
       // ---------- ui ----------
       setViewMode: (mode) => set({ viewMode: mode }),

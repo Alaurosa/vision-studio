@@ -34,6 +34,7 @@ Full-stack implementation — monorepo with React/Vite client, separate Next.js 
 ```bash
 # Client (React + Vite)
 cd client && npm install && npm run dev     # Dev on :5173
+cd client && npm test                       # Vitest unit tests (catalog data, etc.)
 cd client && npx vite build                 # Production build (verify compiles)
 
 # Marketing app (Next.js)
@@ -44,8 +45,7 @@ cd marketing && npm run lint                # ESLint
 # Server (Express)
 cd server && npm install && npm run dev     # Dev on :3001 (nodemon)
 cd server && npm start                      # Production start
-cd server && npm test                       # Vitest (save/load when real Supabase creds + E2E smoke)
-cd server && npm run test:e2e               # API E2E smoke (works in fallback/demo mode)
+cd server && npm test                       # Vitest smoke tests (save/load against live Supabase)
 cd server && npm run test:watch             # Watch mode
 
 # Setup verification (checks env, DB, seeds catalog)
@@ -62,6 +62,24 @@ uvicorn app:app --host 0.0.0.0 --port 5001 --reload
 cd server && node scripts/seedFurniture.js  # Seed IKEA + Ashley data
 cd server && node scripts/applySchema.js    # Apply schema.sql to Supabase
 ```
+
+## Client testing — starter furniture catalog
+
+Automated coverage lives under `client/src/**/__tests__/` (catalog data, filters, `FurnitureCatalogPanel`, `FurnitureCard`, `furniturePlacement`, `layoutStore` catalog selection, sidebar hint/clear).
+
+**Manual QA checklist (Furniture tab → RoomCanvas placement):**
+
+1. Open a project space in the editor (`RoomCanvas`, not project floorplan SVG mode).
+2. Open the **Furniture** tab in the left workspace sidebar.
+3. Search for an item (e.g. `queen`, `lamp`, or `vision`).
+4. Filter by category (e.g. **Tables**) and confirm the result count updates.
+5. Select a catalog card; confirm the sidebar shows **Selected: … Click the canvas to place.**
+6. Click inside the room canvas; confirm furniture appears at the click (grid-snapped, centered).
+7. Click again with the same item still selected; confirm repeat placement works.
+8. Press **Esc**; confirm catalog selection clears (canvas hint disappears).
+9. Use **Clear selection** in the sidebar; confirm the card is no longer highlighted.
+
+`RoomCanvas` click-to-place is covered by unit tests on placement helpers and store draft `addFurniture`; full Konva canvas interaction is manual-only.
 
 ## Monorepo Structure
 
@@ -103,12 +121,17 @@ vision-studio/
 │       ├── utils/
 │       │   ├── constants.js      # Grid snap, clearance, category colors/labels, room templates, zone colors (16 presets + random generator)
 │       │   ├── scale.js          # px↔inches conversion, snap-to-grid, rotation helpers, inchesToFeet formatter
+│       │   ├── furnitureDisplay.js # formatFurnitureDimensions, provider/model status labels for catalog cards
+│       │   ├── furnitureCatalogFilters.js # filterStarterFurnitureCatalog for FurnitureCatalogPanel search/category
+│       │   ├── furniturePlacement.js   # createPlacedFurnitureFromCatalogItem, getFurnitureFootprintSize (catalog → placement)
 │       │   ├── collision.js      # AABB detection (arbitrary rotation), overlap check, room bounds validation
 │       │   ├── floorplanGeometry.js # Shared floorplan geometry normalization for project-level 2D/3D overlays (rect + polygon)
 │       │   ├── projectCompat.js  # Frontend-only project compatibility layer (localStorage `vs-projects-v1`) + helper metadata for Phase 2 schema planning
 │       │   ├── chatRouting.js    # Global `/chat` intent routing helper (project/space name matching → Studio routes or suggestion options)
 │       │   ├── roomWallMath.js   # Wall geometry helpers (snap/clamp/move wall joints, rectangle perimeter, segment scaling, polygon vs segment detection)
 │       │   └── visionGate.js    # Client-side check that whole-property vision (`globalVision.propertyVision` + style/mood rules) is complete
+│       ├── data/
+│       │   └── furnitureCatalog.js # Starter catalog: `FURNITURE_CATEGORIES`, `STARTER_FURNITURE_CATALOG`, lookup helpers (for future `FurnitureCatalogPanel`)
 │       ├── components/
 │       │   ├── project/
 │       │   │   └── ProjectVisionIntake.jsx   # Project Vision Assistant (`/studio/project/:id/vision`); `whole_project` chat → `globalVision`
@@ -120,9 +143,9 @@ vision-studio/
 │       │   │   ├── Navbar.jsx         # Top nav (Home/New project/Studio/Chat), scroll-aware blur, mobile hamburger, skip-to-content
 │       │   │   └── Footer.jsx         # Editorial 4-column footer with semantic HTML (hidden on /studio routes)
 │       │   ├── canvas/
-│       │   │   ├── RoomCanvas.jsx     # Konva Stage with zoom/pan, catalog drag/drop placement, selected-item move/size/rotation controls, room-zone overlays, snap guides, draggable wall joints and resize-floor handles when toggled
+│       │   │   ├── RoomCanvas.jsx     # Konva Stage with zoom/pan, room-zone overlays, snap guides, draggable wall joints and resize-floor handles when toggled
 │       │   │   ├── ProjectCanvas.jsx  # Full-floorplan SVG preview for project mode (interior/exterior overlays, Color Overlay toggle, click-to-select)
-│       │   │   ├── FurnitureItem.jsx  # Draggable/resizable/rotatable Konva Group with Transformer, hover states, staggered fade-in animation (_animDelay)
+│       │   │   ├── FurnitureItem.jsx  # Draggable/rotatable Konva Group with Transformer, hover states, staggered fade-in animation (_animDelay)
 │       │   │   ├── WallOutline.jsx    # Wall polygon/segment renderer
 │       │   │   ├── WallJointHandles.jsx # Drag wall-joint circles when the Wall points tool is on (segment-walls only)
 │       │   │   ├── WallDimensionLabels.jsx # Per-segment feet/inches labels rendered along each wall midpoint
@@ -139,7 +162,9 @@ vision-studio/
 │       │   │   ├── RoomSetupModal.jsx # Template + dimensions picker
 │       │   │   └── ZoneBottomBar.jsx  # Bottom room switcher + room box inspector/add-remove actions
 │       │   ├── catalog/
-│       │   │   └── CatalogPanel.jsx   # Search + category chips + product images + Recommended tab; click-add or drag items into RoomCanvas
+│       │   │   ├── CatalogPanel.jsx   # Legacy API-backed catalog + Recommended tab (unused in editor sidebar)
+│       │   │   ├── FurnitureCatalogPanel.jsx # Starter catalog browse/search/filter in editor Furniture tab
+│       │   │   └── FurnitureCard.jsx  # Reusable starter-catalog card (name, category, dimensions, preview)
 │       │   ├── viewer/
 │       │   │   ├── RoomViewer3D.jsx   # React Three Fiber — floor/walls/GLB furniture + OrbitControls + Suspense loading
 │       │   │   ├── ProjectViewer3D.jsx # Project-level 3D fallback preview: places linked rooms in relative bounding boxes (no per-space layout)
@@ -293,6 +318,7 @@ Store in `client/src/store/layoutStore.js` (wrapped with `zustand/persist` for d
 | `roomWallsTool`         | `boolean`         | Studio canvas: draggable joints for segment-format `room.walls` (mutually exclusive with `roomResizeTool`) |
 | `roomResizeTool`        | `boolean`         | Studio canvas: resize floor handles on E/S/SE (origin fixed; mutually exclusive with `roomWallsTool`) |
 | `loadRoomFailed`        | `boolean`         | Last `loadRoom` failed (invalid id, API error, or missing draft); Studio redirects to `/studio` |
+| `selectedCatalogItem`   | `object \| null`  | Starter catalog template queued for click-to-place on `RoomCanvas` (session-only, not persisted) |
 
 Actions: `loadRoom`, `createRoom`, `createDraftRoom`, `clearDraft`, `saveDraftToAccount`, `saveProject`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setProjectTheme`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleRoomWallsTool`, `clearRoomWallsTool`, `toggleRoomResizeTool`, `clearRoomResizeTool`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `getActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`, `findOpenSlot`, `validate`.
 
@@ -414,7 +440,7 @@ Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furn
 - **`rooms`** — User rooms with walls (jsonb), dimensions, floor plan/photo URLs, detected_objects (jsonb), zones (jsonb array of sub-rooms); RLS: own rooms only
 - **`projects`** — User projects/floorplans with `property_type`, `scope`, `global_vision`, `status`; RLS: own projects only
 - **`spaces`** — Project-level interior/exterior space structure linked to existing `rooms` via nullable `room_id`; includes `category`, `space_vision`, `placeholder_mode`; RLS: via owning project
-- **`placements`** — Furniture placed in rooms with position, rotation, color, optional `image_url` / `model_url`, optional `zone_id` for sub-room assignment; GET `/api/rooms` enriches missing media URLs from `furniture_catalog` when `catalog_id` is set; RLS: via room ownership join
+- **`placements`** — Furniture placed in rooms with position, rotation, color, optional zone_id for sub-room assignment; RLS: via room ownership join
 - **`layout_exports`** — Archived JSON exports with schema_version; RLS: via room ownership join
 - **`chat_messages`** — Chat history per room with role, content, tool_calls (jsonb), model_used; RLS: via room ownership join
 
@@ -439,8 +465,6 @@ All tables use Row Level Security — users can only access their own data. The 
 
 ## Notable Behaviors
 
-- Furniture can be click-added from the catalog to the next open slot or dragged directly from `CatalogPanel` into `RoomCanvas`; drop coordinates respect pan/zoom and focused sub-room bounds.
-- Furniture can be moved by dragging, keyboard arrows, and selected-item nudge buttons; selected items also expose width/depth/height inputs and Konva resize handles for custom simple-block dimensions.
 - Furniture can be rotated freely in the 2D editor via the Konva transformer handle, 15° toolbar nudges, or the in-canvas rotation slider.
 - The 3D viewer renders furniture using `SmartFurnitureModel`, which now **defaults to loading a Kenney CC0 GLB** resolved from each catalog item's `model_url` (populated at seed time by `resolveModelUrl` in `server/services/kenneyMapping.js`). Models are uniform-scaled to 95% of the item's declared `width × depth × height`, centered on the group origin so they sit on the floor, and support a `model_rotation_y` override for one-off facing fixes. `ProceduralFurniture` — category-specific 3D models built from Three.js primitives (sofas have cushions + arms, beds have headboards + pillows, bookshelves have shelves, desks have side panels, TVs sit on stands, etc.) — remains the graceful fallback whenever `model_url` is null or GLB loading fails.
 - The legacy Meshy v2 image-to-3D route (`/api/models/*`) remains available for future GLB generation but is no longer invoked by the client; the procedural approach covers all catalog items by category, and it now sits two layers removed from the default render path behind real Kenney GLBs.
@@ -456,7 +480,7 @@ All tables use Row Level Security — users can only access their own data. The 
 - Toast notifications (`react-hot-toast`) are used throughout for all user-facing feedback (export success, validation results, add-to-room, etc.). Toasts use dark pill style matching the editorial theme.
 - All pages have proper `<title>` and `<meta description>` via `react-helmet-async` for SEO.
 - A 404 page is shown for unknown routes instead of a silent redirect.
-- Destructive confirmations use `ConfirmModal` (project dashboard delete, draft discard, room delete elsewhere).
+- All destructive actions (room delete) use a styled `ConfirmModal` instead of `window.confirm`.
 - The server uses `helmet` for security headers, `express-rate-limit` for rate limiting (120 req/min general, 20/15min for auth), and graceful shutdown on SIGTERM/SIGINT with 10s forced exit timeout.
 - Structured logging (`services/logger.js`) replaces raw `console.log/error` in server code. Request logging warns on slow (>2s) or error (≥400) responses.
 - The build uses manual Rollup chunks to split React, Konva, Three.js, Framer Motion, and Supabase into separate vendor bundles for optimal caching.

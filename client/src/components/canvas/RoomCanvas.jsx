@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Stage, Layer, Rect, Group, Text, Line, Circle } from 'react-konva';
 import { useLayoutStore } from '@/store/layoutStore';
-import { computeRotation, getItemCenter, getRotatedBoundingBox, inchesToFeet, snapToGrid } from '@/utils/scale';
-import { GRID_SNAP_INCHES } from '@/utils/constants';
+import { computeRotation, snapToGrid, inchesToFeet } from '@/utils/scale';
+import { getAABB, overlaps, withinRoom } from '@/utils/collision';
+import { createPlacedFurnitureFromCatalogItem } from '@/utils/furniturePlacement';
 import FurnitureItem from './FurnitureItem';
 import GridOverlay from './GridOverlay';
 import WallOutline from './WallOutline';
@@ -15,8 +16,6 @@ import {
   roomRectangleOutline,
   scaleSegmentWallsToRoomBox,
 } from '@/utils/roomWallMath';
-
-const CATALOG_DRAG_TYPE = 'application/x-vision-studio-furniture';
 
 function getZoneBox(zone) {
   if (Array.isArray(zone?.bbox) && zone.bbox.length === 4) {
@@ -56,8 +55,8 @@ export default function RoomCanvas() {
     room, furniture, selectedId, detections, zones, activeZoneId, gridEnabled,
     roomWallsTool, roomResizeTool,
     selectFurniture, clearSelection, updateFurniture, removeFurniture, setActiveZone, updateZone, getVisibleFurniture,
-    addCatalogFurniture,
     updateRoom,
+    selectedCatalogItem,
   } = useLayoutStore();
 
   // Resize observer
@@ -112,9 +111,6 @@ export default function RoomCanvas() {
   };
 
   const onKeyDown = useCallback((e) => {
-    const tagName = document.activeElement?.tagName;
-    if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return;
-
     const state = useLayoutStore.getState();
     const { selectedId, furniture, removeFurniture, updateFurniture, clearSelection, undo, redo } = state;
 
@@ -133,8 +129,19 @@ export default function RoomCanvas() {
 
     // Escape exits room resize / wall-point modes, then deselects furniture
     if (e.key === 'Escape') {
-      const { roomWallsTool, roomResizeTool, clearRoomWallsTool, clearRoomResizeTool } =
-        useLayoutStore.getState();
+      const {
+        selectedCatalogItem,
+        clearSelectedCatalogItem,
+        roomWallsTool,
+        roomResizeTool,
+        clearRoomWallsTool,
+        clearRoomResizeTool,
+        clearSelection,
+      } = useLayoutStore.getState();
+      if (selectedCatalogItem) {
+        clearSelectedCatalogItem();
+        return;
+      }
       if (roomWallsTool) clearRoomWallsTool();
       if (roomResizeTool) clearRoomResizeTool();
       clearSelection();
@@ -146,29 +153,6 @@ export default function RoomCanvas() {
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
       removeFurniture(selectedId);
-    } else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
-      const item = furniture.find((f) => f.id === selectedId);
-      if (!item) return;
-      e.preventDefault();
-      const step = e.shiftKey ? 12 : e.altKey ? 1 : GRID_SNAP_INCHES;
-      const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
-      const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-      const activeZone = state.getActiveZone();
-      const zoneBounds = activeZone ? getZoneBox(activeZone) : null;
-      const bounds = zoneBounds
-        ? { left: zoneBounds[0], top: zoneBounds[1], right: zoneBounds[2], bottom: zoneBounds[3] }
-        : { left: 0, top: 0, right: state.room?.width || 0, bottom: state.room?.depth || 0 };
-      const box = getRotatedBoundingBox(item.width || 0, item.depth || 0, item.rotation || 0);
-      updateFurniture(item.id, {
-        x_inches: Math.min(
-          Math.max(bounds.left, snapToGrid((item.x_inches || 0) + dx, GRID_SNAP_INCHES)),
-          Math.max(bounds.left, bounds.right - box.width)
-        ),
-        y_inches: Math.min(
-          Math.max(bounds.top, snapToGrid((item.y_inches || 0) + dy, GRID_SNAP_INCHES)),
-          Math.max(bounds.top, bounds.bottom - box.depth)
-        ),
-      });
     } else if (e.key === 'r' || e.key === 'R') {
       const item = furniture.find((f) => f.id === selectedId);
       if (item) {
@@ -264,111 +248,68 @@ export default function RoomCanvas() {
     warningTimeoutRef.current = window.setTimeout(() => setPlacementWarning(''), 2200);
   }, []);
 
-  const clampItemPatch = useCallback((item, patch) => {
-    const next = { ...item, ...patch };
-    const box = getRotatedBoundingBox(next.width || 0, next.depth || 0, next.rotation || 0);
-    const bounds = placementBounds || {
-      left: 0,
-      top: 0,
-      right: roomForLayout?.width || room?.width || box.width,
-      bottom: roomForLayout?.depth || room?.depth || box.depth,
-    };
-    return {
-      ...patch,
-      x_inches: Math.min(
-        Math.max(bounds.left, patch.x_inches ?? next.x_inches ?? 0),
-        Math.max(bounds.left, bounds.right - box.width)
-      ),
-      y_inches: Math.min(
-        Math.max(bounds.top, patch.y_inches ?? next.y_inches ?? 0),
-        Math.max(bounds.top, bounds.bottom - box.depth)
-      ),
-    };
-  }, [placementBounds, roomForLayout?.width, roomForLayout?.depth, room?.width, room?.depth]);
+  const handleCatalogPlacementClick = useCallback(
+    async (e) => {
+      const cat = useLayoutStore.getState().selectedCatalogItem;
+      const currentRoom = useLayoutStore.getState().room;
+      if (!cat || !currentRoom || e.evt.button !== 0) return;
 
-  const updateSelectedDimensions = useCallback((item, dims) => {
-    const width = dims.width == null ? item.width : Math.max(6, Number(dims.width) || 6);
-    const depth = dims.depth == null ? item.depth : Math.max(6, Number(dims.depth) || 6);
-    const height = dims.height == null ? item.height : Math.max(1, Number(dims.height) || 1);
-    const center = getItemCenter(item);
-    const bbox = getRotatedBoundingBox(width, depth, item.rotation || 0);
-    const patch = clampItemPatch(item, {
-      width,
-      depth,
-      height,
-      x_inches: snapToGrid(center.x - bbox.width / 2, GRID_SNAP_INCHES),
-      y_inches: snapToGrid(center.y - bbox.depth / 2, GRID_SNAP_INCHES),
-    });
-    updateFurniture(item.id, patch);
-  }, [clampItemPatch, updateFurniture]);
+      const stage = stageRef.current;
+      if (!stage) return;
+      const pointer = stage.getRelativePointerPosition();
+      if (pointer == null) return;
 
-  const moveSelected = useCallback((item, dx, dy) => {
-    const patch = clampItemPatch(item, {
-      x_inches: snapToGrid((item.x_inches || 0) + dx, GRID_SNAP_INCHES),
-      y_inches: snapToGrid((item.y_inches || 0) + dy, GRID_SNAP_INCHES),
-    });
-    updateFurniture(item.id, patch);
-  }, [clampItemPatch, updateFurniture]);
+      const inchX = focusBox[0] + (pointer.x - roomOffsetX) / pxPerInch;
+      const inchY = focusBox[1] + (pointer.y - roomOffsetY) / pxPerInch;
 
-  const handleCatalogDrop = useCallback(async (event) => {
-    event.preventDefault();
-    if (!room) {
-      showPlacementWarning('Create or open a room before placing furniture.');
-      return;
-    }
-    const raw = event.dataTransfer.getData(CATALOG_DRAG_TYPE);
-    if (!raw) return;
+      const draftPlacement = createPlacedFurnitureFromCatalogItem(cat, {
+        x_inches: inchX,
+        y_inches: inchY,
+      });
 
-    let item;
-    try {
-      item = JSON.parse(raw);
-    } catch {
-      showPlacementWarning('Could not read the dragged furniture item.');
-      return;
-    }
+      const box = getAABB(draftPlacement);
+      const layoutRoom = roomForLayout || currentRoom;
+      if (!withinRoom(box, layoutRoom)) {
+        showPlacementWarning(`${draftPlacement.name || 'Item'} would extend outside the room.`);
+        return;
+      }
 
-    const stage = stageRef.current;
-    const rect = wrapRef.current?.getBoundingClientRect();
-    if (!stage || !rect) return;
-    const localPoint = {
-      x: (event.clientX - rect.left - viewport.x) / viewport.scale,
-      y: (event.clientY - rect.top - viewport.y) / viewport.scale,
-    };
-    const rotation = Number(item.rotation) || 0;
-    const box = getRotatedBoundingBox(Number(item.width) || 24, Number(item.depth) || 24, rotation);
-    const position = {
-      x: focusBox[0] + ((localPoint.x - roomOffsetX) / pxPerInch) - box.width / 2,
-      y: focusBox[1] + ((localPoint.y - roomOffsetY) / pxPerInch) - box.depth / 2,
-    };
-    const placement = await addCatalogFurniture(item, position);
-    if (placement?.id) selectFurniture(placement.id);
-  }, [
-    addCatalogFurniture,
-    focusBox,
-    pxPerInch,
-    room,
-    roomOffsetX,
-    roomOffsetY,
-    selectFurniture,
-    showPlacementWarning,
-    viewport.scale,
-    viewport.x,
-    viewport.y,
-  ]);
+      if (placementBounds) {
+        const insideZone =
+          box.left >= placementBounds.left
+          && box.top >= placementBounds.top
+          && box.right <= placementBounds.right
+          && box.bottom <= placementBounds.bottom;
+        if (!insideZone) {
+          showPlacementWarning('Place inside the selected room area.');
+          return;
+        }
+      }
+
+      const clash = visibleFurniture.some((f) => overlaps(box, getAABB(f)));
+      if (clash) {
+        showPlacementWarning('That spot overlaps another furniture item.');
+        return;
+      }
+
+      e.cancelBubble = true;
+      const placed = await useLayoutStore.getState().addFurniture(draftPlacement);
+      if (placed?.id) useLayoutStore.getState().selectFurniture(placed.id);
+    },
+    [
+      focusBox,
+      roomOffsetX,
+      roomOffsetY,
+      pxPerInch,
+      placementBounds,
+      visibleFurniture,
+      roomForLayout,
+      showPlacementWarning,
+    ],
+  );
 
   return (
-    <div
-      ref={wrapRef}
-      className="relative w-full h-full bg-surface-800"
-      style={{ touchAction: 'none', userSelect: 'none' }}
-      onDragOver={(event) => {
-        if (event.dataTransfer.types.includes(CATALOG_DRAG_TYPE)) {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = 'copy';
-        }
-      }}
-      onDrop={handleCatalogDrop}
-    >
+    <div ref={wrapRef} className="relative w-full h-full bg-surface-800" style={{ touchAction: 'none', userSelect: 'none' }}>
       {/* Corner metadata */}
       <div className="absolute top-4 left-4 text-xs text-surface-400 z-10 pointer-events-none font-mono">
         {room?.width
@@ -381,6 +322,12 @@ export default function RoomCanvas() {
       {placementWarning && (
         <div className="absolute top-4 right-4 z-10 rounded-md border border-red-500 bg-surface-900/95 px-3 py-2 text-xs text-red-400 shadow-lg backdrop-blur-sm">
           {placementWarning}
+        </div>
+      )}
+      {selectedCatalogItem && (
+        <div className="absolute top-14 left-4 z-10 max-w-[min(90vw,20rem)] rounded-md border border-[#004aad]/35 bg-[#eef4f7]/95 px-3 py-2 text-[11px] text-[#004aad] shadow-sm backdrop-blur-sm pointer-events-none">
+          Selected: <span className="font-medium text-[#171717]">{selectedCatalogItem.name}</span>. Click the canvas to place.
+          <span className="block text-[10px] text-[#5b5b5b] mt-1">Esc clears catalog selection.</span>
         </div>
       )}
       {roomResizeTool && room?.width > 0 && (
@@ -588,6 +535,20 @@ export default function RoomCanvas() {
           })}
         </Layer>
 
+        {/* Click-to-place starter catalog (under furniture so placed items stay draggable) */}
+        {selectedCatalogItem && focusWidth > 0 && focusDepth > 0 && (
+          <Layer>
+            <Rect
+              x={roomOffsetX}
+              y={roomOffsetY}
+              width={focusPxW}
+              height={focusPxH}
+              fill="transparent"
+              onMouseDown={handleCatalogPlacementClick}
+            />
+          </Layer>
+        )}
+
         {/* Furniture */}
         <Layer>
           {visibleFurniture.map((it) => (
@@ -666,83 +627,15 @@ export default function RoomCanvas() {
       {selectedId && (() => {
         const sel = visibleFurniture.find(f => f.id === selectedId);
         if (!sel) return null;
-        const moveStep = GRID_SNAP_INCHES;
         return (
-          <div className="absolute bottom-4 left-4 right-4 z-10 flex flex-wrap items-center gap-2 bg-white/90 backdrop-blur-sm border border-ink-900/15 rounded-lg px-4 py-2 shadow-sm">
+          <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 bg-white/90 backdrop-blur-sm border border-ink-900/15 rounded-lg px-4 py-2 shadow-sm">
             <span className="text-xs font-medium text-ink-800 truncate max-w-[140px]">{sel.name || sel.category}</span>
             <span className="text-[10px] text-ink-500">{sel.width}" × {sel.depth}" · {(sel.rotation || 0).toFixed(1)}°</span>
-            <div className="h-3 w-px bg-ink-900/15" />
-            <div className="grid grid-cols-3 gap-1">
-              <span />
-              <button
-                onClick={() => moveSelected(sel, 0, -moveStep)}
-                className="h-6 w-6 rounded border border-ink-900/20 text-[11px] text-ink-700 hover:bg-ink-900 hover:text-paper-50 transition"
-                title="Move up"
-              >
-                ^
-              </button>
-              <span />
-              <button
-                onClick={() => moveSelected(sel, -moveStep, 0)}
-                className="h-6 w-6 rounded border border-ink-900/20 text-[11px] text-ink-700 hover:bg-ink-900 hover:text-paper-50 transition"
-                title="Move left"
-              >
-                {'<'}
-              </button>
-              <button
-                onClick={() => moveSelected(sel, 0, moveStep)}
-                className="h-6 w-6 rounded border border-ink-900/20 text-[11px] text-ink-700 hover:bg-ink-900 hover:text-paper-50 transition"
-                title="Move down"
-              >
-                v
-              </button>
-              <button
-                onClick={() => moveSelected(sel, moveStep, 0)}
-                className="h-6 w-6 rounded border border-ink-900/20 text-[11px] text-ink-700 hover:bg-ink-900 hover:text-paper-50 transition"
-                title="Move right"
-              >
-                {'>'}
-              </button>
-            </div>
-            <div className="h-3 w-px bg-ink-900/15" />
-            <label className="flex items-center gap-1 text-[10px] uppercase tracking-editorial text-ink-500">
-              W
-              <input
-                type="number"
-                min="6"
-                step="1"
-                value={Number(sel.width || 0)}
-                onChange={(e) => updateSelectedDimensions(sel, { width: e.target.value })}
-                className="w-14 rounded border border-ink-900/15 px-1.5 py-1 text-[11px] text-ink-800"
-              />
-            </label>
-            <label className="flex items-center gap-1 text-[10px] uppercase tracking-editorial text-ink-500">
-              D
-              <input
-                type="number"
-                min="6"
-                step="1"
-                value={Number(sel.depth || 0)}
-                onChange={(e) => updateSelectedDimensions(sel, { depth: e.target.value })}
-                className="w-14 rounded border border-ink-900/15 px-1.5 py-1 text-[11px] text-ink-800"
-              />
-            </label>
-            <label className="flex items-center gap-1 text-[10px] uppercase tracking-editorial text-ink-500">
-              H
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={Number(sel.height || 0)}
-                onChange={(e) => updateSelectedDimensions(sel, { height: e.target.value })}
-                className="w-14 rounded border border-ink-900/15 px-1.5 py-1 text-[11px] text-ink-800"
-              />
-            </label>
             <div className="h-3 w-px bg-ink-900/15" />
             <button
               onClick={() => {
                 const patch = computeRotation(sel, (sel.rotation || 0) - 15);
-                updateFurniture(sel.id, clampItemPatch(sel, patch));
+                updateFurniture(sel.id, patch);
               }}
               className="text-[10px] uppercase tracking-editorial px-2 py-0.5 rounded border border-ink-900/20 text-ink-700 hover:bg-ink-900 hover:text-paper-50 transition"
             >
@@ -751,7 +644,7 @@ export default function RoomCanvas() {
             <button
               onClick={() => {
                 const patch = computeRotation(sel, (sel.rotation || 0) + 15);
-                updateFurniture(sel.id, clampItemPatch(sel, patch));
+                updateFurniture(sel.id, patch);
               }}
               className="text-[10px] uppercase tracking-editorial px-2 py-0.5 rounded border border-ink-900/20 text-ink-700 hover:bg-ink-900 hover:text-paper-50 transition"
             >
@@ -766,7 +659,7 @@ export default function RoomCanvas() {
               onChange={(e) => {
                 const nextValue = Number(e.target.value);
                 if (Number.isNaN(nextValue)) return;
-                updateFurniture(sel.id, clampItemPatch(sel, computeRotation(sel, nextValue)));
+                updateFurniture(sel.id, computeRotation(sel, nextValue));
               }}
               className="w-16 rounded border border-ink-900/15 px-2 py-1 text-[11px] text-ink-800"
             />
@@ -776,7 +669,7 @@ export default function RoomCanvas() {
               max="359"
               step="1"
               value={Math.round(sel.rotation || 0)}
-              onChange={(e) => updateFurniture(sel.id, clampItemPatch(sel, computeRotation(sel, Number(e.target.value))))}
+              onChange={(e) => updateFurniture(sel.id, computeRotation(sel, Number(e.target.value)))}
               className="w-28 accent-ink-900"
             />
             <button
@@ -786,7 +679,7 @@ export default function RoomCanvas() {
               Delete
             </button>
             <div className="h-3 w-px bg-ink-900/15" />
-            <span className="text-[9px] text-ink-400">Arrow keys move · resize handles change size · R rotates</span>
+            <span className="text-[9px] text-ink-400">R +15° · drag rotate handle freely · Del remove</span>
           </div>
         );
       })()}

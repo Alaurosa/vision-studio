@@ -1,7 +1,7 @@
 import { Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid, Environment } from '@react-three/drei';
-import { useLayoutStore } from '@/store/layoutStore';
+import { useLayoutStore, selectVisibleFurniture } from '@/store/layoutStore';
 import { CATEGORY_COLORS } from '@/utils/constants';
 import { getRotatedBoundingBox } from '@/utils/scale';
 import SmartFurnitureModel from './SmartFurnitureModel';
@@ -12,27 +12,15 @@ import {
 
 const IN_TO_M = INCHES_TO_METERS;
 
-function LoadingOverlay() {
-  return (
-    <div className="absolute inset-0 flex items-center justify-center z-10 bg-paper-100/80 pointer-events-none">
-      <div className="flex flex-col items-center gap-3">
-        <div className="w-8 h-8 border-2 border-ink-300 border-t-ink-900 rounded-full animate-spin" />
-        <span className="eyebrow text-ink-500">Loading 3D view…</span>
-      </div>
-    </div>
-  );
-}
-
 export default function RoomViewer3D() {
-  const { room, getVisibleFurniture } = useLayoutStore();
-  const furniture = getVisibleFurniture();
+  const room = useLayoutStore((s) => s.room);
+  const furniture = useLayoutStore(selectVisibleFurniture);
   const w = (room?.width || 180) * IN_TO_M;
   const d = (room?.depth || 144) * IN_TO_M;
   const h = (room?.height || 96) * IN_TO_M;
 
   return (
     <div className="w-full h-full bg-paper-100 relative">
-      <Suspense fallback={<LoadingOverlay />}>
       <Canvas shadows camera={{ position: [w * 1.1, h * 1.3, d * 1.4], fov: 45 }}>
         <color attach="background" args={['#f4efe4']} />
         <ambientLight intensity={0.55} />
@@ -42,7 +30,9 @@ export default function RoomViewer3D() {
           intensity={1.1}
           shadow-mapSize={[2048, 2048]}
         />
-        <Environment preset="apartment" />
+        <Suspense fallback={null}>
+          <Environment preset="apartment" />
+        </Suspense>
 
         {/* Floor */}
         <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[w / 2, 0, d / 2]}>
@@ -68,7 +58,7 @@ export default function RoomViewer3D() {
           <meshStandardMaterial color="#faf7f1" />
         </mesh>
 
-        {/* Furniture */}
+        {/* Furniture — each SmartFurnitureModel suspends locally; do not wrap Canvas in Suspense */}
         {furniture.map((it) => {
           const dimsIn = getFurnitureRenderDimensionsInches(it);
           const fw = dimsIn.width * IN_TO_M;
@@ -97,7 +87,6 @@ export default function RoomViewer3D() {
 
         <OrbitControls target={[w / 2, h / 3, d / 2]} />
       </Canvas>
-      </Suspense>
     </div>
   );
 }

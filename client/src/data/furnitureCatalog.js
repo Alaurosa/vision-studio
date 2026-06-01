@@ -29,6 +29,12 @@
  * @property {string | null} previewImageUrl
  * @property {string | null} modelUrl
  * @property {'placeholder' | 'curated' | 'generated' | 'missing'} modelStatus
+ * @property {string} [modelSourceType]
+ * @property {string} [modelProvider]
+ * @property {string} [modelLicense]
+ * @property {string} [modelAttribution]
+ * @property {boolean} [verifiedScale]
+ * @property {number} [modelRotationY]
  * @property {string[]} tags
  * @property {string | null} sourceUrl
  */
@@ -46,6 +52,30 @@ const CATEGORY_LABEL_BY_ID = Object.fromEntries(
   FURNITURE_CATEGORIES.map(({ id, label }) => [id, label]),
 );
 
+const KENNEY_MODEL_BASE = '/models/kenney';
+
+/** Shared license metadata for bundled Kenney Furniture Kit GLBs (CC0). */
+const KENNEY_SOURCE = Object.freeze({
+  modelSourceType: 'kenney',
+  modelProvider: 'Kenney Furniture Kit',
+  modelLicense: 'CC0-1.0',
+  modelAttribution: 'Kenney',
+});
+
+/**
+ * @param {string} fileName Kenney GLB file name (e.g. loungeSofa.glb)
+ * @param {{ modelRotationY?: number, verifiedScale?: boolean }} [options]
+ */
+export function kenneyCuratedModel(fileName, options = {}) {
+  return {
+    modelUrl: `${KENNEY_MODEL_BASE}/${fileName}`,
+    modelStatus: 'curated',
+    ...KENNEY_SOURCE,
+    verifiedScale: options.verifiedScale === true,
+    modelRotationY: options.modelRotationY ?? 0,
+  };
+}
+
 /** @type {FurnitureCatalogItem[]} */
 export const STARTER_FURNITURE_CATALOG = [
   {
@@ -56,8 +86,7 @@ export const STARTER_FURNITURE_CATALOG = [
     dimensions: { width: 84, depth: 36, height: 32, unit: 'in' },
     footprint: { width: 84, depth: 36, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/sofa.png',
-    modelUrl: null,
-    modelStatus: 'placeholder',
+    ...kenneyCuratedModel('loungeSofaLong.glb'),
     tags: ['living room', 'sofa', 'starter'],
     sourceUrl: null,
   },
@@ -69,8 +98,7 @@ export const STARTER_FURNITURE_CATALOG = [
     dimensions: { width: 32, depth: 34, height: 38, unit: 'in' },
     footprint: { width: 32, depth: 34, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/sofa.png',
-    modelUrl: null,
-    modelStatus: 'placeholder',
+    ...kenneyCuratedModel('loungeChair.glb'),
     tags: ['living room', 'chair', 'starter'],
     sourceUrl: null,
   },
@@ -82,8 +110,7 @@ export const STARTER_FURNITURE_CATALOG = [
     dimensions: { width: 48, depth: 24, height: 18, unit: 'in' },
     footprint: { width: 48, depth: 24, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/table.png',
-    modelUrl: null,
-    modelStatus: 'placeholder',
+    ...kenneyCuratedModel('tableCoffee.glb'),
     tags: ['living room', 'table', 'starter'],
     sourceUrl: null,
   },
@@ -95,8 +122,7 @@ export const STARTER_FURNITURE_CATALOG = [
     dimensions: { width: 72, depth: 36, height: 30, unit: 'in' },
     footprint: { width: 72, depth: 36, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/table.png',
-    modelUrl: null,
-    modelStatus: 'placeholder',
+    ...kenneyCuratedModel('table.glb'),
     tags: ['dining', 'table', 'starter'],
     sourceUrl: null,
   },
@@ -108,8 +134,7 @@ export const STARTER_FURNITURE_CATALOG = [
     dimensions: { width: 32, depth: 12, height: 72, unit: 'in' },
     footprint: { width: 32, depth: 12, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/table.png',
-    modelUrl: null,
-    modelStatus: 'placeholder',
+    ...kenneyCuratedModel('bookcaseOpen.glb'),
     tags: ['storage', 'shelf', 'starter'],
     sourceUrl: null,
   },
@@ -121,8 +146,7 @@ export const STARTER_FURNITURE_CATALOG = [
     dimensions: { width: 60, depth: 18, height: 34, unit: 'in' },
     footprint: { width: 60, depth: 18, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/table.png',
-    modelUrl: null,
-    modelStatus: 'placeholder',
+    ...kenneyCuratedModel('cabinetBedDrawer.glb'),
     tags: ['bedroom', 'storage', 'starter'],
     sourceUrl: null,
   },
@@ -134,8 +158,7 @@ export const STARTER_FURNITURE_CATALOG = [
     dimensions: { width: 60, depth: 80, height: 14, unit: 'in' },
     footprint: { width: 60, depth: 80, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/bed.png',
-    modelUrl: null,
-    modelStatus: 'placeholder',
+    ...kenneyCuratedModel('bedDouble.glb'),
     tags: ['bedroom', 'bed', 'starter'],
     sourceUrl: null,
   },
@@ -147,8 +170,7 @@ export const STARTER_FURNITURE_CATALOG = [
     dimensions: { width: 14, depth: 14, height: 62, unit: 'in' },
     footprint: { width: 14, depth: 14, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/table.png',
-    modelUrl: null,
-    modelStatus: 'placeholder',
+    ...kenneyCuratedModel('lampRoundFloor.glb'),
     tags: ['lighting', 'lamp', 'starter'],
     sourceUrl: null,
   },
@@ -160,8 +182,7 @@ export const STARTER_FURNITURE_CATALOG = [
     dimensions: { width: 96, depth: 72, height: 0.5, unit: 'in' },
     footprint: { width: 96, depth: 72, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/table.png',
-    modelUrl: null,
-    modelStatus: 'placeholder',
+    ...kenneyCuratedModel('rugRectangle.glb'),
     tags: ['decor', 'rug', 'starter'],
     sourceUrl: null,
   },

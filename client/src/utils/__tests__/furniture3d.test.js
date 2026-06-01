@@ -45,7 +45,7 @@ describe('furniture3d', () => {
 
   it('shouldUseGlbModel reflects resolved URL', () => {
     expect(shouldUseGlbModel({ model_url: '/models/kenney/chair.glb' })).toBe(true);
-    expect(shouldUseGlbModel(STARTER_FURNITURE_CATALOG[0])).toBe(false);
+    expect(shouldUseGlbModel(STARTER_FURNITURE_CATALOG[0])).toBe(true);
   });
 
   it('getFurnitureRenderDimensionsInches uses footprint and dimensions', () => {

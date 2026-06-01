@@ -30,6 +30,14 @@ describe('furniturePlacement', () => {
     expect(placed.footprint).toEqual(sample.footprint);
     expect(placed.previewImageUrl).toBe(sample.previewImageUrl);
     expect(placed.modelStatus).toBe(sample.modelStatus);
+    expect(placed.modelUrl).toBe(sample.modelUrl);
+    expect(placed.model_url).toBe(sample.modelUrl);
+    expect(placed.modelSourceType).toBe(sample.modelSourceType);
+    expect(placed.modelProvider).toBe(sample.modelProvider);
+    expect(placed.modelLicense).toBe(sample.modelLicense);
+    expect(placed.modelAttribution).toBe(sample.modelAttribution);
+    expect(placed.verifiedScale).toBe(sample.verifiedScale === true);
+    expect(placed.model_rotation_y).toBe(sample.modelRotationY ?? 0);
     expect(placed.tags).toEqual(sample.tags);
     expect(placed.x_inches).toBeDefined();
     expect(placed.y_inches).toBeDefined();

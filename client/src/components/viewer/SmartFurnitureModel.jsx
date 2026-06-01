@@ -79,7 +79,7 @@ export default function SmartFurnitureModel({ item, w, d, h, color }) {
   if (!modelUrl) return fallback;
 
   return (
-    <ModelErrorBoundary fallback={fallback}>
+    <ModelErrorBoundary key={modelUrl} fallback={fallback}>
       <Suspense fallback={fallback}>
         <GLBModel
           url={modelUrl}

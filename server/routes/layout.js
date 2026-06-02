@@ -1,6 +1,6 @@
 import express from 'express';
 import { optionalAuth } from '../middleware/auth.js';
-import { useDb, supabaseAdmin, fallback } from '../services/db.js';
+import { useDb, supabaseAdmin, fallback, hasDbUserId, getFallbackRoom } from '../services/db.js';
 import { buildLayoutJSON } from '../services/exportFormats.js';
 import { chat } from '../services/llmRouter.js';
 import { log } from '../services/logger.js';
@@ -11,8 +11,8 @@ const router = express.Router();
 // POST /api/layout/auto-place — Use LLM to compute optimal placement for all furniture
 router.post('/auto-place', optionalAuth, async (req, res) => {
   const { room_id, room_context, placements_context } = req.body;
-  const db = await useDb();
   const isDraft = typeof room_id === 'string' && room_id.startsWith('draft-');
+  const db = (await useDb()) && hasDbUserId(req.user?.id);
 
   try {
     let room, placements;
@@ -29,7 +29,7 @@ router.post('/auto-place', optionalAuth, async (req, res) => {
       room = roomRes.data;
       placements = placementsRes.data || [];
     } else {
-      room = fallback.getRoom(room_id, req.user.id);
+      room = getFallbackRoom(room_id, req.user.id);
       if (!room) return res.status(404).json({ error: 'Room not found' });
       placements = room.placements || [];
     }
@@ -137,7 +137,7 @@ router.post('/validate', optionalAuth, async (req, res) => {
   if (isDraftRoom && room_context) {
     room = room_context;
     placements = placements_context || [];
-  } else if (await useDb()) {
+  } else if ((await useDb()) && hasDbUserId(req.user?.id)) {
     const [roomRes, placementsRes] = await Promise.all([
       supabaseAdmin.from('rooms').select('*').eq('id', room_id).eq('user_id', req.user.id).single(),
       supabaseAdmin.from('placements').select('*').eq('room_id', room_id),
@@ -146,7 +146,7 @@ router.post('/validate', optionalAuth, async (req, res) => {
     room = roomRes.data;
     placements = placementsRes.data || [];
   } else {
-    room = fallback.getRoom(room_id, req.user.id);
+    room = getFallbackRoom(room_id, req.user.id);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     placements = room.placements || [];
   }

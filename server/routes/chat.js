@@ -1,13 +1,11 @@
 import express from 'express';
 import { optionalAuth } from '../middleware/auth.js';
-import { useDb, supabaseAdmin, fallback } from '../services/db.js';
+import { useDb, supabaseAdmin, fallback, hasDbUserId } from '../services/db.js';
 import { chat } from '../services/llmRouter.js';
 import { LAYOUT_FUNCTIONS, executeFunction } from '../services/chatFunctions.js';
 import { log } from '../services/logger.js';
 
 const router = express.Router();
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const hasDbUserId = (userId) => typeof userId === 'string' && UUID_RE.test(userId);
 
 // POST /api/chat/message
 router.post('/message', optionalAuth, async (req, res) => {
@@ -21,8 +19,8 @@ router.post('/message', optionalAuth, async (req, res) => {
     global_vision,
     space_vision,
   } = req.body;
-  const db = (await useDb()) && hasDbUserId(req.user?.id);
   const isDraft = typeof room_id === 'string' && room_id.startsWith('draft-');
+  const db = (await useDb()) && hasDbUserId(req.user?.id) && !isDraft;
 
   try {
     let room, placements, history;

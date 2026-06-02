@@ -31,6 +31,7 @@ import {
 import { isProjectVisionComplete } from '@/utils/visionGate';
 import ProjectVisionIntake from '@/components/project/ProjectVisionIntake';
 import RoomEditor from '@/components/upload/RoomEditor';
+import ConfirmModal from '@/components/ConfirmModal';
 
 const isConfirmationDone = (project) => Boolean(project?.confirmationCompletedAt);
 
@@ -226,6 +227,7 @@ export default function Studio() {
   const [editingProjectName, setEditingProjectName] = useState('');
   const [editorEntryIssue, setEditorEntryIssue] = useState(null);
   const [adjustConfirmIssue, setAdjustConfirmIssue] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const draftRoom = useLayoutStore((s) => (isDraftId(s.room?.id) ? s.room : null));
 
   const matchDashboard = useMatch({ path: '/studio', end: true });
@@ -270,8 +272,8 @@ export default function Studio() {
 
   const resolvedRoomId = useMemo(() => {
     if (roomId) return roomId;
-    if (isProjectEditorRoute && editorSpaceId && currentProject?.spaces) {
-      const sp = currentProject.spaces.find((s) => s.id === editorSpaceId);
+    if (isProjectEditorRoute && editorSpaceId && currentProject) {
+      const sp = resolveSpaceByEditorId(currentProject, editorSpaceId);
       return getSpaceRoomId(sp);
     }
     return null;
@@ -413,13 +415,20 @@ export default function Studio() {
     setEditingProjectName('');
     toast.success('Project name updated');
   };
-  const deleteProject = (project) => {
+  const requestDeleteProject = (project) => {
     if (!project?.id) return;
-    const ok = window.confirm('Remove this project from your dashboard? This does not delete backend room records.');
-    if (!ok) return;
+    setConfirmDialog({ kind: 'deleteProject', project });
+  };
+  const confirmDeleteProject = () => {
+    const project = confirmDialog?.project;
+    if (!project?.id) {
+      setConfirmDialog(null);
+      return;
+    }
     deleteProjectById(project.id);
     setProjects((prev) => prev.filter((p) => p.id !== project.id));
     toast.success('Project removed from dashboard');
+    setConfirmDialog(null);
   };
   const setProjectStatus = (project, status) => {
     const nextProject = { ...project, status, updatedAt: new Date().toISOString() };
@@ -615,10 +624,11 @@ export default function Studio() {
     if (activeSpace?.zoneId) setActiveZone(activeSpace.zoneId);
   }, [room, currentProject, querySpaceId, setActiveZone]);
 
-  const discardDraft = () => {
-    if (!window.confirm('Discard your draft? This cannot be undone.')) return;
+  const requestDiscardDraft = () => setConfirmDialog({ kind: 'discardDraft' });
+  const confirmDiscardDraft = () => {
     clearDraft();
     toast.success('Draft discarded');
+    setConfirmDialog(null);
   };
 
   const syncProjectFromChild = (next) => {
@@ -1121,7 +1131,7 @@ export default function Studio() {
               <div className="flex gap-3">
                 <button className="btn-ink" onClick={() => openRoom(draftRoom.id)}>Continue space editing →</button>
                 <button
-                  onClick={discardDraft}
+                  onClick={requestDiscardDraft}
                   className="text-[11px] uppercase tracking-editorial text-ink-500 hover:text-ink-900 px-4"
                 >
                   Discard
@@ -1270,7 +1280,7 @@ export default function Studio() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => deleteProject(p)}
+                        onClick={() => requestDeleteProject(p)}
                         className="text-[10px] uppercase tracking-[0.2em] text-[#8f4d4d] hover:text-[#7a2f2f]"
                       >
                         Delete
@@ -1287,6 +1297,25 @@ export default function Studio() {
             <div className="text-ink-500 eyebrow">Loading…</div>
           )}
           {!waitingForAuth && <p className="mt-14 text-xs uppercase tracking-[0.2em] text-vs-dark/52" />}
+
+          <ConfirmModal
+            open={confirmDialog?.kind === 'deleteProject'}
+            title="Remove project?"
+            message="Remove this project from your dashboard? This does not delete backend room records."
+            confirmLabel="Remove"
+            danger
+            onConfirm={confirmDeleteProject}
+            onCancel={() => setConfirmDialog(null)}
+          />
+          <ConfirmModal
+            open={confirmDialog?.kind === 'discardDraft'}
+            title="Discard draft?"
+            message="Discard your draft? This cannot be undone."
+            confirmLabel="Discard"
+            danger
+            onConfirm={confirmDiscardDraft}
+            onCancel={() => setConfirmDialog(null)}
+          />
 
           {editingProjectId && (
             <div className="fixed inset-0 z-50 bg-black/35 grid place-items-center px-4">

@@ -61,27 +61,30 @@ const TEST_USER = { id: 'test-user-001', email: 'test@visionstudio.dev' };
 
 export async function optionalAuth(req, res, next) {
   const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.split(' ')[1];
-
-    // Fallback test account
-    if (token === TEST_TOKEN) {
-      req.user = TEST_USER;
-      return next();
-    }
-
-    // Supabase auth
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.auth.getUser(token);
-        if (!error && data.user) {
-          req.user = data.user;
-          return next();
-        }
-      } catch { /* fall through to guest */ }
-    }
+  if (!authHeader?.startsWith('Bearer ')) {
+    req.user = { id: 'guest', email: 'guest' };
+    return next();
   }
-  // Guest fallback
-  req.user = { id: 'guest', email: 'guest' };
-  next();
+
+  const token = authHeader.split(' ')[1];
+
+  if (token === TEST_TOKEN) {
+    req.user = TEST_USER;
+    return next();
+  }
+
+  if (!supabase) {
+    return res.status(401).json({ error: 'Supabase is not configured on the server.' });
+  }
+
+  try {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data.user) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+    req.user = data.user;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Auth verification failed' });
+  }
 }

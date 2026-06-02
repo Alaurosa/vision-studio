@@ -7,6 +7,7 @@ import { log } from '../services/logger.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import { saveFileLocally } from '../services/fileStorage.js';
 import { normalizeZones } from '../services/normalizeZones.js';
+import { enrichRoomPlacements, enrichRoomsPlacements } from '../services/placementEnrichment.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -41,9 +42,11 @@ router.get('/', optionalAuth, async (req, res) => {
       .eq('user_id', req.user.id)
       .order('created_at', { ascending: false });
     if (error) return res.status(400).json({ error: error.message });
-    return res.json(data);
+    const enriched = await enrichRoomsPlacements(data, true);
+    return res.json(enriched);
   }
-  res.json(fallback.getRooms(req.user.id));
+  const rooms = fallback.getRooms(req.user.id);
+  res.json(await enrichRoomsPlacements(rooms, false));
 });
 
 // GET /api/rooms/:id
@@ -61,11 +64,12 @@ router.get('/:id', optionalAuth, async (req, res) => {
     if (!data.zones && data.detected_objects?.zones) {
       data.zones = data.detected_objects.zones;
     }
-    return res.json(data);
+    const enriched = await enrichRoomPlacements(data, true);
+    return res.json(enriched);
   }
   const room = fallback.getRoom(req.params.id, req.user.id);
   if (!room) return res.status(404).json({ error: 'Room not found' });
-  res.json(room);
+  res.json(await enrichRoomPlacements(room, false));
 });
 
 // PUT /api/rooms/:id

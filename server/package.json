@@ -8,6 +8,7 @@
     "setup": "node scripts/setup.js",
     "seed": "node scripts/seedFurniture.js",
     "test": "vitest run",
+    "test:e2e": "vitest run __tests__/e2e.smoke.test.js",
     "test:watch": "vitest"
   },
   "dependencies": {

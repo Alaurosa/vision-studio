@@ -21,7 +21,7 @@ describe('FurnitureCard', () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByText('Vision Studio')).toBeInTheDocument();
-    expect(screen.getByText('Placeholder model')).toBeInTheDocument();
+    expect(screen.getByText('Curated model')).toBeInTheDocument();
   });
 
   it('shows preview placeholder when previewImageUrl is missing', () => {

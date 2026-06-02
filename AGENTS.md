@@ -23,7 +23,7 @@ Full-stack implementation — monorepo with React/Vite client, separate Next.js 
 | AI/LLM        | OpenAI gpt-5.4 (function calling) |
 | Python AI     | FastAPI 0.115 + OpenAI Vision gpt-5.4 (20×20 grid + wall-snap room segmentation) + Replicate (Grounding DINO + SAM 2 for room photos; constant currently named `SAM3_MODEL`) + OpenCV fallback |
 | Database      | Supabase (PostgreSQL + Auth + Storage)         |
-| 3D Models     | Kenney Furniture Kit (CC0 low-poly GLBs bundled under `client/public/models/kenney/`) resolved per item via `server/services/kenneyMapping.js`, with optional catalog `model_url` overrides. Legacy Meshy v2 route remains for future image-to-3D generation. |
+| 3D Models     | Kenney Furniture Kit (CC0 GLBs in `client/public/models/kenney/`): starter catalog sets `modelUrl` in `furnitureCatalog.js`; API catalog via `server/services/kenneyMapping.js` at seed time. GLBs are visual-only; catalog dimensions stay source of truth. Procedural fallback when `modelUrl` is missing or load fails. Meshy v2 route exists for future batch generation, not the live editor. |
 | 3D Viewer     | React Three Fiber 8.18 + @react-three/drei 9.122 + GLTFLoader |
 | Marketing     | Next.js 16.2 + React 19.2 + Tailwind CSS 4 + Supabase SSR helpers |
 | SEO           | react-helmet-async 3.0                        |
@@ -81,6 +81,23 @@ Automated coverage lives under `client/src/**/__tests__/` (catalog data, filters
 
 `RoomCanvas` click-to-place is covered by unit tests on placement helpers and store draft `addFurniture`; full Konva canvas interaction is manual-only.
 
+## Client testing — 3D furniture fallback
+
+Pure logic: `client/src/utils/__tests__/furniture3d.test.js` (`resolveFurnitureModelUrl`, `resolveProceduralCategory`, dimension inches→meters).
+
+**Manual QA checklist (RoomCanvas → 3D preview):**
+
+1. Place starter-catalog furniture in `RoomCanvas` (Furniture tab → select → click canvas).
+2. Switch the editor to **3D** view (`StudioToolbar` 2D/3D toggle).
+3. Confirm placed furniture appears in the room (not an empty floor).
+4. Place items from different starter categories (seating, tables, beds, storage, lighting, decor); confirm distinct Kenney GLB meshes (not identical procedural boxes).
+5. Confirm footprint scale roughly matches catalog dimensions (wide sofa vs small nightstand).
+6. Starter catalog items should load Kenney GLBs from `/models/kenney/*.glb` (curated `modelStatus` in `furnitureCatalog.js`).
+7. Clear `modelUrl` on a placement in devtools; confirm procedural fallback still works.
+8. Confirm no console errors when switching 2D ↔ 3D.
+
+Meshy/Tripo and other external 3D APIs are **not** called from the editor viewer; procedural fallback remains required when GLB is absent or fails.
+
 ## Monorepo Structure
 
 ```
@@ -124,6 +141,7 @@ vision-studio/
 │       │   ├── furnitureDisplay.js # formatFurnitureDimensions, provider/model status labels for catalog cards
 │       │   ├── furnitureCatalogFilters.js # filterStarterFurnitureCatalog for FurnitureCatalogPanel search/category
 │       │   ├── furniturePlacement.js   # createPlacedFurnitureFromCatalogItem, getFurnitureFootprintSize (catalog → placement)
+│       │   ├── furniture3d.js          # 3D render helpers: modelUrl resolution, starter category→procedural map, inches→meters dimensions
 │       │   ├── collision.js      # AABB detection (arbitrary rotation), overlap check, room bounds validation
 │       │   ├── floorplanGeometry.js # Shared floorplan geometry normalization for project-level 2D/3D overlays (rect + polygon)
 │       │   ├── projectCompat.js  # Frontend-only project compatibility layer (localStorage `vs-projects-v1`) + helper metadata for Phase 2 schema planning
@@ -131,7 +149,7 @@ vision-studio/
 │       │   ├── roomWallMath.js   # Wall geometry helpers (snap/clamp/move wall joints, rectangle perimeter, segment scaling, polygon vs segment detection)
 │       │   └── visionGate.js    # Client-side check that whole-property vision (`globalVision.propertyVision` + style/mood rules) is complete
 │       ├── data/
-│       │   └── furnitureCatalog.js # Starter catalog: `FURNITURE_CATEGORIES`, `STARTER_FURNITURE_CATALOG`, lookup helpers (for future `FurnitureCatalogPanel`)
+│       │   └── furnitureCatalog.js # Starter catalog + `kenneyCuratedModel()` Kenney GLB metadata
 │       ├── components/
 │       │   ├── project/
 │       │   │   └── ProjectVisionIntake.jsx   # Project Vision Assistant (`/studio/project/:id/vision`); `whole_project` chat → `globalVision`
@@ -168,8 +186,8 @@ vision-studio/
 │       │   ├── viewer/
 │       │   │   ├── RoomViewer3D.jsx   # React Three Fiber — floor/walls/GLB furniture + OrbitControls + Suspense loading
 │       │   │   ├── ProjectViewer3D.jsx # Project-level 3D fallback preview: places linked rooms in relative bounding boxes (no per-space layout)
-│       │   │   ├── SmartFurnitureModel.jsx # Loads real GLBs from model_url; falls back to ProceduralFurniture when none exists
-│       │   │   └── ProceduralFurniture.jsx # Category-specific Three.js primitive models (sofa, bed, desk, chair, table, bookshelf, dresser, tv_stand, etc.) — no external API needed
+│       │   │   ├── SmartFurnitureModel.jsx # GLB when model_url/modelUrl set; else ProceduralFurniture via furniture3d category map
+│       │   │   └── ProceduralFurniture.jsx # Category-specific Three.js primitives (legacy API + starter: seating→sofa, tables, beds, storage, lamp, decor)
 │       │   └── chatbot/
 │       │       ├── ChatPanel.jsx      # Enhanced agentic chat sidebar — rich messages, style prompts, textarea input, auto-refresh
 │       │       ├── MessageBubble.jsx  # Rich message renderer — inline markdown, action result cards, assistant avatar
@@ -466,8 +484,8 @@ All tables use Row Level Security — users can only access their own data. The 
 ## Notable Behaviors
 
 - Furniture can be rotated freely in the 2D editor via the Konva transformer handle, 15° toolbar nudges, or the in-canvas rotation slider.
-- The 3D viewer renders furniture using `SmartFurnitureModel`, which now **defaults to loading a Kenney CC0 GLB** resolved from each catalog item's `model_url` (populated at seed time by `resolveModelUrl` in `server/services/kenneyMapping.js`). Models are uniform-scaled to 95% of the item's declared `width × depth × height`, centered on the group origin so they sit on the floor, and support a `model_rotation_y` override for one-off facing fixes. `ProceduralFurniture` — category-specific 3D models built from Three.js primitives (sofas have cushions + arms, beds have headboards + pillows, bookshelves have shelves, desks have side panels, TVs sit on stands, etc.) — remains the graceful fallback whenever `model_url` is null or GLB loading fails.
-- The legacy Meshy v2 image-to-3D route (`/api/models/*`) remains available for future GLB generation but is no longer invoked by the client; the procedural approach covers all catalog items by category, and it now sits two layers removed from the default render path behind real Kenney GLBs.
+- **3D furniture rendering** (`RoomViewer3D` + `SmartFurnitureModel` + `client/src/utils/furniture3d.js`): if a placement has `model_url` or `modelUrl`, load the GLB (uniform-scaled to catalog footprint/dimensions, `model_rotation_y` optional); on load error, fall back to `ProceduralFurniture`. **Starter catalog** (`client/src/data/furnitureCatalog.js`) ships curated Kenney `modelUrl` values (`modelStatus: curated`, `modelSourceType: kenney`, CC0 attribution fields); GLBs are visual proxies only—**catalog inch dimensions remain the layout source of truth**. Procedural shapes still render when `modelUrl` is null or GLB load fails. This path does **not** call Meshy/Tripo from the editor.
+- The legacy Meshy v2 route (`/api/models/*`) and server `kenneyMapping.js` remain for seeded API catalog items but are not required for starter-catalog editor placements.
 - Floorplan upload uses a 3-stage pipeline: (1) 20×20 grid overlay drawn on image, (2) GPT-5.4 identifies rooms using grid coordinates — returns rectangular bboxes for simple rooms and polygon vertices for L-shaped/irregular rooms (only real habitable rooms — no hallways, stairs, or entries), (3) OpenCV wall-snap aligns each bbox edge to the nearest architectural wall. Results are normalized into editable `zones` stored in room-local coordinates.
 - The RoomEditor (`upload/RoomEditor.jsx`) supports both rectangular and polygon room shapes. Users can draw rectangles (click-drag) or polygons (click vertices, close by clicking first vertex or "Close Shape" button). AI-detected polygons are rendered as SVG polygons with vertex handles. Room dimensions are decoupled from the visual shape.
 - The pre-editor adjust/confirm step is the geometry source of truth for the frontend project overlay: confirmed spaces persist normalized geometry on the localStorage-backed compatibility object (`project.floorplan.zones[]` and `project.spaces[].geometry` with `type`, `bbox`, optional polygon `points`, `source`) before entering the editor. The Supabase `projects`/`spaces` schema currently stores project/space metadata and room links; durable geometric room data still lives on `rooms.zones`.

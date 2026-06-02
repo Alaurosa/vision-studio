@@ -61,4 +61,32 @@ describe('furnitureCatalog', () => {
 
     expect(getFurnitureById('missing-id')).toBeNull();
   });
+
+  it('starter items with modelUrl use curated Kenney metadata', () => {
+    const curated = STARTER_FURNITURE_CATALOG.filter((item) => item.modelUrl);
+    expect(curated.length).toBe(STARTER_FURNITURE_CATALOG.length);
+
+    for (const item of curated) {
+      expect(item.modelStatus).toBe('curated');
+      expect(item.modelUrl).toMatch(/^\/models\/kenney\/.+\.glb$/);
+      expect(item.modelSourceType).toBe('kenney');
+      expect(item.modelProvider).toBe('Kenney Furniture Kit');
+      expect(item.modelLicense).toBe('CC0-1.0');
+      expect(item.modelAttribution).toBe('Kenney');
+      expect(typeof item.verifiedScale).toBe('boolean');
+    }
+  });
+
+  it('placeholder items remain valid when modelUrl is null', () => {
+    const placeholder = {
+      ...STARTER_FURNITURE_CATALOG[0],
+      id: 'test-placeholder-only',
+      modelUrl: null,
+      modelStatus: 'placeholder',
+      modelSourceType: undefined,
+    };
+    expect(isValidFurnitureCatalogItem(placeholder)).toBe(true);
+    expect(placeholder.modelUrl).toBeNull();
+    expect(placeholder.modelStatus).toBe('placeholder');
+  });
 });

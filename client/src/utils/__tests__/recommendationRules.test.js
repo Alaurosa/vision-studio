@@ -378,6 +378,79 @@ describe('recommendForRoom', () => {
   });
 });
 
+// Style tags ------------------------------------------------------------
+
+describe('recommendFurniture — style tags', () => {
+  it('boosts items tagged with the selected style', () => {
+    const cozy = recommendFurniture({
+      room: { width: 216, depth: 168 },
+      placements: [],
+      catalog: STARTER_FURNITURE_CATALOG,
+      category: 'seating',
+      options: { styleHint: 'cozy' },
+    });
+    const ids = cozy.items.map((e) => e.item.id);
+    expect(ids[0]).toBe('starter-sofa-3seat');
+    expect(cozy.items[0].reasons.join(' ')).toMatch(/cozy/i);
+  });
+
+  it('prefers compact footprints when compact style is selected', () => {
+    const compact = recommendFurniture({
+      room: { width: 216, depth: 168 },
+      placements: [],
+      catalog: STARTER_FURNITURE_CATALOG,
+      category: 'seating',
+      options: { styleHint: 'compact' },
+    });
+    expect(compact.items[0].item.id).toBe('starter-armchair');
+    expect(compact.items[0].reasons.join(' ')).toMatch(/compact/i);
+  });
+});
+
+// Physical realism & usability ------------------------------------------
+
+describe('recommendFurniture — realism and usability', () => {
+  it('never recommends items whose footprint exceeds the room', () => {
+    const result = recommendFurniture({
+      room: { width: 96, depth: 96 },
+      placements: [],
+      catalog: STARTER_FURNITURE_CATALOG,
+      category: 'seating',
+    });
+    for (const { item } of result.items) {
+      const w = item.footprint?.width ?? item.dimensions?.width ?? 0;
+      const d = item.footprint?.depth ?? item.dimensions?.depth ?? 0;
+      expect(Math.min(w, d)).toBeLessThanOrEqual(96);
+      expect(Math.max(w, d)).toBeLessThanOrEqual(96);
+    }
+  });
+
+  it('returns results sorted by descending score', () => {
+    const result = recommendFurniture({
+      room: { width: 216, depth: 168 },
+      placements: [],
+      catalog: STARTER_FURNITURE_CATALOG,
+      category: 'storage',
+    });
+    const scores = result.items.map((e) => e.score);
+    for (let i = 1; i < scores.length; i++) {
+      expect(scores[i]).toBeLessThanOrEqual(scores[i - 1]);
+    }
+  });
+
+  it('includes a human-readable reason for every recommended item', () => {
+    const result = recommendForRoom({
+      room: { width: 216, depth: 168 },
+      placements: [],
+      catalog: STARTER_FURNITURE_CATALOG,
+    });
+    for (const entry of result.items) {
+      expect(entry.reasons.length).toBeGreaterThan(0);
+      expect(entry.reasons[0].length).toBeGreaterThan(8);
+    }
+  });
+});
+
 // Cross-taxonomy matching ----------------------------------------------
 
 describe('recommendFurniture — taxonomy', () => {

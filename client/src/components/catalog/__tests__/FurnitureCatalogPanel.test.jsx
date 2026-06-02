@@ -235,6 +235,21 @@ describe('FurnitureCatalogPanel', () => {
       expect(within(recPanel).queryByText('Starter 3-Seat Sofa')).not.toBeInTheDocument();
     });
 
+    it('filters catalog and recommendations by style tag', () => {
+      setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
+
+      render(<FurnitureCatalogPanel />);
+      fireEvent.click(screen.getByRole('button', { name: 'Minimal' }));
+      expandRecommendations();
+
+      const browseList = screen.getByRole('list', { name: 'Furniture catalog results' });
+      expect(within(browseList).getByText('Starter Coffee Table')).toBeInTheDocument();
+      expect(within(browseList).queryByText('Starter 3-Seat Sofa')).not.toBeInTheDocument();
+
+      const recPanel = screen.getByTestId('recommended-collapsible-panel');
+      expect(within(recPanel).getByText(/minimal/i)).toBeInTheDocument();
+    });
+
     it('keeps search enabled while recommendations are collapsed', () => {
       setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
 

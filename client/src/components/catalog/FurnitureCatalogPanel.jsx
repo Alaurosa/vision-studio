@@ -5,6 +5,7 @@ import {
   FURNITURE_CATEGORIES,
   STARTER_FURNITURE_CATALOG,
 } from '@/data/furnitureCatalog';
+import { FURNITURE_STYLE_TAGS, getStyleTagLabel } from '@/data/furnitureStyleTags';
 import { filterStarterFurnitureCatalog } from '@/utils/furnitureCatalogFilters';
 import { recommendForRoom } from '@/utils/recommendationRules';
 import { useLayoutStore } from '@/store/layoutStore';
@@ -19,6 +20,7 @@ import { inchesToFeet } from '@/utils/scale';
 export default function FurnitureCatalogPanel({ onSelectItem, selectedItemId: selectedItemIdProp }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [styleTagId, setStyleTagId] = useState('');
   const [recommendationsOpen, setRecommendationsOpen] = useState(false);
   const [internalSelectedItemId, setInternalSelectedItemId] = useState(null);
   const selectedItemId = selectedItemIdProp ?? internalSelectedItemId;
@@ -33,8 +35,14 @@ export default function FurnitureCatalogPanel({ onSelectItem, selectedItemId: se
       filterStarterFurnitureCatalog(STARTER_FURNITURE_CATALOG, {
         searchQuery,
         categoryId,
+        styleTagId,
       }),
-    [searchQuery, categoryId],
+    [searchQuery, categoryId, styleTagId],
+  );
+
+  const recommendationOptions = useMemo(
+    () => (styleTagId ? { styleHint: styleTagId } : {}),
+    [styleTagId],
   );
 
   const roomRecommendations = useMemo(() => {
@@ -44,8 +52,9 @@ export default function FurnitureCatalogPanel({ onSelectItem, selectedItemId: se
       placements: furniture,
       catalog: STARTER_FURNITURE_CATALOG,
       category: categoryId,
+      options: recommendationOptions,
     });
-  }, [roomKnown, categoryId, room, furniture]);
+  }, [roomKnown, categoryId, room, furniture, recommendationOptions]);
 
   const recommendedEntries = roomRecommendations?.items ?? [];
 
@@ -67,7 +76,7 @@ export default function FurnitureCatalogPanel({ onSelectItem, selectedItemId: se
     ? 'Set room size to unlock picks'
     : recommendedEntries.length === 0
       ? 'No fits for current filters'
-      : `${recommendedEntries.length} pick${recommendedEntries.length === 1 ? '' : 's'} for this room`;
+      : `${recommendedEntries.length} pick${recommendedEntries.length === 1 ? '' : 's'} for this room${styleTagId ? ` · ${getStyleTagLabel(styleTagId)}` : ''}`;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -112,6 +121,25 @@ export default function FurnitureCatalogPanel({ onSelectItem, selectedItemId: se
           ))}
         </div>
 
+        <div>
+          <p className="mb-1.5 text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">Style</p>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by style">
+            <CategoryChip
+              label="Any"
+              active={styleTagId === ''}
+              onClick={() => setStyleTagId('')}
+            />
+            {FURNITURE_STYLE_TAGS.map((style) => (
+              <CategoryChip
+                key={style.id}
+                label={style.label}
+                active={styleTagId === style.id}
+                onClick={() => setStyleTagId(style.id)}
+              />
+            ))}
+          </div>
+        </div>
+
         <p className="text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]" aria-live="polite">
           {browseLabel}
         </p>
@@ -125,6 +153,7 @@ export default function FurnitureCatalogPanel({ onSelectItem, selectedItemId: se
           roomKnown={roomKnown}
           roomRecommendations={roomRecommendations}
           categoryId={categoryId}
+          styleTagId={styleTagId}
           recommendedEntries={recommendedEntries}
           selectedItemId={selectedItemId}
           onSelect={handleSelect}
@@ -165,6 +194,7 @@ export default function FurnitureCatalogPanel({ onSelectItem, selectedItemId: se
  *   roomKnown: boolean,
  *   roomRecommendations: ReturnType<typeof recommendForRoom> | null,
  *   categoryId: string,
+ *   styleTagId: string,
  *   recommendedEntries: Array<{ item: import('@/data/furnitureCatalog.js').FurnitureCatalogItem, reasons?: string[] | null }>,
  *   selectedItemId: string | null,
  *   onSelect: (item: import('@/data/furnitureCatalog.js').FurnitureCatalogItem) => void,
@@ -177,6 +207,7 @@ function RecommendedCollapsible({
   roomKnown,
   roomRecommendations,
   categoryId,
+  styleTagId,
   recommendedEntries,
   selectedItemId,
   onSelect,
@@ -246,6 +277,7 @@ function RecommendedCollapsible({
               {categoryId
                 ? ` · ${FURNITURE_CATEGORIES.find((c) => c.id === categoryId)?.label ?? categoryId}`
                 : ''}
+              {styleTagId ? ` · ${getStyleTagLabel(styleTagId)}` : ''}
             </p>
           )}
 

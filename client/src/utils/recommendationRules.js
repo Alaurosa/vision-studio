@@ -17,6 +17,7 @@
  *    the same way as the rest of the editor.
  */
 
+import { itemHasStyleTag, getStyleTagLabel } from '@/data/furnitureStyleTags';
 import { MIN_CLEARANCE_IN } from '@/utils/constants';
 import { getAABB } from '@/utils/collision';
 
@@ -440,9 +441,14 @@ function scoreItem({
   }
 
   const styleHint = (options?.styleHint || '').trim().toLowerCase();
-  if (styleHint && (item.tags || []).some((t) => String(t).toLowerCase().includes(styleHint))) {
+  if (styleHint && itemHasStyleTag(item, styleHint)) {
     score += 10;
-    reasons.push(`Matches the "${options.styleHint}" style`);
+    const label = getStyleTagLabel(styleHint);
+    reasons.push(
+      styleHint === 'compact'
+        ? 'Compact footprint — good for tighter layouts'
+        : `Matches your ${label} style`,
+    );
   }
 
   const providerHint = (options?.providerHint || '').trim().toLowerCase();

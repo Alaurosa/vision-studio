@@ -87,7 +87,7 @@ export const STARTER_FURNITURE_CATALOG = [
     footprint: { width: 84, depth: 36, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/sofa.png',
     ...kenneyCuratedModel('loungeSofaLong.glb'),
-    tags: ['living room', 'sofa', 'starter'],
+    tags: ['living room', 'sofa', 'starter', 'modern', 'cozy'],
     sourceUrl: null,
   },
   {
@@ -99,7 +99,7 @@ export const STARTER_FURNITURE_CATALOG = [
     footprint: { width: 32, depth: 34, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/sofa.png',
     ...kenneyCuratedModel('loungeChair.glb'),
-    tags: ['living room', 'chair', 'starter'],
+    tags: ['living room', 'chair', 'starter', 'cozy', 'compact'],
     sourceUrl: null,
   },
   {
@@ -111,7 +111,7 @@ export const STARTER_FURNITURE_CATALOG = [
     footprint: { width: 48, depth: 24, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/table.png',
     ...kenneyCuratedModel('tableCoffee.glb'),
-    tags: ['living room', 'table', 'starter'],
+    tags: ['living room', 'table', 'starter', 'minimal', 'modern', 'compact'],
     sourceUrl: null,
   },
   {
@@ -123,7 +123,7 @@ export const STARTER_FURNITURE_CATALOG = [
     footprint: { width: 72, depth: 36, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/table.png',
     ...kenneyCuratedModel('table.glb'),
-    tags: ['dining', 'table', 'starter'],
+    tags: ['dining', 'table', 'starter', 'modern', 'neutral'],
     sourceUrl: null,
   },
   {
@@ -135,7 +135,7 @@ export const STARTER_FURNITURE_CATALOG = [
     footprint: { width: 32, depth: 12, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/table.png',
     ...kenneyCuratedModel('bookcaseOpen.glb'),
-    tags: ['storage', 'shelf', 'starter'],
+    tags: ['storage', 'shelf', 'starter', 'minimal', 'neutral', 'compact'],
     sourceUrl: null,
   },
   {
@@ -147,7 +147,7 @@ export const STARTER_FURNITURE_CATALOG = [
     footprint: { width: 60, depth: 18, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/table.png',
     ...kenneyCuratedModel('cabinetBedDrawer.glb'),
-    tags: ['bedroom', 'storage', 'starter'],
+    tags: ['bedroom', 'storage', 'starter', 'neutral', 'modern'],
     sourceUrl: null,
   },
   {
@@ -159,7 +159,7 @@ export const STARTER_FURNITURE_CATALOG = [
     footprint: { width: 60, depth: 80, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/bed.png',
     ...kenneyCuratedModel('bedDouble.glb'),
-    tags: ['bedroom', 'bed', 'starter'],
+    tags: ['bedroom', 'bed', 'starter', 'cozy', 'neutral'],
     sourceUrl: null,
   },
   {
@@ -171,7 +171,7 @@ export const STARTER_FURNITURE_CATALOG = [
     footprint: { width: 14, depth: 14, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/table.png',
     ...kenneyCuratedModel('lampRoundFloor.glb'),
-    tags: ['lighting', 'lamp', 'starter'],
+    tags: ['lighting', 'lamp', 'starter', 'minimal', 'modern', 'compact'],
     sourceUrl: null,
   },
   {
@@ -183,7 +183,7 @@ export const STARTER_FURNITURE_CATALOG = [
     footprint: { width: 96, depth: 72, unit: 'in' },
     previewImageUrl: '/furniture/placeholders/table.png',
     ...kenneyCuratedModel('rugRectangle.glb'),
-    tags: ['decor', 'rug', 'starter'],
+    tags: ['decor', 'rug', 'starter', 'cozy', 'neutral'],
     sourceUrl: null,
   },
 ];

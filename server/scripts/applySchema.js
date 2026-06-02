@@ -18,7 +18,16 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const schemaPath = path.resolve(__dirname, '../../supabase/schema.sql');
 const schemaSql = fs.readFileSync(schemaPath, 'utf8');
 
-const TABLES = ['providers', 'furniture_catalog', 'rooms', 'placements', 'layout_exports', 'chat_messages'];
+const TABLES = [
+  'providers',
+  'furniture_catalog',
+  'rooms',
+  'placements',
+  'layout_exports',
+  'chat_messages',
+  'projects',
+  'spaces',
+];
 
 async function verifyTables() {
   const results = {};

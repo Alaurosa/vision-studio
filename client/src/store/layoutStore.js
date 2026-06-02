@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { getAABB, overlaps, withinRoom, validateAll } from '@/utils/collision';
-import { GRID_SNAP_INCHES, getZoneColor } from '@/utils/constants';
-import { computeRotation } from '@/utils/scale';
+import { CATEGORY_COLORS, GRID_SNAP_INCHES, getZoneColor } from '@/utils/constants';
+import { computeRotation, getRotatedBoundingBox } from '@/utils/scale';
+import { normalizeRoomInterior, roomWithInterior } from '@/data/roomInterior';
 
 const snapToGrid = (value, gridSize) => Math.round(value / gridSize) * gridSize;
 
@@ -63,6 +65,61 @@ function furnitureBelongsToZone(item, zone) {
   return center.x >= bounds.left && center.x <= bounds.right && center.y >= bounds.top && center.y <= bounds.bottom;
 }
 
+/** Pure selector for room-scoped 3D/2D furniture lists (active zone filters by center point). */
+export function selectVisibleFurniture(state) {
+  const { furniture, zones, activeZoneId } = state;
+  if (!activeZoneId) return furniture;
+  const activeZone = zones.find((zone) => zone.id === activeZoneId) || null;
+  if (!activeZone) return furniture;
+  return furniture.filter((item) => furnitureBelongsToZone(item, activeZone));
+}
+
+function clampPlacementToBounds({ x, y, width, depth, rotation = 0 }, bounds) {
+  const box = getRotatedBoundingBox(width || 0, depth || 0, rotation || 0);
+  const rightLimit = Math.max(bounds.left, bounds.right - box.width);
+  const bottomLimit = Math.max(bounds.top, bounds.bottom - box.depth);
+  return {
+    x: Math.min(Math.max(bounds.left, x), rightLimit),
+    y: Math.min(Math.max(bounds.top, y), bottomLimit),
+  };
+}
+
+function buildPlacementFromCatalog(item, position = null, state) {
+  const room = state.room;
+  const activeZone = state.getActiveZone();
+  const bounds = getZoneBounds(activeZone) || {
+    left: 0,
+    top: 0,
+    right: room?.width || item.width || 0,
+    bottom: room?.depth || item.depth || 0,
+  };
+  const width = Number(item.width) || 24;
+  const depth = Number(item.depth) || 24;
+  const rotation = Number(item.rotation) || 0;
+  const rawSlot = position
+    ? clampPlacementToBounds({ x: position.x, y: position.y, width, depth, rotation }, bounds)
+    : state.findOpenSlot(width, depth);
+  const slot = clampPlacementToBounds({ ...rawSlot, width, depth, rotation }, bounds);
+
+  return {
+    catalog_id: item.catalog_id || item.id || null,
+    name: item.name,
+    category: item.category,
+    provider: item.provider || null,
+    provider_id: item.provider_id || null,
+    width,
+    depth,
+    height: Number(item.height) || null,
+    x_inches: snapToGrid(slot.x, GRID_SNAP_INCHES),
+    y_inches: snapToGrid(slot.y, GRID_SNAP_INCHES),
+    rotation,
+    color: item.color || CATEGORY_COLORS[item.category] || CATEGORY_COLORS.default,
+    image_url: item.image_url || null,
+    model_url: item.model_url || null,
+    zone_id: activeZone?.id || item.zone_id || null,
+  };
+}
+
 function normalizeDetectedObjects(detectedObjects) {
   if (Array.isArray(detectedObjects)) return detectedObjects;
   if (Array.isArray(detectedObjects?.detections)) return detectedObjects.detections;
@@ -93,36 +150,86 @@ export const useLayoutStore = create(
       loading: false,
       viewMode: '2d',
       gridEnabled: true,
-      isChatOpen: true,
+      /** Studio canvas: drag segment wall joints when room.walls uses {start,end} format. */
+      roomWallsTool: false,
+      /** Studio canvas: resize room width/depth (handles on E / S / SE; origin fixed). */
+      roomResizeTool: false,
+      isChatOpen: false,
       undoStack: [],
       redoStack: [],
+      loadRoomFailed: false,
+      /** Starter catalog item queued for click-to-place on RoomCanvas (not persisted). */
+      selectedCatalogItem: null,
 
       // ---------- room ----------
       loadRoom: async (roomId) => {
-        // Draft rooms are purely client-side — just set them from persisted state
+        set({ loadRoomFailed: false });
+        // Draft rooms are purely client-side — set from Zustand persist (may rehydrate after first tick)
         if (isDraftId(roomId)) {
-          const { room } = get();
-          if (room?.id === roomId) {
-            // Already loaded from persist
-            set({ loading: false });
-          }
+          const tryDraft = () => {
+            const { room } = get();
+            if (room?.id === roomId) {
+              set({ loading: false, loadRoomFailed: false });
+              return true;
+            }
+            return false;
+          };
+          if (tryDraft()) return;
+          set({ loading: true });
+          let attempts = 0;
+          const tick = () => {
+            attempts += 1;
+            if (tryDraft()) return;
+            if (attempts >= 24) {
+              set({ loading: false, loadRoomFailed: true });
+              return;
+            }
+            setTimeout(tick, 40);
+          };
+          queueMicrotask(() => tick());
           return;
         }
-        set({ loading: true });
+        set((s) => {
+          const patch = { loading: true };
+          if (s.room?.id !== roomId) {
+            patch.room = null;
+            patch.furniture = [];
+            patch.selectedId = null;
+            patch.detections = [];
+            patch.zones = [];
+            patch.activeZoneId = null;
+            patch.recommendedItems = [];
+            patch.selectedCatalogItem = null;
+          }
+          return patch;
+        });
         try {
           const { data } = await api.get(`/api/rooms/${roomId}`);
           const fallbackZones = normalizeZoneObjects(data);
           set({
-            room: data,
+            room: roomWithInterior(data),
             furniture: data.placements || [],
             detections: normalizeDetectedObjects(data.detected_objects),
             zones: fallbackZones,
             activeZoneId: fallbackZones[0]?.id || null,
             loading: false,
+            loadRoomFailed: false,
           });
         } catch (e) {
           console.error('loadRoom', e);
-          set({ loading: false });
+          set({
+            loading: false,
+            loadRoomFailed: true,
+            room: null,
+            furniture: [],
+            selectedId: null,
+            detections: [],
+            zones: [],
+            activeZoneId: null,
+            recommendedItems: [],
+            undoStack: [],
+            redoStack: [],
+          });
         }
       },
 
@@ -134,7 +241,7 @@ export const useLayoutStore = create(
       // Create a local draft room (guest mode — no server call)
       createDraftRoom: (payload) => {
         const id = newDraftId();
-        const room = {
+        const room = roomWithInterior({
           id,
           name: payload.name || 'Draft Room',
           unit: payload.unit || 'inches',
@@ -143,7 +250,8 @@ export const useLayoutStore = create(
           height: payload.height || null,
           scale_px_per_inch: payload.scale_px_per_inch || null,
           walls: payload.walls || null,
-        };
+          interior: payload.interior,
+        });
         const zones = normalizeZonesArray(payload.zones || []);
         set({
           room,
@@ -176,10 +284,33 @@ export const useLayoutStore = create(
       updateRoom: async (patch) => {
         const { room } = get();
         if (!room) return;
-        set({ room: { ...room, ...patch } });
-        if (!isDraftId(room.id)) {
-          await api.put(`/api/rooms/${room.id}`, patch);
+        const previous = room;
+        const nextPatch = { ...patch };
+        if (nextPatch.interior !== undefined) {
+          nextPatch.interior = normalizeRoomInterior({
+            ...room.interior,
+            ...nextPatch.interior,
+          });
         }
+        set({ room: { ...room, ...nextPatch } });
+        if (!isDraftId(room.id)) {
+          try {
+            await api.put(`/api/rooms/${room.id}`, nextPatch);
+          } catch (e) {
+            set({ room: previous });
+            const msg = e?.response?.data?.error || e.message || 'Failed to save room';
+            toast.error(msg);
+            throw e;
+          }
+        }
+      },
+
+      updateRoomInterior: async (patch) => {
+        const { room, updateRoom } = get();
+        if (!room) return;
+        return updateRoom({
+          interior: normalizeRoomInterior({ ...room.interior, ...patch }),
+        });
       },
 
       // ---------- furniture ----------
@@ -209,6 +340,20 @@ export const useLayoutStore = create(
           const { data } = await api.post('/api/furniture/placements', { ...item, room_id: room.id });
           const placement = {
             ...data,
+            ...(item.catalogItemId != null
+              ? {
+                  catalogItemId: item.catalogItemId,
+                  dimensions: item.dimensions,
+                  footprint: item.footprint,
+                  previewImageUrl: item.previewImageUrl,
+                  modelUrl: item.modelUrl,
+                  modelStatus: item.modelStatus,
+                  tags: item.tags,
+                  sourceUrl: item.sourceUrl,
+                  x: item.x_inches ?? item.x,
+                  y: item.y_inches ?? item.y,
+                }
+              : {}),
             image_url: item.image_url || data.image_url || null,
             model_url: item.model_url || data.model_url || null,
           };
@@ -216,7 +361,16 @@ export const useLayoutStore = create(
           return placement;
         } catch (e) {
           console.error('addFurniture', e);
+          const msg = e?.response?.data?.error || e.message || 'Failed to add furniture';
+          toast.error(msg);
         }
+      },
+
+      addCatalogFurniture: async (item, position = null) => {
+        const state = get();
+        if (!state.room) return null;
+        const placement = buildPlacementFromCatalog(item, position, state);
+        return state.addFurniture(placement);
       },
 
       updateFurniture: (id, changes) => {
@@ -278,9 +432,24 @@ export const useLayoutStore = create(
       setRecommendedItems: (items) => set({ recommendedItems: items || [] }),
       clearRecommendedItems: () => set({ recommendedItems: [] }),
 
+      setSelectedCatalogItem: (item) => set({ selectedCatalogItem: item || null }),
+      clearSelectedCatalogItem: () => set({ selectedCatalogItem: null }),
+
       // ---------- ui ----------
       setViewMode: (mode) => set({ viewMode: mode }),
       toggleGrid: () => set((s) => ({ gridEnabled: !s.gridEnabled })),
+      toggleRoomWallsTool: () =>
+        set((s) => {
+          const on = !s.roomWallsTool;
+          return { roomWallsTool: on, roomResizeTool: on ? false : s.roomResizeTool };
+        }),
+      clearRoomWallsTool: () => set({ roomWallsTool: false }),
+      toggleRoomResizeTool: () =>
+        set((s) => {
+          const on = !s.roomResizeTool;
+          return { roomResizeTool: on, roomWallsTool: on ? false : s.roomWallsTool };
+        }),
+      clearRoomResizeTool: () => set({ roomResizeTool: false }),
       toggleChat: () => set((s) => ({ isChatOpen: !s.isChatOpen })),
 
       undo: () => {
@@ -375,12 +544,7 @@ export const useLayoutStore = create(
         return zones.find((zone) => zone.id === activeZoneId) || null;
       },
 
-      getVisibleFurniture: () => {
-        const { furniture } = get();
-        const activeZone = get().getActiveZone();
-        if (!activeZone) return furniture;
-        return furniture.filter((item) => furnitureBelongsToZone(item, activeZone));
-      },
+      getVisibleFurniture: () => selectVisibleFurniture(get()),
 
       // ---------- explicit save ----------
       // Force-flush all pending edits and persist current state.
@@ -404,6 +568,7 @@ export const useLayoutStore = create(
           zones,
           walls: room.walls || null,
           scale_px_per_inch: room.scale_px_per_inch || null,
+          interior: room.interior || null,
         });
 
         await Promise.all(
@@ -412,7 +577,13 @@ export const useLayoutStore = create(
               x_inches: f.x_inches,
               y_inches: f.y_inches,
               rotation: f.rotation,
+              width: f.width,
+              depth: f.depth,
+              height: f.height,
               color: f.color,
+              name: f.name,
+              zone_id: f.zone_id || null,
+              model_url: f.model_url || null,
             }).catch((e) => console.warn('save placement', f.id, e.message))
           )
         );
@@ -445,6 +616,7 @@ export const useLayoutStore = create(
               zones: zones || [],
               scale_px_per_inch: room.scale_px_per_inch || null,
               walls: room.walls || null,
+              interior: room.interior || null,
             });
           } catch (e) {
             console.warn('Saved room but zone/geometry save failed:', e.message);
@@ -475,14 +647,14 @@ export const useLayoutStore = create(
           const { data } = await api.get(`/api/rooms/${serverRoom.id}`);
           const fallbackZones = normalizeZoneObjects(data);
           set({
-            room: data,
+            room: roomWithInterior(data),
             furniture: data.placements || savedPlacements,
             zones: fallbackZones.length ? fallbackZones : zones,
             activeZoneId: (fallbackZones[0] || zones[0])?.id || null,
           });
         } catch (e) {
           set({
-            room: serverRoom,
+            room: roomWithInterior(serverRoom),
             furniture: savedPlacements,
           });
         }

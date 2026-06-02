@@ -4,9 +4,10 @@
  * Data is lost on server restart.
  */
 import { randomUUID } from 'crypto';
+import { resolveModelUrl } from './kenneyMapping.js';
 
 // Embedded catalog data (same as seedFurniture.js)
-const CATALOG = [
+const RAW_CATALOG = [
   { id: randomUUID(), category: 'sofa', name: 'SÖDERHAMN 3-seat sofa', provider: 'ikea', provider_id: 's49302521', width: 93, depth: 39, height: 33, price_usd: 699, url: 'https://www.ikea.com/us/en/p/soederhamn-sofa-fridtuna-light-beige-s39429618/', image_url: 'https://www.ikea.com/us/en/images/products/soederhamn-sofa-fridtuna-light-beige__1057770_pe848964_s5.jpg', available: true },
   { id: randomUUID(), category: 'sofa', name: 'KIVIK 3-seat sofa', provider: 'ikea', provider_id: 's49282816', width: 90, depth: 37, height: 32, price_usd: 799, url: 'https://www.ikea.com/us/en/p/kivik-sofa-tibbleby-beige-gray-s49282816/', image_url: 'https://www.ikea.com/us/en/images/products/kivik-sofa-tibbleby-beige-gray__1056144_pe848277_s5.jpg', available: true },
   { id: randomUUID(), category: 'sofa', name: 'BACKSÄLEN sofa', provider: 'ikea', provider_id: 's09518258', width: 88, depth: 36, height: 34, price_usd: 549, url: 'https://www.ikea.com/us/en/p/backsalen-sofa-katorp-natural-s09518258/', image_url: 'https://www.ikea.com/us/en/images/products/backsalen-sofa-katorp-natural__1063588_pe851528_s5.jpg', available: true },
@@ -34,6 +35,13 @@ const CATALOG = [
   { id: randomUUID(), category: 'dining_table', name: 'Owingsville Dining Table', provider: 'ashley', provider_id: 'ash-d580-25', width: 60, depth: 36, height: 30, price_usd: 449, url: 'https://www.ashleyfurniture.com/p/owingsville-dining-table/D580-25.html', image_url: 'https://ashleyfurniture.scene7.com/is/image/AshleyFurniture/D580-25-quartz?$QUARTZ$', available: true },
   { id: randomUUID(), category: 'dresser', name: 'Maribel Dresser', provider: 'ashley', provider_id: 'ash-b138-31', width: 60, depth: 15.5, height: 36, price_usd: 499, url: 'https://www.ashleyfurniture.com/p/maribel-dresser/B138-31.html', image_url: 'https://ashleyfurniture.scene7.com/is/image/AshleyFurniture/B138-31-quartz?$QUARTZ$', available: true },
 ];
+
+// Enrich each embedded item with a Kenney GLB URL when one isn't already set.
+// Keeps the rest of the module working against a stable `CATALOG` binding.
+const CATALOG = RAW_CATALOG.map((item) => ({
+  ...item,
+  model_url: item.model_url || resolveModelUrl(item),
+}));
 
 // In-memory rooms and placements (keyed by user id)
 const rooms = new Map();       // roomId -> room object

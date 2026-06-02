@@ -132,18 +132,38 @@ export function createApp() {
     }
   });
 
-  // Database status check — helps diagnose setup issues
+  // Database status check — helps diagnose setup issues. Probes all tables in
+  // parallel with a short per-table timeout so the endpoint returns within a
+  // couple of seconds even when Supabase is unreachable.
   app.get('/api/status', async (req, res) => {
-    const { supabaseAdmin } = await import('./services/supabase.js');
+    const { supabaseAdmin, hasSupabaseCredentials } = await import('./services/supabase.js');
     const tables = ['providers', 'furniture_catalog', 'rooms', 'placements', 'layout_exports', 'chat_messages', 'projects', 'spaces'];
-    const results = {};
-    let allOk = true;
 
-    for (const table of tables) {
-      const { data, error } = await supabaseAdmin.from(table).select('*').limit(0);
-      results[table] = !error;
-      if (error) allOk = false;
+    // Short-circuit when credentials are obviously missing — no point dialing out.
+    if (!hasSupabaseCredentials) {
+      return res.json({
+        database: 'unconfigured',
+        tables: Object.fromEntries(tables.map((t) => [t, false])),
+        uptime: Math.round((Date.now() - startTime) / 1000),
+        setup_hint: 'Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in root .env. The server is running in in-memory fallback mode.',
+      });
     }
+
+    const probe = async (table) => {
+      try {
+        const result = await Promise.race([
+          supabaseAdmin.from(table).select('*').limit(0),
+          new Promise((resolve) => setTimeout(() => resolve({ error: { message: 'timeout' } }), 3500)),
+        ]);
+        return !result?.error;
+      } catch {
+        return false;
+      }
+    };
+
+    const probed = await Promise.all(tables.map((t) => probe(t)));
+    const results = Object.fromEntries(tables.map((t, i) => [t, probed[i]]));
+    const allOk = probed.every(Boolean);
 
     const ref = (process.env.SUPABASE_URL || '').replace('https://', '').replace('.supabase.co', '');
     res.json({

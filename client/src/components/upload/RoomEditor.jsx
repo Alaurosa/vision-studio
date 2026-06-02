@@ -14,20 +14,92 @@ function bboxFromPolygon(polygon) {
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
 
+function isRectLikePolygon(polygon, bbox) {
+  if (!Array.isArray(polygon) || polygon.length !== 4 || !Array.isArray(bbox) || bbox.length !== 4) {
+    return false;
+  }
+  const [x1, y1, x2, y2] = bbox;
+  const corners = new Set([
+    `${Math.round(x1)},${Math.round(y1)}`,
+    `${Math.round(x2)},${Math.round(y1)}`,
+    `${Math.round(x2)},${Math.round(y2)}`,
+    `${Math.round(x1)},${Math.round(y2)}`,
+  ]);
+  const points = polygon.map(([x, y]) => `${Math.round(x)},${Math.round(y)}`);
+  return points.every((pt) => corners.has(pt));
+}
+
+function rectPolygonFromBbox([x1, y1, x2, y2]) {
+  return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
+}
+
+function getZoneBbox(zone) {
+  if (Array.isArray(zone?.bbox) && zone.bbox.length === 4) return [...zone.bbox];
+  if (zone?.geometry?.bbox) {
+    const { x = 0, y = 0, width = 100, height = 100 } = zone.geometry.bbox;
+    return [x, y, x + width, y + height];
+  }
+  if (Array.isArray(zone?.polygon) && zone.polygon.length >= 3) return bboxFromPolygon(zone.polygon);
+  return [0, 0, 100, 100];
+}
+
+function getZonePolygon(zone, bbox = getZoneBbox(zone)) {
+  if (zone?.geometry?.type === 'polygon' && Array.isArray(zone?.geometry?.points) && zone.geometry.points.length >= 3) {
+    return zone.geometry.points.map((pt) => [pt.x, pt.y]);
+  }
+  if (Array.isArray(zone?.polygon) && zone.polygon.length >= 3) return zone.polygon.map(([x, y]) => [x, y]);
+  return rectPolygonFromBbox(bbox);
+}
+
+function getZoneType(zone, bbox = getZoneBbox(zone), polygon = getZonePolygon(zone, bbox)) {
+  return Array.isArray(polygon) && polygon.length >= 3 && !isRectLikePolygon(polygon, bbox)
+    ? 'polygon'
+    : 'rect';
+}
+
+function isPolygonShape(zone) {
+  return getZoneType(zone) === 'polygon';
+}
+
+function syncZoneGeometry(zone, nextBbox, nextPolygon = null, nextType = null) {
+  const bbox = [...nextBbox];
+  const candidatePolygon = Array.isArray(nextPolygon) ? nextPolygon : getZonePolygon(zone, bbox);
+  const isPolygon = (nextType || getZoneType(zone, bbox, candidatePolygon)) === 'polygon';
+  const polygon = isPolygon ? candidatePolygon : rectPolygonFromBbox(bbox);
+  const [x1, y1, x2, y2] = bbox;
+  return {
+    ...zone,
+    bbox,
+    polygon,
+    geometry: {
+      type: isPolygon ? 'polygon' : 'rect',
+      bbox: { x: x1, y: y1, width: x2 - x1, height: y2 - y1 },
+      points: isPolygon ? polygon.map(([x, y]) => ({ x, y })) : [],
+      source: zone.geometry?.source || 'confirmed',
+    },
+  };
+}
+
+function normalizeZoneState(zone) {
+  return syncZoneGeometry(zone, getZoneBbox(zone), getZonePolygon(zone), getZoneType(zone));
+}
+
 function initZones(zones) {
   return (zones || []).map((z, i) => {
     const polygon = z.polygon && z.polygon.length >= 3 ? z.polygon : null;
     const bbox = z.bbox && z.bbox.length === 4 ? [...z.bbox] : (polygon ? bboxFromPolygon(polygon) : [0, 0, 100, 100]);
-    return {
+    return normalizeZoneState({
       id: z.id || `zone-${i}`,
       name: z.name || z.label || `Room ${i + 1}`,
       bbox,
       polygon,
+      geometry: z.geometry || null,
+      type: z.type === 'exterior' ? 'exterior' : 'interior',
       color: getZoneColor(i),
       confidence: z.confidence ?? null,
       widthIn: z.width_inches || null,
       depthIn: z.depth_inches || null,
-    };
+    });
   });
 }
 
@@ -53,7 +125,7 @@ function parseFeetInches(str) {
   return null;
 }
 
-const HANDLE_SIZE = 8;
+const HANDLE_SIZE = 12;
 
 function getHandles(bbox, scale) {
   const [x1, y1, x2, y2] = bbox;
@@ -71,7 +143,15 @@ function getHandles(bbox, scale) {
 }
 
 export default function RoomEditor({
-  imageUrl, imageWidth, imageHeight, initialZones, boundary, scalePxPerInch, onConfirm, onCancel,
+  imageUrl,
+  imageWidth,
+  imageHeight,
+  initialZones,
+  boundary,
+  scalePxPerInch,
+  onConfirm,
+  onCancel,
+  confirmError,
 }) {
   const [zones, setZones] = useState(() => initZones(initialZones));
   const [selectedId, setSelectedId] = useState(null);
@@ -82,9 +162,36 @@ export default function RoomEditor({
   const [polyPoints, setPolyPoints] = useState([]); // vertices for polygon drawing
   const [editPanel, setEditPanel] = useState(null);
   const [dragState, setDragState] = useState(null);
+  const [colorOverlay, setColorOverlay] = useState(true);
+  const [undoStack, setUndoStack] = useState([]);
 
   const svgRef = useRef(null);
   const containerRef = useRef(null);
+  const zonesRef = useRef(zones);
+  const fieldEditRef = useRef(null);
+
+  const cloneZones = useCallback(
+    (list) =>
+      (list || []).map((z) => ({
+        ...z,
+        bbox: Array.isArray(z.bbox) ? [...z.bbox] : z.bbox,
+        polygon: Array.isArray(z.polygon) ? z.polygon.map(([x, y]) => [x, y]) : z.polygon,
+        geometry: z.geometry
+          ? {
+              ...z.geometry,
+              bbox: z.geometry.bbox ? { ...z.geometry.bbox } : z.geometry.bbox,
+              points: Array.isArray(z.geometry.points)
+                ? z.geometry.points.map((pt) => ({ ...pt }))
+                : z.geometry.points,
+            }
+          : z.geometry,
+      })),
+    [],
+  );
+
+  useEffect(() => {
+    zonesRef.current = zones;
+  }, [zones]);
 
   const [viewScale, setViewScale] = useState(1);
   useEffect(() => {
@@ -101,6 +208,24 @@ export default function RoomEditor({
 
   const scale = scalePxPerInch || 1;
 
+  const pushUndoSnapshot = useCallback(() => {
+    const snap = cloneZones(zonesRef.current);
+    setUndoStack((prev) => [...prev.slice(-49), snap]);
+  }, [cloneZones]);
+
+  const undoLastChange = useCallback(() => {
+    setUndoStack((prev) => {
+      if (prev.length === 0) return prev;
+      const next = [...prev];
+      const snapshot = next.pop();
+      if (snapshot) {
+        setZones(cloneZones(snapshot).map((z) => normalizeZoneState(z)));
+        setSelectedId(null);
+      }
+      return next;
+    });
+  }, [cloneZones]);
+
   const mouseToImg = useCallback((e) => {
     const rect = svgRef.current?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
@@ -111,11 +236,22 @@ export default function RoomEditor({
   const onPointerDown = useCallback((e, zoneId, type, handleIdx) => {
     e.stopPropagation();
     e.preventDefault();
+    if (typeof e.currentTarget?.setPointerCapture === 'function') {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
     const zone = zones.find(z => z.id === zoneId);
     if (!zone) return;
+    pushUndoSnapshot();
     setSelectedId(zoneId);
-    setDragState({ zoneId, type, handleIdx, startMouse: mouseToImg(e), startBbox: [...zone.bbox] });
-  }, [zones, mouseToImg]);
+    setDragState({
+      zoneId,
+      type,
+      handleIdx,
+      startMouse: mouseToImg(e),
+      startBbox: [...zone.bbox],
+      startPolygon: Array.isArray(zone.polygon) ? zone.polygon.map(([x, y]) => [x, y]) : null,
+    });
+  }, [zones, mouseToImg, pushUndoSnapshot]);
 
   const onPointerMove = useCallback((e) => {
     if (drawing && drawStart) { setDrawEnd(mouseToImg(e)); return; }
@@ -129,9 +265,33 @@ export default function RoomEditor({
       if (z.id !== dragState.zoneId) return z;
       let [x1, y1, x2, y2] = [ox1, oy1, ox2, oy2];
       if (dragState.type === 'move') {
-        const w = x2 - x1, h = y2 - y1;
-        x1 = clamp(ox1 + dx, 0, imageWidth - w); y1 = clamp(oy1 + dy, 0, imageHeight - h);
-        x2 = x1 + w; y2 = y1 + h;
+        const w = x2 - x1;
+        const h = y2 - y1;
+        x1 = clamp(ox1 + dx, 0, imageWidth - w);
+        y1 = clamp(oy1 + dy, 0, imageHeight - h);
+        x2 = x1 + w;
+        y2 = y1 + h;
+        if (
+          Array.isArray(dragState.startPolygon)
+          && dragState.startPolygon.length >= 3
+          && !isRectLikePolygon(dragState.startPolygon, dragState.startBbox)
+        ) {
+          const polyDx = x1 - ox1;
+          const polyDy = y1 - oy1;
+          const movedPolygon = dragState.startPolygon.map(([px, py]) => [px + polyDx, py + polyDy]);
+          return syncZoneGeometry(z, [x1, y1, x2, y2], movedPolygon, 'polygon');
+        }
+      } else if (dragState.type === 'vertex') {
+        const vertexIndex = dragState.handleIdx;
+        const base = Array.isArray(dragState.startPolygon) ? dragState.startPolygon : z.polygon;
+        if (!Array.isArray(base) || base.length < 3 || vertexIndex == null) return z;
+        const nextPolygon = base.map(([px, py], idx) =>
+          idx === vertexIndex
+            ? [clamp(pos.x, 0, imageWidth), clamp(pos.y, 0, imageHeight)]
+            : [px, py],
+        );
+        const nextBbox = bboxFromPolygon(nextPolygon);
+        return syncZoneGeometry(z, nextBbox, nextPolygon, 'polygon');
       } else {
         const handles = getHandles(dragState.startBbox, viewScale);
         const h = handles[dragState.handleIdx];
@@ -140,8 +300,8 @@ export default function RoomEditor({
         if (h.dy < 0) y1 = clamp(oy1 + dy, 0, oy2 - MIN_BOX);
         if (h.dy > 0) y2 = clamp(oy2 + dy, oy1 + MIN_BOX, imageHeight);
       }
-      // Only update bbox — widthIn/depthIn stay untouched
-      return { ...z, bbox: [x1, y1, x2, y2] };
+      // Keep bbox/polygon/geometry synchronized for repeatable resize.
+      return syncZoneGeometry(z, [x1, y1, x2, y2], null, 'rect');
     }));
   }, [dragState, drawing, drawStart, mouseToImg, imageWidth, imageHeight, viewScale]);
 
@@ -150,19 +310,21 @@ export default function RoomEditor({
       const x1 = Math.min(drawStart.x, drawEnd.x), y1 = Math.min(drawStart.y, drawEnd.y);
       const x2 = Math.max(drawStart.x, drawEnd.x), y2 = Math.max(drawStart.y, drawEnd.y);
       if (x2 - x1 > MIN_BOX && y2 - y1 > MIN_BOX) {
+        pushUndoSnapshot();
         const newZone = {
           id: `zone-${Date.now()}`, name: `Space ${zones.length + 1}`,
           bbox: [x1, y1, x2, y2], color: getZoneColor(zones.length),
-          confidence: null, widthIn: null, depthIn: null,
+          confidence: null, widthIn: null, depthIn: null, type: 'interior',
         };
-        setZones(prev => [...prev, newZone]);
+        setZones(prev => [...prev, normalizeZoneState(newZone)]);
         setSelectedId(newZone.id);
       }
       setDrawStart(null); setDrawEnd(null); setDrawing(false);
       return;
     }
+    fieldEditRef.current = null;
     setDragState(null);
-  }, [drawing, drawStart, drawEnd, zones.length]);
+  }, [drawing, drawStart, drawEnd, zones.length, pushUndoSnapshot]);
 
   const onSvgPointerDown = useCallback((e) => {
     if (drawing && drawMode === 'rect') { const pos = mouseToImg(e); setDrawStart(pos); setDrawEnd(pos); return; }
@@ -177,26 +339,67 @@ export default function RoomEditor({
   /* ── zone actions ── */
   const finishPolygon = () => {
     if (polyPoints.length < 3) { setPolyPoints([]); return; }
+    pushUndoSnapshot();
     const polygon = polyPoints.map(([x, y]) => [Math.round(x), Math.round(y)]);
     const bbox = bboxFromPolygon(polygon);
     const newZone = {
       id: `zone-${Date.now()}`, name: `Room ${zones.length + 1}`,
       bbox, polygon, color: getZoneColor(zones.length),
-      confidence: null, widthIn: null, depthIn: null,
+      confidence: null, widthIn: null, depthIn: null, type: 'interior',
     };
-    setZones(prev => [...prev, newZone]);
+    setZones(prev => [...prev, normalizeZoneState(newZone)]);
     setSelectedId(newZone.id);
     setPolyPoints([]);
     setDrawing(false);
   };
   const removeZone = (id) => {
+    pushUndoSnapshot();
     setZones(prev => prev.filter(z => z.id !== id));
     if (selectedId === id) setSelectedId(null);
     if (editPanel === id) setEditPanel(null);
   };
 
   const updateZoneName = (id, name) => setZones(prev => prev.map(z => z.id === id ? { ...z, name } : z));
-  const updateZoneColor = (id, color) => setZones(prev => prev.map(z => z.id === id ? { ...z, color } : z));
+  const updateZoneColor = (id, color) => {
+    pushUndoSnapshot();
+    setZones(prev => prev.map(z => z.id === id ? { ...z, color } : z));
+  };
+  const updateZoneType = (id, type) => {
+    pushUndoSnapshot();
+    setZones(prev => prev.map(z => z.id === id ? { ...z, type } : z));
+  };
+  const convertPolygonToRect = (id) => {
+    pushUndoSnapshot();
+    setZones((prev) => prev.map((z) => {
+      if (z.id !== id) return z;
+      return syncZoneGeometry(z, getZoneBbox(z), null, 'rect');
+    }));
+    setSelectedId(id);
+  };
+
+  const updateRectFromPanel = (id, field, rawValue) => {
+    const n = Number(rawValue);
+    if (!Number.isFinite(n)) return;
+    setZones((prev) => prev.map((z) => {
+      if (z.id !== id) return z;
+      if (isPolygonShape(z)) return z;
+      const [bx1, by1, bx2, by2] = getZoneBbox(z);
+      let x = bx1;
+      let y = by1;
+      let w = bx2 - bx1;
+      let h = by2 - by1;
+      if (field === 'x') x = n;
+      if (field === 'y') y = n;
+      if (field === 'w') w = n;
+      if (field === 'h') h = n;
+      w = Math.max(MIN_BOX, w);
+      h = Math.max(MIN_BOX, h);
+      x = clamp(x, 0, imageWidth - w);
+      y = clamp(y, 0, imageHeight - h);
+      const nextBbox = [x, y, x + w, y + h];
+      return syncZoneGeometry(z, nextBbox, null, 'rect');
+    }));
+  };
 
   /* Dimension update — only changes the stored widthIn/depthIn, does NOT resize the box */
   const updateZoneDimension = (id, field, valueStr) => {
@@ -211,22 +414,73 @@ export default function RoomEditor({
   /* ── confirm — uses user-entered dimensions if available, else falls back to pixel calc ── */
   const handleConfirm = () => {
     const finalZones = zones.map((z) => {
-      const [x1, y1, x2, y2] = z.bbox;
+      const [x1, y1, x2, y2] = getZoneBbox(z);
       const wPx = x2 - x1, hPx = y2 - y1;
+      const hasPolygon = isPolygonShape(z);
       // Use the actual polygon if available, otherwise generate from bbox
-      const polygon = (z.polygon && z.polygon.length >= 3)
-        ? z.polygon.map(([x, y]) => [Math.round(x), Math.round(y)])
+      const polygon = hasPolygon
+        ? getZonePolygon(z).map(([x, y]) => [Math.round(x), Math.round(y)])
         : [[x1, y1], [x2, y1], [x2, y2], [x1, y2]].map(([x, y]) => [Math.round(x), Math.round(y)]);
       return {
         id: z.id, name: z.name, color: z.color,
+        type: z.type === 'exterior' ? 'exterior' : 'interior',
         bbox: z.bbox.map(v => Math.round(v)),
         polygon,
+        geometry: {
+          type: hasPolygon ? 'polygon' : 'rect',
+          bbox: {
+            x: Math.round(x1),
+            y: Math.round(y1),
+            width: Math.round(wPx),
+            height: Math.round(hPx),
+          },
+          points: hasPolygon
+            ? getZonePolygon(z).map(([x, y]) => ({ x: Math.round(x), y: Math.round(y) }))
+            : [],
+          source: 'confirmed',
+        },
         width: z.widthIn ? Math.round(z.widthIn) : Math.round(pxToInches(wPx, scale)),
         depth: z.depthIn ? Math.round(z.depthIn) : Math.round(pxToInches(hPx, scale)),
       };
     });
     onConfirm(finalZones);
   };
+
+  const beginFieldEdit = (key) => {
+    if (fieldEditRef.current === key) return;
+    pushUndoSnapshot();
+    fieldEditRef.current = key;
+  };
+
+  const endFieldEdit = () => {
+    fieldEditRef.current = null;
+  };
+
+  useEffect(() => {
+    const isEditableTarget = (target) => {
+      if (!(target instanceof Element)) return false;
+      if (target.closest('[contenteditable="true"]')) return true;
+      const tag = target.tagName?.toLowerCase();
+      return tag === 'input' || tag === 'textarea' || tag === 'select';
+    };
+
+    const onKeyDown = (e) => {
+      if (isEditableTarget(e.target)) return;
+      const hasSelection = Boolean(selectedId && zonesRef.current.some((z) => z.id === selectedId));
+      if ((e.key === 'Backspace' || e.key === 'Delete') && hasSelection) {
+        e.preventDefault();
+        removeZone(selectedId);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        undoLastChange();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedId, removeZone, undoLastChange]);
 
   const drawRect = useMemo(() => {
     if (!drawStart || !drawEnd) return null;
@@ -242,6 +496,7 @@ export default function RoomEditor({
         <button onClick={onCancel} className="eyebrow text-ink-500 hover:text-ink-900 transition">← Back</button>
         <div className="h-5 w-px bg-ink-900/15" />
         <div className="font-display text-lg">Adjust Spaces</div>
+        <div className="text-xs text-ink-500">Select a space, then drag edges or corners to resize.</div>
         <div className="flex-1" />
         <button onClick={() => { setDrawing(!drawing); setDrawMode('rect'); setPolyPoints([]); }}
           className={`text-[10px] uppercase tracking-editorial px-4 py-1.5 rounded-full border transition ${
@@ -253,14 +508,29 @@ export default function RoomEditor({
             drawing && drawMode === 'polygon' ? 'bg-sienna-500 text-paper-50 border-sienna-500' : 'border-ink-900/20 text-ink-700 hover:border-ink-900'}`}>
           {drawing && drawMode === 'polygon' ? `${polyPoints.length} pts` : '+ Polygon'}
         </button>
+        <button
+          onClick={() => setColorOverlay((v) => !v)}
+          className={`text-[10px] uppercase tracking-editorial px-4 py-1.5 rounded-full border transition ${
+            colorOverlay ? 'bg-ink-900 text-paper-50 border-ink-900' : 'border-ink-900/20 text-ink-700 hover:border-ink-900'
+          }`}
+        >
+          Color Overlay
+        </button>
         {drawing && drawMode === 'polygon' && polyPoints.length >= 3 && (
           <button onClick={finishPolygon}
             className="text-[10px] uppercase tracking-editorial px-4 py-1.5 rounded-full border bg-emerald-600 text-paper-50 border-emerald-600 hover:bg-emerald-700 transition">
             Close Shape ✓
           </button>
         )}
-        <button onClick={handleConfirm} className="btn-ink text-[10px] px-6 py-2">Confirm & Open Studio →</button>
+        <button onClick={handleConfirm} className="btn-ink text-[10px] px-6 py-2">
+          Confirm and open editor
+        </button>
       </div>
+      {confirmError ? (
+        <div className="shrink-0 px-6 py-2 bg-red-50 border-b border-red-200 text-[11px] text-red-800">
+          {confirmError}
+        </div>
+      ) : null}
 
       {/* Main area */}
       <div ref={containerRef} className="flex-1 flex overflow-hidden">
@@ -269,45 +539,61 @@ export default function RoomEditor({
           <div className="relative" style={{ width: imageWidth * viewScale, height: imageHeight * viewScale, cursor: drawing ? 'crosshair' : 'default' }}>
             <img src={imageUrl} alt="Floor plan" className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" draggable={false} />
             <svg ref={svgRef} viewBox={`0 0 ${imageWidth} ${imageHeight}`} className="absolute inset-0 w-full h-full"
-              onPointerDown={onSvgPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} style={{ touchAction: 'none' }}>
+              onPointerDown={onSvgPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+              style={{ touchAction: 'none' }}>
 {zones.map((z) => {
-                const [x1, y1, x2, y2] = z.bbox;
+                const [x1, y1, x2, y2] = getZoneBbox(z);
                 const w = x2 - x1, h = y2 - y1;
                 const isSelected = z.id === selectedId;
-                const hasPolygon = z.polygon && z.polygon.length >= 3;
-                const polyPoints = hasPolygon ? z.polygon.map(p => p.join(',')).join(' ') : null;
+                const hasPolygon = isPolygonShape(z);
+                const polyPoints = hasPolygon ? getZonePolygon(z).map(p => p.join(',')).join(' ') : null;
                 return (
                   <g key={z.id}>
                     {hasPolygon ? (
                       <polygon points={polyPoints} fill={z.color}
-                        fillOpacity={isSelected ? 0.35 : 0.2} stroke={z.color}
+                        fillOpacity={colorOverlay ? (isSelected ? 0.35 : 0.2) : 0} stroke={z.color}
                         strokeWidth={isSelected ? 3 / viewScale : 2 / viewScale}
                         strokeDasharray={isSelected ? 'none' : `${6 / viewScale}`}
                         style={{ cursor: drawing ? 'crosshair' : 'move' }}
                         onPointerDown={(e) => !drawing && onPointerDown(e, z.id, 'move')} />
                     ) : (
                       <rect x={x1} y={y1} width={w} height={h} fill={z.color}
-                        fillOpacity={isSelected ? 0.35 : 0.2} stroke={z.color}
+                        fillOpacity={colorOverlay ? (isSelected ? 0.35 : 0.2) : 0} stroke={z.color}
                         strokeWidth={isSelected ? 3 / viewScale : 2 / viewScale}
                         strokeDasharray={isSelected ? 'none' : `${6 / viewScale}`}
                         style={{ cursor: drawing ? 'crosshair' : 'move' }}
                         onPointerDown={(e) => !drawing && onPointerDown(e, z.id, 'move')} />
                     )}
                     <text x={x1 + 6 / viewScale} y={y1 + 18 / viewScale} fill="#fff" fontSize={13 / viewScale} fontWeight="600"
-                      style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)', pointerEvents: 'none', userSelect: 'none' }}>{z.name}</text>
+                      style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)', pointerEvents: 'auto', userSelect: 'none', cursor: drawing ? 'crosshair' : 'move' }}
+                      onPointerDown={(e) => !drawing && onPointerDown(e, z.id, 'move')}
+                    >
+                      {z.name}
+                    </text>
                     <text x={x1 + 6 / viewScale} y={y1 + 34 / viewScale} fill="#fff" fontSize={10 / viewScale} fontWeight="400" opacity={0.85}
-                      style={{ textShadow: '0 1px 2px rgba(0,0,0,0.6)', pointerEvents: 'none', userSelect: 'none' }}>
+                      style={{ textShadow: '0 1px 2px rgba(0,0,0,0.6)', pointerEvents: 'auto', userSelect: 'none', cursor: drawing ? 'crosshair' : 'move' }}
+                      onPointerDown={(e) => !drawing && onPointerDown(e, z.id, 'move')}
+                    >
                       {z.widthIn ? fmtFeetInches(z.widthIn) : fmtFeetInches(pxToInches(w, scale))} \u00d7 {z.depthIn ? fmtFeetInches(z.depthIn) : fmtFeetInches(pxToInches(h, scale))}
                     </text>
-                    {isSelected && !drawing && !hasPolygon && getHandles(z.bbox, viewScale).map((hdl, hi) => (
+                    {isSelected && !drawing && !hasPolygon && getHandles(getZoneBbox(z), viewScale).map((hdl, hi) => (
                       <rect key={hi} x={hdl.x} y={hdl.y} width={HANDLE_SIZE / viewScale} height={HANDLE_SIZE / viewScale}
-                        fill="#fff" stroke={z.color} strokeWidth={1.5 / viewScale} style={{ cursor: hdl.cursor }}
+                        fill="#ffffff"
+                        stroke="#1e3a8a"
+                        strokeWidth={2 / viewScale}
+                        rx={1.5 / viewScale}
+                        style={{ cursor: hdl.cursor, pointerEvents: 'all' }}
                         onPointerDown={(e) => onPointerDown(e, z.id, 'resize', hi)} />
                     ))}
-                    {isSelected && !drawing && hasPolygon && z.polygon.map((pt, pi) => (
+                    {isSelected && !drawing && hasPolygon && getZonePolygon(z).map((pt, pi) => (
                       <circle key={pi} cx={pt[0]} cy={pt[1]} r={4 / viewScale}
-                        fill="#fff" stroke={z.color} strokeWidth={1.5 / viewScale}
-                        style={{ cursor: 'move' }} />
+                        fill="#ffffff" stroke="#1e3a8a" strokeWidth={2 / viewScale}
+                        style={{ cursor: 'grab', pointerEvents: 'all' }}
+                        onPointerDown={(e) => onPointerDown(e, z.id, 'vertex', pi)}
+                      />
                     ))}
                   </g>
                 );
@@ -357,6 +643,7 @@ export default function RoomEditor({
               const [x1, y1, x2, y2] = z.bbox;
               const wIn = z.widthIn || pxToInches(x2 - x1, scale);
               const hIn = z.depthIn || pxToInches(y2 - y1, scale);
+              const isPoly = isPolygonShape(z);
               const isSelected = z.id === selectedId;
               const isEditing = editPanel === z.id;
 
@@ -381,20 +668,116 @@ export default function RoomEditor({
                             <div className="text-[10px] uppercase tracking-editorial text-ink-500 mb-1">Space Name</div>
                             <input className="input-field text-sm" value={z.name} onChange={(e) => updateZoneName(z.id, e.target.value)} />
                           </label>
-
                           <label className="block">
-                            <div className="text-[10px] uppercase tracking-editorial text-ink-500 mb-1">Width <span className="text-ink-400">(feet'inches")</span></div>
-                            <input className="input-field text-sm" defaultValue={z.widthIn ? fmtFeetInches(z.widthIn) : fmtFeetInches(pxToInches(x2 - x1, scale))}
-                              onBlur={(e) => updateZoneDimension(z.id, 'width', e.target.value)}
-                              onKeyDown={(e) => e.key === 'Enter' && updateZoneDimension(z.id, 'width', e.target.value)} placeholder="12'6&quot;" />
+                            <div className="text-[10px] uppercase tracking-editorial text-ink-500 mb-1">Space Type</div>
+                            <select
+                              className="input-field text-sm bg-transparent"
+                              value={z.type === 'exterior' ? 'exterior' : 'interior'}
+                              onFocus={() => beginFieldEdit(`type-${z.id}`)}
+                              onBlur={endFieldEdit}
+                              onChange={(e) => updateZoneType(z.id, e.target.value)}
+                            >
+                              <option value="interior">Interior</option>
+                              <option value="exterior">Exterior</option>
+                            </select>
                           </label>
 
-                          <label className="block">
-                            <div className="text-[10px] uppercase tracking-editorial text-ink-500 mb-1">Depth <span className="text-ink-400">(feet'inches")</span></div>
-                            <input className="input-field text-sm" defaultValue={z.depthIn ? fmtFeetInches(z.depthIn) : fmtFeetInches(pxToInches(y2 - y1, scale))}
-                              onBlur={(e) => updateZoneDimension(z.id, 'depth', e.target.value)}
-                              onKeyDown={(e) => e.key === 'Enter' && updateZoneDimension(z.id, 'depth', e.target.value)} placeholder="10'0&quot;" />
-                          </label>
+                          {!isPoly ? (
+                            <>
+                              <div className="grid grid-cols-2 gap-2">
+                                <label className="block">
+                                  <div className="text-[10px] uppercase tracking-editorial text-ink-500 mb-1">X</div>
+                                  <input
+                                    className="input-field text-sm"
+                                    type="number"
+                                    value={Math.round(x1)}
+                                    onFocus={() => beginFieldEdit(`x-${z.id}`)}
+                                    onBlur={endFieldEdit}
+                                    onChange={(e) => updateRectFromPanel(z.id, 'x', e.target.value)}
+                                  />
+                                </label>
+                                <label className="block">
+                                  <div className="text-[10px] uppercase tracking-editorial text-ink-500 mb-1">Y</div>
+                                  <input
+                                    className="input-field text-sm"
+                                    type="number"
+                                    value={Math.round(y1)}
+                                    onFocus={() => beginFieldEdit(`y-${z.id}`)}
+                                    onBlur={endFieldEdit}
+                                    onChange={(e) => updateRectFromPanel(z.id, 'y', e.target.value)}
+                                  />
+                                </label>
+                                <label className="block">
+                                  <div className="text-[10px] uppercase tracking-editorial text-ink-500 mb-1">Width</div>
+                                  <input
+                                    className="input-field text-sm"
+                                    type="number"
+                                    value={Math.round(x2 - x1)}
+                                    onFocus={() => beginFieldEdit(`w-${z.id}`)}
+                                    onBlur={endFieldEdit}
+                                    onChange={(e) => updateRectFromPanel(z.id, 'w', e.target.value)}
+                                  />
+                                </label>
+                                <label className="block">
+                                  <div className="text-[10px] uppercase tracking-editorial text-ink-500 mb-1">Height</div>
+                                  <input
+                                    className="input-field text-sm"
+                                    type="number"
+                                    value={Math.round(y2 - y1)}
+                                    onFocus={() => beginFieldEdit(`h-${z.id}`)}
+                                    onBlur={endFieldEdit}
+                                    onChange={(e) => updateRectFromPanel(z.id, 'h', e.target.value)}
+                                  />
+                                </label>
+                              </div>
+                              <label className="block">
+                                <div className="text-[10px] uppercase tracking-editorial text-ink-500 mb-1">Width <span className="text-ink-400">(feet'inches")</span></div>
+                                <input className="input-field text-sm" defaultValue={z.widthIn ? fmtFeetInches(z.widthIn) : fmtFeetInches(pxToInches(x2 - x1, scale))}
+                                  onFocus={() => beginFieldEdit(`width-dim-${z.id}`)}
+                                  onBlur={(e) => {
+                                    updateZoneDimension(z.id, 'width', e.target.value);
+                                    endFieldEdit();
+                                  }}
+                                  onKeyDown={(e) => e.key === 'Enter' && updateZoneDimension(z.id, 'width', e.target.value)} placeholder="12'6&quot;" />
+                              </label>
+                              <label className="block">
+                                <div className="text-[10px] uppercase tracking-editorial text-ink-500 mb-1">Depth <span className="text-ink-400">(feet'inches")</span></div>
+                                <input className="input-field text-sm" defaultValue={z.depthIn ? fmtFeetInches(z.depthIn) : fmtFeetInches(pxToInches(y2 - y1, scale))}
+                                  onFocus={() => beginFieldEdit(`depth-dim-${z.id}`)}
+                                  onBlur={(e) => {
+                                    updateZoneDimension(z.id, 'depth', e.target.value);
+                                    endFieldEdit();
+                                  }}
+                                  onKeyDown={(e) => e.key === 'Enter' && updateZoneDimension(z.id, 'depth', e.target.value)} placeholder="10'0&quot;" />
+                              </label>
+                            </>
+                          ) : (
+                            <div className="rounded-md border border-ink-900/10 bg-paper-100 p-3">
+                              <p className="text-xs text-ink-600 leading-relaxed">
+                                This is a custom polygon space. You can move it, convert it to a rectangle, or delete and redraw it.
+                              </p>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  className="btn-ghost text-[10px]"
+                                  onClick={() => convertPolygonToRect(z.id)}
+                                >
+                                  Convert to Editable Rectangle
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-ghost text-[10px]"
+                                  onClick={() => {
+                                    setDrawing(true);
+                                    setDrawMode('polygon');
+                                    setPolyPoints([]);
+                                  }}
+                                >
+                                  Draw Replacement Shape
+                                </button>
+                              </div>
+                            </div>
+                          )}
 
                           {/* Color: preset swatches + native color picker */}
                           <div>
@@ -406,7 +789,7 @@ export default function RoomEditor({
                                   style={{ backgroundColor: c }} />
                               ))}
                               <label className="w-5 h-5 rounded-full border-2 border-dashed border-ink-900/30 cursor-pointer overflow-hidden relative hover:border-ink-900/60 transition" title="Custom color">
-                                <input type="color" value={z.color} onChange={(e) => updateZoneColor(z.id, e.target.value)}
+                                <input type="color" value={z.color} onFocus={() => beginFieldEdit(`color-${z.id}`)} onBlur={endFieldEdit} onChange={(e) => updateZoneColor(z.id, e.target.value)}
                                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                                 <span className="absolute inset-0 grid place-items-center text-[8px] text-ink-500 font-bold">+</span>
                               </label>
@@ -437,7 +820,14 @@ export default function RoomEditor({
             <div className="flex items-center justify-between mb-3">
               <span className="eyebrow text-ink-500">{zones.length} spaces</span>
             </div>
-            <button onClick={handleConfirm} className="btn-ink w-full text-[10px] py-2.5">Confirm & Open Studio →</button>
+            {confirmError ? (
+              <p className="text-xs text-red-700 bg-red-50 border border-red-200/80 rounded-lg px-3 py-2 mb-3">
+                {confirmError}
+              </p>
+            ) : null}
+            <button onClick={handleConfirm} className="btn-ink w-full text-[10px] py-2.5">
+              Confirm and open editor
+            </button>
           </div>
         </aside>
       </div>

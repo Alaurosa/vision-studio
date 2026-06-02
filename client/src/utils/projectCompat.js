@@ -48,6 +48,7 @@ export function createProjectDraft({ name, propertyType, startMode }) {
     startMode: startMode || 'blank',
     status: 'in_progress',
     globalVision: {
+      propertyVision: '',
       styleKeywords: [],
       moodVibe: '',
       budgetRange: '',
@@ -57,6 +58,8 @@ export function createProjectDraft({ name, propertyType, startMode }) {
     },
     theme: null,
     spaces: [],
+    confirmationCompletedAt: null,
+    visionIntakeCompletedAt: null,
     updatedAt: now,
     createdAt: now,
   };
@@ -187,9 +190,12 @@ export function toDashboardProjects(rooms) {
   if (Array.isArray(rooms) && rooms.length > 0) {
     const roomIds = new Set(rooms.map((r) => r.id));
     for (const project of projects) {
-      project.spaces = (project.spaces || []).filter((space) => {
-        if (!space.roomId) return true;
-        return roomIds.has(space.roomId);
+      project.spaces = (project.spaces || []).map((space) => {
+        const linkedRoomId = space.roomId ?? space.room_id ?? null;
+        if (!linkedRoomId) return space;
+        // Keep spaces visible even when their room link is stale after migrations/account changes.
+        if (!roomIds.has(linkedRoomId)) return { ...space, missingLinkedRoom: true };
+        return { ...space, missingLinkedRoom: false };
       });
     }
   }

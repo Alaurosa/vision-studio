@@ -1,5 +1,6 @@
 import '../config/env.js';
 import { supabaseAdmin } from '../services/supabase.js';
+import { resolveModelUrl } from '../services/kenneyMapping.js';
 
 const IKEA_PRODUCTS = [
   // SOFAS
@@ -46,7 +47,23 @@ const ASHLEY_PRODUCTS = [
 
 export async function seed() {
   console.log('Seeding furniture catalog...');
-  const all = [...IKEA_PRODUCTS, ...ASHLEY_PRODUCTS];
+  const rawItems = [...IKEA_PRODUCTS, ...ASHLEY_PRODUCTS];
+
+  // Enrich each item with a resolved Kenney GLB URL (don't clobber explicit model_url).
+  const all = rawItems.map((item) => ({
+    ...item,
+    model_url:
+      item.model_url ||
+      resolveModelUrl({
+        provider: item.provider,
+        provider_id: item.provider_id,
+        name: item.name,
+        category: item.category,
+      }),
+  }));
+
+  const withModel = all.filter((i) => i.model_url).length;
+  const withoutModel = all.length - withModel;
 
   for (let i = 0; i < all.length; i += 50) {
     const chunk = all.slice(i, i + 50);
@@ -58,6 +75,9 @@ export async function seed() {
     else console.log(`  Inserted ${chunk.length} items`);
   }
   console.log(`\n✅ Seeded ${all.length} furniture items.`);
+  console.log(
+    `   model_url coverage: ${withModel}/${all.length} resolved to Kenney GLB, ${withoutModel} fell back to null (procedural).`
+  );
 }
 
 seed();

@@ -18,6 +18,27 @@ function findPlacement(placements, name) {
   return placements.find(p => fuzzyMatch(p.name || '', name));
 }
 
+async function dbUpdatePlacement(id, patch) {
+  const { error } = await supabaseAdmin
+    .from('placements')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  return error?.message || null;
+}
+
+async function dbInsertPlacement(placement) {
+  let { data, error } = await supabaseAdmin.from('placements').insert(placement).select().single();
+  if (error && placement.image_url && /image_url/i.test(error.message || '')) {
+    const { image_url, ...rest } = placement;
+    ({ data, error } = await supabaseAdmin.from('placements').insert(rest).select().single());
+    if (!error && data) {
+      return { error: null, data: { ...data, image_url } };
+    }
+  }
+  if (error) return { error: error.message, data: null };
+  return { error: null, data };
+}
+
 /**
  * OpenAI function-calling tool definitions for the layout assistant.
  */
@@ -189,24 +210,31 @@ export async function executeFunction(fnName, args, roomId, placements, room, db
       const p = findPlacement(placements, args.furniture_name);
       if (!p) return { success: false, message: `Furniture "${args.furniture_name}" not found` };
       if (db) {
-        await supabaseAdmin
-          .from('placements')
-          .update({ x_inches: args.x_inches, y_inches: args.y_inches, updated_at: new Date().toISOString() })
-          .eq('id', p.id);
+        const err = await dbUpdatePlacement(p.id, { x_inches: args.x_inches, y_inches: args.y_inches });
+        if (err) return { success: false, message: err };
       } else {
         fallback.updatePlacement(p.id, { x_inches: args.x_inches, y_inches: args.y_inches });
       }
-      return { success: true, message: `Moved ${p.name} to (${args.x_inches}", ${args.y_inches}")` };
+      return {
+        success: true,
+        placement_id: p.id,
+        message: `Moved ${p.name} to (${args.x_inches}", ${args.y_inches}")`,
+      };
     }
     case 'rotate_furniture': {
       const p = findPlacement(placements, args.furniture_name);
       if (!p) return { success: false, message: `Furniture "${args.furniture_name}" not found` };
       if (db) {
-        await supabaseAdmin.from('placements').update({ rotation: args.rotation }).eq('id', p.id);
+        const err = await dbUpdatePlacement(p.id, { rotation: args.rotation });
+        if (err) return { success: false, message: err };
       } else {
         fallback.updatePlacement(p.id, { rotation: args.rotation });
       }
-      return { success: true, message: `Rotated ${p.name} to ${args.rotation}°` };
+      return {
+        success: true,
+        placement_id: p.id,
+        message: `Rotated ${p.name} to ${args.rotation}°`,
+      };
     }
     case 'suggest_furniture': {
       let data;
@@ -252,23 +280,39 @@ export async function executeFunction(fnName, args, roomId, placements, room, db
         y_inches: args.y_inches || 12,
         rotation: args.rotation || 0,
         color: '#d4a27a',
+        image_url: item.image_url || null,
+        model_url: item.model_url || null,
       };
       if (db) {
-        await supabaseAdmin.from('placements').insert(placement);
-      } else {
-        fallback.addPlacement(placement);
+        const { error, data } = await dbInsertPlacement(placement);
+        if (error) return { success: false, message: error };
+        return {
+          success: true,
+          message: `Added ${item.name} to the room`,
+          added_item: { ...data, image_url: item.image_url, model_url: item.model_url },
+        };
       }
-      return { success: true, message: `Added ${item.name} to the room`, added_item: { ...placement, image_url: item.image_url, model_url: item.model_url } };
+      const added = fallback.addPlacement(placement);
+      return {
+        success: true,
+        message: `Added ${item.name} to the room`,
+        added_item: { ...added, image_url: item.image_url, model_url: item.model_url },
+      };
     }
     case 'remove_furniture': {
       const p = findPlacement(placements, args.furniture_name);
       if (!p) return { success: false, message: `Furniture "${args.furniture_name}" not found` };
       if (db) {
-        await supabaseAdmin.from('placements').delete().eq('id', p.id);
+        const { error } = await supabaseAdmin.from('placements').delete().eq('id', p.id);
+        if (error) return { success: false, message: error.message };
       } else {
         fallback.deletePlacement(p.id);
       }
-      return { success: true, message: `Removed ${p.name} from the room` };
+      return {
+        success: true,
+        placement_id: p.id,
+        message: `Removed ${p.name} from the room`,
+      };
     }
     case 'validate_layout': {
       return { success: true, ...validateLayout(placements, room) };
@@ -373,20 +417,62 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
       const pos = { x_inches: current.x_inches, y_inches: current.y_inches, rotation: current.rotation };
       if (db) {
         await supabaseAdmin.from('placements').delete().eq('id', current.id);
-        await supabaseAdmin.from('placements').insert({
-          room_id: roomId, catalog_id: newItem.id, name: newItem.name, category: newItem.category,
-          provider: newItem.provider, width: newItem.width, depth: newItem.depth, height: newItem.height,
-          x_inches: pos.x_inches, y_inches: pos.y_inches, rotation: pos.rotation, color: '#d4a27a',
+        await dbInsertPlacement({
+          room_id: roomId,
+          catalog_id: newItem.id,
+          name: newItem.name,
+          category: newItem.category,
+          provider: newItem.provider,
+          width: newItem.width,
+          depth: newItem.depth,
+          height: newItem.height,
+          x_inches: pos.x_inches,
+          y_inches: pos.y_inches,
+          rotation: pos.rotation,
+          color: '#d4a27a',
+          image_url: newItem.image_url || null,
+          model_url: newItem.model_url || null,
         });
       } else {
         fallback.deletePlacement(current.id);
         fallback.addPlacement({
-          room_id: roomId, catalog_id: newItem.id, name: newItem.name, category: newItem.category,
-          provider: newItem.provider, width: newItem.width, depth: newItem.depth, height: newItem.height,
-          x_inches: pos.x_inches, y_inches: pos.y_inches, rotation: pos.rotation, color: '#d4a27a',
+          room_id: roomId,
+          catalog_id: newItem.id,
+          name: newItem.name,
+          category: newItem.category,
+          provider: newItem.provider,
+          width: newItem.width,
+          depth: newItem.depth,
+          height: newItem.height,
+          x_inches: pos.x_inches,
+          y_inches: pos.y_inches,
+          rotation: pos.rotation,
+          color: '#d4a27a',
+          image_url: newItem.image_url || null,
+          model_url: newItem.model_url || null,
         });
       }
-      return { success: true, message: `Replaced ${current.name} with ${newItem.name}`, refresh: true, removed_name: current.name, added_item: { name: newItem.name, category: newItem.category, provider: newItem.provider, width: newItem.width, depth: newItem.depth, height: newItem.height, x_inches: pos.x_inches, y_inches: pos.y_inches, rotation: pos.rotation, color: '#d4a27a', image_url: newItem.image_url, model_url: newItem.model_url } };
+      return {
+        success: true,
+        message: `Replaced ${current.name} with ${newItem.name}`,
+        refresh: true,
+        removed_placement_id: current.id,
+        removed_name: current.name,
+        added_item: {
+          name: newItem.name,
+          category: newItem.category,
+          provider: newItem.provider,
+          width: newItem.width,
+          depth: newItem.depth,
+          height: newItem.height,
+          x_inches: pos.x_inches,
+          y_inches: pos.y_inches,
+          rotation: pos.rotation,
+          color: '#d4a27a',
+          image_url: newItem.image_url,
+          model_url: newItem.model_url,
+        },
+      };
     }
     case 'furnish_room': {
       if (!room?.width || !room?.depth) return { success: false, message: 'Room dimensions not set — upload a floor plan or set dimensions first' };
@@ -447,9 +533,11 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
           y_inches: 12,
           rotation: item._rotation || 0,
           color: '#d4a27a',
+          image_url: item.image_url || null,
+          model_url: item.model_url || null,
         };
         if (db) {
-          const { data: newP } = await supabaseAdmin.from('placements').insert(placement).select().single();
+          const { data: newP } = await dbInsertPlacement(placement);
           if (newP) added.push(newP);
         } else {
           const newP = fallback.addPlacement(placement);

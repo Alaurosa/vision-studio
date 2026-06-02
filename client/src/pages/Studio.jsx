@@ -1,31 +1,39 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useParams, useNavigate, useSearchParams, useMatch, useLocation, Navigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { useLayoutStore } from '@/store/layoutStore';
 import { useAuth } from '@/hooks/useAuth';
 import api from '@/lib/api';
+import { fetchRoomsListOnce } from '@/lib/roomsFetchOnce';
 import RoomCanvas from '@/components/canvas/RoomCanvas';
-import CatalogPanel from '@/components/catalog/CatalogPanel';
+import ProjectCanvas from '@/components/canvas/ProjectCanvas';
 import ChatPanel from '@/components/chatbot/ChatPanel';
+import EditorWorkspaceSidebar from '@/components/studio/EditorWorkspaceSidebar';
 import RoomViewer3D from '@/components/viewer/RoomViewer3D';
+import ProjectViewer3D from '@/components/viewer/ProjectViewer3D';
 import StudioToolbar from '@/components/studio/StudioToolbar';
 import ZoneBottomBar from '@/components/studio/ZoneBottomBar';
+import ProjectSpaceBottomBar from '@/components/studio/ProjectSpaceBottomBar';
 import ErrorBoundary from '@/components/ErrorBoundary';
-import MessageBubble from '@/components/chatbot/MessageBubble';
 import { ROOM_TEMPLATES } from '@/utils/constants';
 import { inchesToFeet } from '@/utils/scale';
 import {
   countSpaces,
   createProjectSpaceDraft,
-  createProjectDraft,
   deleteProjectById,
   getMostRecentSpace,
   getProjectById,
   toDashboardProjects,
   upsertProject,
 } from '@/utils/projectCompat';
+import { isProjectVisionComplete } from '@/utils/visionGate';
+import ProjectVisionIntake from '@/components/project/ProjectVisionIntake';
+import RoomEditor from '@/components/upload/RoomEditor';
+import ConfirmModal from '@/components/ConfirmModal';
+
+const isConfirmationDone = (project) => Boolean(project?.confirmationCompletedAt);
 
 const isDraftId = (id) => typeof id === 'string' && id.startsWith('draft-');
 const INTERIOR_SPACE_TYPES = [
@@ -49,252 +57,166 @@ const EXTERIOR_AREA_TYPES = [
   'Pool Area',
   'Custom',
 ];
-const PROPERTY_TYPES = ['Apartment', 'House', 'Studio', 'Office', 'Retail / Hospitality', 'Other'];
-const PROJECT_SCOPES = [
-  { id: 'interior_only', label: 'Interior only' },
-  { id: 'exterior_only', label: 'Exterior only' },
-  { id: 'interior_exterior', label: 'Interior + Exterior' },
-];
 const STATUS_OPTIONS = ['in_progress', 'draft', 'completed'];
 
-/* ── Fullscreen chat overlay shown when entering a space ── */
-function FullscreenChat({
-  room,
-  onMinimize,
-  projectName,
-  selectedContextLabel,
-  projectId,
-  spaceId,
-  contextType,
-  globalVision,
-  spaceVision,
-}) {
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
-  const scrollRef = useRef(null);
-  const textareaRef = useRef(null);
-  const { chatHistory, addChatMessage, furniture, setRecommendedItems, loadRoom } = useLayoutStore();
+function getSpaceRoomId(space) {
+  return space?.roomId ?? space?.room_id ?? null;
+}
 
-  useEffect(() => {
-    if (scrollRef.current) requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }));
-  }, [chatHistory, sending]);
+/** First interior space with a linked room, else any space with a room (for editor entry). */
+function getFirstEditableEditorSpace(project) {
+  const spaces = Array.isArray(project?.spaces) ? project.spaces : [];
+  const interior = spaces.find((s) => s.type === 'interior' && getSpaceRoomId(s));
+  if (interior) return interior;
+  return spaces.find((s) => getSpaceRoomId(s)) || null;
+}
 
-  useEffect(() => {
-    if (textareaRef.current) { textareaRef.current.style.height = 'auto'; textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 140)}px`; }
-  }, [input]);
+function resolveSpaceByEditorId(project, editorSpaceId) {
+  if (!project || !editorSpaceId) return null;
+  const spaces = Array.isArray(project.spaces) ? project.spaces : [];
+  const direct = spaces.find((s) => s.id === editorSpaceId);
+  if (direct) return direct;
+  // Legacy upload-derived ids (space-zone-0) should map to current API spaces by zone id.
+  const legacyZoneId = editorSpaceId.startsWith('space-')
+    ? editorSpaceId.slice('space-'.length)
+    : editorSpaceId;
+  return spaces.find((s) => s.zoneId === legacyZoneId) || null;
+}
 
-  const send = async (msg) => {
-    const text = typeof msg === 'string' ? msg : input;
-    if (!text.trim() || !room?.id) return;
-    addChatMessage({ role: 'user', content: text });
-    setInput('');
-    setSending(true);
-    try {
-      const isDraft = isDraftId(room.id);
-      const { data } = await api.post('/api/chat/message', {
-        room_id: room.id, message: text,
-        project_id: projectId || null,
-        space_id: spaceId || null,
-        context_type: contextType || 'current_space',
-        global_vision: globalVision || null,
-        space_vision: spaceVision || null,
-        ...(isDraft && { room_context: { id: room.id, name: room.name, width: room.width, depth: room.depth, height: room.height || 96, unit: room.unit || 'inches', placements: furniture.map(f => ({ id: f.id, name: f.name, category: f.category, provider: f.provider, width: f.width, depth: f.depth, height: f.height, x_inches: f.x_inches, y_inches: f.y_inches, rotation: f.rotation })) } }),
-      });
-      addChatMessage({ role: 'assistant', content: data.message || '(no response)', actions: data.actions || [] });
-
-      const suggestions = (data.actions || []).filter(a => ['suggest_furniture', 'furnish_room'].includes(a.function)).flatMap(a => a.result?.suggestions || []);
-      if (suggestions.length) setRecommendedItems(suggestions);
-
-      const mutatingTools = ['move_furniture', 'rotate_furniture', 'add_furniture', 'remove_furniture', 'arrange_room', 'swap_furniture', 'furnish_room', 'clear_room'];
-      const didMutate = (data.actions || []).some(a => mutatingTools.includes(a.function) && a.result?.success);
-
-      if (didMutate) {
-        if (isDraft) {
-          const store = useLayoutStore.getState();
-          for (const action of (data.actions || [])) {
-            const r = action.result; if (!r?.success) continue;
-            if (action.function === 'add_furniture' && r.added_item) { const ai = r.added_item; store.addFurniture({ name: ai.name, category: ai.category, provider: ai.provider, width: ai.width, depth: ai.depth, height: ai.height, x_inches: ai.x_inches || 12, y_inches: ai.y_inches || 12, rotation: ai.rotation || 0, color: '#d4a27a', image_url: ai.image_url, model_url: ai.model_url, _animDelay: 300 }); }
-            else if (['move_furniture', 'rotate_furniture'].includes(action.function)) { const nm = action.args?.furniture_name?.toLowerCase(); if (nm) { const m = store.furniture.find(f => f.name?.toLowerCase().includes(nm)); if (m) { const p = {}; if (action.args.x_inches != null) p.x_inches = action.args.x_inches; if (action.args.y_inches != null) p.y_inches = action.args.y_inches; if (action.args.rotation != null) p.rotation = action.args.rotation; store.updateFurniture(m.id, p); } } }
-            else if (action.function === 'remove_furniture') { const nm = action.args?.furniture_name?.toLowerCase(); if (nm) { const m = store.furniture.find(f => f.name?.toLowerCase().includes(nm)); if (m) store.removeFurniture(m.id); } }
-            else if (action.function === 'clear_room') { for (const f of [...store.furniture]) store.removeFurniture(f.id); }
-            else if (action.function === 'swap_furniture') { if (r.removed_name) { const m = store.furniture.find(f => f.name?.toLowerCase().includes(r.removed_name.toLowerCase())); if (m) store.removeFurniture(m.id); } if (r.added_item) { const ai = r.added_item; store.addFurniture({ name: ai.name, category: ai.category, provider: ai.provider, width: ai.width, depth: ai.depth, height: ai.height, x_inches: ai.x_inches || 12, y_inches: ai.y_inches || 12, rotation: ai.rotation || 0, color: '#d4a27a', image_url: ai.image_url, model_url: ai.model_url, _animDelay: 300 }); } }
-            else if (action.function === 'furnish_room' && r.suggestions) { r.suggestions.forEach((item, idx) => store.addFurniture({ name: item.name, category: item.category, provider: item.provider, width: item.width, depth: item.depth, height: item.height, x_inches: item.x_inches || 12, y_inches: item.y_inches || 12, rotation: item.rotation || 0, color: '#d4a27a', image_url: item.image_url, model_url: item.model_url, _animDelay: 400 + idx * 500 })); }
-          }
-          // Skip follow-up auto-place for furnish_room since positions are already arranged
-          const hasArrange = (data.actions || []).some(a => a.function === 'arrange_room' && a.result?.success);
-          if (hasArrange) {
-            try {
-              const cur = useLayoutStore.getState().furniture;
-              if (cur.length > 0) {
-                const { data: arranged } = await api.post('/api/layout/auto-place', { room_id: room.id, room_context: { id: room.id, name: room.name, width: room.width, depth: room.depth }, placements_context: cur.map(f => ({ id: f.id, name: f.name, category: f.category, width: f.width, depth: f.depth, height: f.height, x_inches: f.x_inches, y_inches: f.y_inches, rotation: f.rotation })) });
-                for (const u of (arranged.placements || [])) { const m = useLayoutStore.getState().furniture.find(f => f.name === u.name); if (m) useLayoutStore.getState().updateFurniture(m.id, { x_inches: u.x_inches, y_inches: u.y_inches, rotation: u.rotation }); }
-              }
-            } catch {}
-          }
-        } else { await loadRoom(room.id); }
-        // Auto-minimize to show the editor after mutations
-        onMinimize();
+/** Align API snake_case + localStorage shapes; map room_id → roomId for spaces */
+function normalizeProjectPayload(project) {
+  if (!project) return null;
+  const gvRaw = project.globalVision ?? project.global_vision;
+  const gv =
+    gvRaw && typeof gvRaw === 'object'
+      ? {
+          propertyVision: gvRaw.propertyVision ?? gvRaw.property_vision ?? '',
+          ...gvRaw,
+        }
+      : {};
+  return {
+    ...project,
+    propertyType: project.propertyType ?? project.property_type ?? 'House',
+    globalVision: gv,
+    spaces: (project.spaces || []).map((space) => {
+      const rawType = space.type ?? space.space_type;
+      const pm = space.placeholderMode ?? space.placeholder_mode;
+      let typeNorm = 'interior';
+      if (typeof rawType === 'string') {
+        typeNorm = rawType.toLowerCase() === 'exterior' ? 'exterior' : 'interior';
+      } else if (pm === true) {
+        typeNorm = 'exterior';
       }
-    } catch (e) { addChatMessage({ role: 'assistant', content: `Something went wrong: ${e?.response?.data?.error || e.message}` }); }
-    finally { setSending(false); }
+      return {
+        ...space,
+        type: typeNorm,
+        roomId: space.roomId ?? space.room_id ?? null,
+        placeholderMode: space.placeholderMode ?? space.placeholder_mode ?? false,
+        spaceVision: space.spaceVision ?? space.space_vision ?? {},
+      };
+    }),
+    updatedAt: project.updatedAt ?? project.updated_at,
+    createdAt: project.createdAt ?? project.created_at,
+    confirmationCompletedAt: project.confirmationCompletedAt ?? null,
+    visionIntakeCompletedAt: project.visionIntakeCompletedAt ?? null,
   };
+}
 
-  const hasMessages = chatHistory.length > 0;
-  const PROMPTS = [
-    { icon: '🏠', text: 'Furnish this as a living room' },
-    { icon: '🛏️', text: 'Set up a cozy bedroom' },
-    { icon: '💼', text: 'Design a home office' },
-    { icon: '🎨', text: 'I want a Scandinavian style' },
-    { icon: '🪑', text: 'Show me sofas under $600' },
-    { icon: '📐', text: 'Auto-arrange everything' },
-    { icon: '💡', text: 'Give me design tips' },
-    { icon: '💰', text: 'Estimate the total cost' },
-  ];
-  const STYLES = ['Modern', 'Scandinavian', 'Industrial', 'Mid-Century', 'Minimalist', 'Bohemian', 'Rustic', 'Japandi'];
-
-  return (
-    <div className="flex-1 flex flex-col">
-      {/* Header */}
-      <div className="h-12 border-b border-ink-900/10 flex items-center justify-between px-6 shrink-0">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-sienna-400 to-sienna-600 grid place-items-center">
-            <span className="text-xs text-paper-50 font-bold">V</span>
-          </div>
-          <span className="font-display text-base">AI Design Assistant</span>
-          <span className="text-[10px] uppercase tracking-editorial text-ink-500 flex items-center gap-1">
-            <span className={`w-1.5 h-1.5 rounded-full ${sending ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
-            {sending ? 'Thinking…' : room.name}
-          </span>
-        </div>
-        <button onClick={onMinimize} className="text-[10px] uppercase tracking-editorial px-3 py-1.5 rounded-full border border-ink-900/15 text-ink-600 hover:border-ink-900 hover:text-ink-900 transition">
-          Show Editor
-        </button>
-      </div>
-      <div className="border-b border-ink-900/10 px-6 py-2 text-[10px] uppercase tracking-[0.2em] text-ink-500">
-        Selected context: {selectedContextLabel || 'Current space'}
-        {projectName ? ` · ${projectName}` : ''}
-      </div>
-      <div className="border-b border-ink-900/10 px-6 py-2 text-xs text-ink-500">
-        Ask about this project, a specific space, or the overall design direction.
-      </div>
-
-      {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto px-6 space-y-5">
-          {!hasMessages && (
-            <div className="flex flex-col items-center justify-center min-h-[calc(100vh-16rem)] py-8">
-              <div className="w-12 h-12 mb-4 rounded-2xl bg-gradient-to-br from-sienna-400 to-sienna-600 grid place-items-center shadow-lg">
-                <span className="text-lg text-paper-50 font-display">V</span>
-              </div>
-              <h2 className="display-md mb-6 text-center">What would you like to do with {room.name}?</h2>
-
-              {/* Inline chat input — prominent on the welcome screen */}
-              <div className="w-full max-w-lg mb-8">
-                <div className="flex items-end gap-2">
-                  <textarea ref={textareaRef}
-                    className="flex-1 bg-paper-100 border border-ink-900/15 rounded-2xl px-5 py-3.5 text-sm text-ink-900 placeholder:text-ink-400 resize-none focus:outline-none focus:border-ink-900/30 focus:ring-2 focus:ring-ink-900/5 transition min-h-[52px] max-h-[120px] shadow-sm"
-                    placeholder="e.g. Furnish this as a modern living room…" value={input}
-                    onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }}
-                    disabled={sending} rows={1} autoFocus />
-                  <button onClick={() => send(input)} disabled={!input.trim() || sending}
-                    className="shrink-0 w-12 h-12 rounded-2xl bg-ink-900 text-paper-50 grid place-items-center transition hover:bg-ink-700 disabled:opacity-30 shadow-sm" aria-label="Send">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
-                    </svg>
-                  </button>
-                </div>
-                <p className="text-[10px] text-ink-400 mt-2 text-center">Enter to send · Shift+Enter for new line</p>
-              </div>
-
-              {/* Style chips */}
-              <div className="mb-5">
-                <div className="eyebrow text-ink-400 mb-2 text-center">Or set your style</div>
-                <div className="flex flex-wrap justify-center gap-1.5">
-                  {STYLES.map(s => (
-                    <button key={s} onClick={() => send(`I prefer a ${s.toLowerCase()} style`)}
-                      className="text-[10px] uppercase tracking-editorial rounded-full px-3 py-1.5 border border-ink-900/12 text-ink-600 hover:border-sienna-500 hover:text-sienna-600 transition">{s}</button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Quick prompts */}
-              <div className="w-full max-w-xl">
-                <div className="eyebrow text-ink-400 mb-2 text-center">Quick actions</div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {PROMPTS.map(p => (
-                    <button key={p.text} onClick={() => send(p.text)}
-                      className="text-left p-3 rounded-xl border border-ink-900/8 hover:border-ink-900/25 hover:shadow-sm transition-all group">
-                      <span className="text-base mb-1 block">{p.icon}</span>
-                      <span className="text-xs text-ink-600 group-hover:text-ink-900 transition leading-snug">{p.text}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-          {/* Message history */}
-          {hasMessages && <div className="pt-6" />}
-          <AnimatePresence initial={false}>
-            {chatHistory.map((m, i) => <MessageBubble key={m.id} message={m} isLast={i === chatHistory.length - 1} />)}
-          </AnimatePresence>
-          {sending && (
-            <div className="flex items-center gap-2 pb-4">
-              <div className="w-6 h-6 rounded-full bg-gradient-to-br from-sienna-400 to-sienna-600 grid place-items-center shrink-0">
-                <span className="text-[9px] text-paper-50 font-bold">V</span>
-              </div>
-              <div className="bg-paper-100 border border-ink-900/10 px-4 py-3 rounded-2xl rounded-bl-md flex items-center gap-1.5">
-                <span className="typing-dot" style={{ animationDelay: '0ms' }} /><span className="typing-dot" style={{ animationDelay: '150ms' }} /><span className="typing-dot" style={{ animationDelay: '300ms' }} />
-              </div>
-            </div>
-          )}
-          {hasMessages && <div className="pb-4" />}
-        </div>
-      </div>
-
-      {/* Bottom input — only shown after conversation starts (welcome screen has its own inline input) */}
-      {hasMessages && (
-        <div className="border-t border-ink-900/10 bg-paper-50 shrink-0">
-          <div className="max-w-2xl mx-auto px-6 py-3">
-            <div className="flex items-end gap-3">
-              <textarea ref={textareaRef}
-                className="flex-1 bg-paper-100 border border-ink-900/10 rounded-2xl px-5 py-3 text-sm text-ink-900 placeholder:text-ink-400 resize-none focus:outline-none focus:border-ink-900/25 focus:ring-2 focus:ring-ink-900/5 transition min-h-[48px] max-h-[140px]"
-                    placeholder="Describe your space goals, style, or ask for furniture…" value={input}
-                onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }}
-                disabled={sending} rows={1} />
-              <button onClick={() => send(input)} disabled={!input.trim() || sending}
-                className="shrink-0 w-11 h-11 rounded-2xl bg-ink-900 text-paper-50 grid place-items-center transition hover:bg-ink-700 disabled:opacity-30 shadow-sm" aria-label="Send">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex items-center justify-between mt-2 px-1">
-              <span className="text-[10px] text-ink-400">{room.name} space · {furniture.length} items</span>
-              <span className="text-[10px] text-ink-400 hidden sm:inline">Enter to send</span>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+function mergeDashboardProjects(apiProjects, localProjects) {
+  const apiList = (Array.isArray(apiProjects) ? apiProjects : []).map((p) =>
+    normalizeProjectPayload(p),
   );
+  const localList = (Array.isArray(localProjects) ? localProjects : []).map((p) =>
+    normalizeProjectPayload(p),
+  );
+  const localById = new Map(localList.filter(Boolean).map((p) => [p.id, p]));
+  const merged = apiList
+    .filter(Boolean)
+    .map((apiProject) => {
+      const localProject = localById.get(apiProject.id);
+      if (!localProject) return apiProject;
+      return normalizeProjectPayload({
+        ...apiProject,
+        globalVision: {
+          ...(typeof apiProject.globalVision === 'object' ? apiProject.globalVision : {}),
+          ...(typeof localProject.globalVision === 'object' ? localProject.globalVision : {}),
+        },
+        confirmationCompletedAt:
+          localProject.confirmationCompletedAt ?? apiProject.confirmationCompletedAt ?? null,
+        visionIntakeCompletedAt:
+          localProject.visionIntakeCompletedAt ?? apiProject.visionIntakeCompletedAt ?? null,
+      });
+    });
+  const mergedIds = new Set(merged.map((p) => p.id));
+  const localOnly = localList.filter((p) => p && !mergedIds.has(p.id));
+  return [...merged, ...localOnly].sort((a, b) => {
+    const aTime = new Date(a?.updatedAt || a?.createdAt || 0).getTime();
+    const bTime = new Date(b?.updatedAt || b?.createdAt || 0).getTime();
+    return bTime - aTime;
+  });
+}
+
+function buildAdjustZones(project) {
+  const floorplan = project?.floorplan || {};
+  const zones = Array.isArray(floorplan?.zones) ? floorplan.zones : [];
+  const spaces = Array.isArray(project?.spaces) ? project.spaces : [];
+  const spaceByZoneId = new Map(
+    spaces
+      .filter((space) => space?.zoneId || space?.zone_id)
+      .map((space) => [space.zoneId || space.zone_id, space]),
+  );
+  return zones.map((zone, index) => {
+    const linked = spaceByZoneId.get(zone.id);
+    const geometry = zone.geometry || linked?.geometry || null;
+    const bbox = Array.isArray(zone.bbox) && zone.bbox.length === 4
+      ? zone.bbox
+      : geometry?.bbox
+        ? [
+            geometry.bbox.x,
+            geometry.bbox.y,
+            geometry.bbox.x + geometry.bbox.width,
+            geometry.bbox.y + geometry.bbox.height,
+          ]
+        : [0, 0, 100, 100];
+    const polygon =
+      Array.isArray(zone.polygon) && zone.polygon.length >= 3
+        ? zone.polygon
+        : Array.isArray(geometry?.points) && geometry.points.length >= 3
+          ? geometry.points.map((pt) => [pt.x, pt.y])
+          : null;
+    return {
+      ...zone,
+      id: zone.id || `zone-${index}`,
+      name: linked?.name || zone.name || `Space ${index + 1}`,
+      type: linked?.type || zone.type || 'interior',
+      bbox,
+      polygon,
+    };
+  });
 }
 
 export default function Studio() {
-  const { roomId, projectId, spaceId } = useParams();
+  const { roomId, projectId, editorSpaceId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { pathname: locationPath } = useLocation();
   const { user, loading: authLoading } = useAuth();
   const {
-    room, loadRoom, viewMode, isChatOpen, createRoom, createDraftRoom, clearDraft, clearChat, setActiveZone,
+    room,
+    loadRoom,
+    viewMode,
+    isChatOpen,
+    createRoom,
+    createDraftRoom,
+    clearDraft,
+    clearChat,
+    setActiveZone,
+    loadRoomFailed,
   } = useLayoutStore();
   const [rooms, setRooms] = useState([]);
   const [projects, setProjects] = useState([]);
   const [loadingList, setLoadingList] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
-  const [chatFullscreen, setChatFullscreen] = useState(true);
-  const [showProjectCreate, setShowProjectCreate] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [projectCreateError, setProjectCreateError] = useState('');
   const [creatingInteriorSpace, setCreatingInteriorSpace] = useState(false);
   const [creatingExteriorSpace, setCreatingExteriorSpace] = useState(false);
   const [showSpaceTypeModal, setShowSpaceTypeModal] = useState(false);
@@ -303,73 +225,148 @@ export default function Studio() {
   const [customSpaceName, setCustomSpaceName] = useState('');
   const [editingProjectId, setEditingProjectId] = useState(null);
   const [editingProjectName, setEditingProjectName] = useState('');
-  const [projectForm, setProjectForm] = useState({
-    name: '',
-    propertyType: 'Apartment',
-    scope: 'interior_exterior',
-    startMode: 'upload',
-    templateId: ROOM_TEMPLATES[0]?.id || '',
-  });
+  const [editorEntryIssue, setEditorEntryIssue] = useState(null);
+  const [adjustConfirmIssue, setAdjustConfirmIssue] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const draftRoom = useLayoutStore((s) => (isDraftId(s.room?.id) ? s.room : null));
 
+  const matchDashboard = useMatch({ path: '/studio', end: true });
+  const matchProjectHub = useMatch({ path: '/studio/project/:projectId', end: true });
+  const matchConfirm = useMatch({ path: '/studio/project/:projectId/confirm', end: true });
+  const matchVision = useMatch({ path: '/studio/project/:projectId/vision', end: true });
+  const matchEditorRoot = useMatch({ path: '/studio/project/:projectId/editor', end: true });
+  const isProjectEditorRoute = /^\/studio\/project\/[^/]+\/editor/.test(locationPath);
+
   const queryProjectId = searchParams.get('projectId');
-  const querySpaceId = searchParams.get('spaceId');
+  const confirmPhase = searchParams.get('phase');
+  const confirmMode = searchParams.get('mode');
+  const querySpaceId = editorSpaceId || searchParams.get('spaceId');
   const currentProjectId = projectId || queryProjectId;
   const currentProject = useMemo(() => {
     if (!currentProjectId) return null;
-    return getProjectById(currentProjectId) || projects.find((p) => p.id === currentProjectId) || null;
+    const fromApi = projects.find((p) => p.id === currentProjectId);
+    const fromLocal = getProjectById(currentProjectId);
+    let raw = fromApi || fromLocal;
+    if (fromApi && fromLocal) {
+      raw = {
+        ...fromApi,
+        ...fromLocal,
+        name: fromLocal.name || fromApi.name,
+        globalVision: {
+          ...(typeof fromApi.globalVision === 'object' ? fromApi.globalVision : {}),
+          ...(typeof fromApi.global_vision === 'object' ? fromApi.global_vision : {}),
+          ...(fromLocal.globalVision && typeof fromLocal.globalVision === 'object' ? fromLocal.globalVision : {}),
+        },
+        spaces:
+          Array.isArray(fromApi.spaces) && fromApi.spaces.length > 0
+            ? fromApi.spaces
+            : fromLocal.spaces || [],
+        confirmationCompletedAt:
+          fromLocal.confirmationCompletedAt ?? fromApi.confirmationCompletedAt ?? null,
+        visionIntakeCompletedAt:
+          fromLocal.visionIntakeCompletedAt ?? fromApi.visionIntakeCompletedAt ?? null,
+      };
+    }
+    return normalizeProjectPayload(raw);
   }, [currentProjectId, projects]);
-  const selectedContextLabel = querySpaceId
-    ? 'Current space'
-    : currentProject
-      ? 'Whole project'
-      : 'Current space';
-  const activeSpace = currentProject?.spaces?.find((s) => s.id === querySpaceId) || null;
 
-  const normalizeProjectPayload = (project) => {
-    if (!project) return null;
-    return {
-      ...project,
-      propertyType: project.propertyType ?? project.property_type ?? 'House',
-      globalVision: project.globalVision ?? project.global_vision ?? {},
-      spaces: (project.spaces || []).map((space) => ({
-        ...space,
-        roomId: space.roomId ?? space.room_id ?? null,
-        placeholderMode: space.placeholderMode ?? space.placeholder_mode ?? false,
-        spaceVision: space.spaceVision ?? space.space_vision ?? {},
-      })),
-      updatedAt: project.updatedAt ?? project.updated_at,
-      createdAt: project.createdAt ?? project.created_at,
-    };
-  };
+  const resolvedRoomId = useMemo(() => {
+    if (roomId) return roomId;
+    if (isProjectEditorRoute && editorSpaceId && currentProject) {
+      const sp = resolveSpaceByEditorId(currentProject, editorSpaceId);
+      return getSpaceRoomId(sp);
+    }
+    return null;
+  }, [roomId, editorSpaceId, currentProject, isProjectEditorRoute]);
+  const activeSpace = useMemo(() => {
+    if (!currentProject) return null;
+    if (!querySpaceId) return null;
+    return resolveSpaceByEditorId(currentProject, querySpaceId);
+  }, [currentProject, querySpaceId]);
+  const projectSpaces = useMemo(
+    () => (Array.isArray(currentProject?.spaces) ? currentProject.spaces : []),
+    [currentProject],
+  );
+  const selectedProjectSpaceId = activeSpace?.id || null;
+  const selectedProjectSpace = activeSpace || null;
+  const projectForTitle = projectId ? getProjectById(projectId) : null;
+  const resolvedProjectTitle =
+    projectForTitle?.name
+    || currentProject?.name
+    || getProjectById(currentProjectId || '')?.name
+    || searchParams.get('projectName')
+    || 'Untitled project';
+
+  useEffect(() => {
+    if (!matchEditorRoot || !currentProject?.id || editorSpaceId) return;
+    setEditorEntryIssue(null);
+  }, [matchEditorRoot, currentProject, editorSpaceId]);
+
+  useEffect(() => {
+    if (!editorSpaceId || !currentProject?.id) return;
+    const resolved = resolveSpaceByEditorId(currentProject, editorSpaceId);
+    if (!resolved?.id) return;
+    if (resolved.id === editorSpaceId) return;
+    navigate(`/studio/project/${currentProject.id}/editor/${resolved.id}`, { replace: true });
+  }, [editorSpaceId, currentProject, navigate]);
+
+  useEffect(() => {
+    if (!isProjectEditorRoute || !editorSpaceId || !currentProject) return;
+    const maybeSpace = resolveSpaceByEditorId(currentProject, editorSpaceId);
+    if (!maybeSpace) {
+      setEditorEntryIssue(
+        'This space is not part of this project. Choose another space from the bottom bar.',
+      );
+      return;
+    }
+    setEditorEntryIssue(
+      getSpaceRoomId(maybeSpace)
+        ? null
+        : 'This space has no linked editable room yet. You can still plan it in the full floorplan view.',
+    );
+  }, [isProjectEditorRoute, editorSpaceId, currentProject]);
 
   // Load requested room or dashboard data.
   useEffect(() => {
-    if (roomId) {
+    if (resolvedRoomId) {
       clearChat();
-      loadRoom(roomId);
-      if (queryProjectId) {
+      loadRoom(resolvedRoomId);
+      if (queryProjectId || projectId) {
         fetchRooms();
       }
     } else {
       fetchRooms();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, user, projectId, queryProjectId]);
+  }, [resolvedRoomId, user, projectId, queryProjectId]);
+
+  useEffect(() => {
+    if (!loadRoomFailed) return;
+    useLayoutStore.setState({ loadRoomFailed: false });
+    if (isProjectEditorRoute) {
+      setEditorEntryIssue(
+        'This space is missing a valid linked room. Review spaces or add a new space before opening the editor.',
+      );
+      return;
+    }
+    toast.error("Couldn't load this space. Returning to projects.");
+    if (projectId) navigate(`/studio/project/${projectId}`, { replace: true });
+    else navigate('/studio', { replace: true });
+  }, [loadRoomFailed, navigate, projectId, isProjectEditorRoute]);
 
   const fetchRooms = async () => {
     setLoadingList(true);
     try {
-      const { data } = await api.get('/api/rooms');
-      const nextRooms = Array.isArray(data) ? data : [];
+      const nextRooms = await fetchRoomsListOnce();
       setRooms(nextRooms);
       try {
         const projectsRes = await api.get('/api/projects');
         const apiProjects = Array.isArray(projectsRes.data)
           ? projectsRes.data.map((p) => normalizeProjectPayload(p)).filter(Boolean)
           : [];
-        if (apiProjects.length > 0) {
-          setProjects(apiProjects);
+        const mergedProjects = mergeDashboardProjects(apiProjects, toDashboardProjects(nextRooms));
+        if (mergedProjects.length > 0) {
+          setProjects(mergedProjects);
           return;
         }
       } catch {
@@ -384,15 +381,19 @@ export default function Studio() {
     }
   };
 
-  const openRoom = (id) => navigate(`/studio/${id}`);
-  const openProject = (id) => navigate(`/studio/project/${id}`);
+  const openRoom = (id) => navigate(`/studio/${id}`); // legacy draft deep link
+  const openProject = (id) => {
+    navigate(`/studio/project/${id}`);
+  };
   const continueProjectEditing = (project) => {
+    if (!project?.id) return;
     const mostRecent = getMostRecentSpace(project);
-    if (mostRecent?.id && mostRecent?.roomId) {
-      navigate(`/studio/project/${project.id}/${mostRecent.id}`);
+    const rid = mostRecent?.roomId ?? mostRecent?.room_id;
+    if (mostRecent?.id && rid) {
+      navigate(`/studio/project/${project.id}/editor/${mostRecent.id}`);
       return;
     }
-    openProject(project.id);
+    navigate(`/studio/project/${project.id}`);
   };
   const renameProject = (project) => {
     setEditingProjectId(project.id);
@@ -405,7 +406,7 @@ export default function Studio() {
       setEditingProjectName('');
       return;
     }
-    const project = getProjectById(editingProjectId) || projects.find((p) => p.id === editingProjectId);
+    const project = projects.find((p) => p.id === editingProjectId) || getProjectById(editingProjectId);
     if (!project) return;
     const nextProject = { ...project, name: nextName, updatedAt: new Date().toISOString() };
     upsertProject(nextProject);
@@ -414,13 +415,20 @@ export default function Studio() {
     setEditingProjectName('');
     toast.success('Project name updated');
   };
-  const deleteProject = (project) => {
+  const requestDeleteProject = (project) => {
     if (!project?.id) return;
-    const ok = window.confirm('Remove this project from your dashboard? This does not delete backend room records.');
-    if (!ok) return;
+    setConfirmDialog({ kind: 'deleteProject', project });
+  };
+  const confirmDeleteProject = () => {
+    const project = confirmDialog?.project;
+    if (!project?.id) {
+      setConfirmDialog(null);
+      return;
+    }
     deleteProjectById(project.id);
     setProjects((prev) => prev.filter((p) => p.id !== project.id));
     toast.success('Project removed from dashboard');
+    setConfirmDialog(null);
   };
   const setProjectStatus = (project, status) => {
     const nextProject = { ...project, status, updatedAt: new Date().toISOString() };
@@ -432,6 +440,7 @@ export default function Studio() {
     const nextProject = {
       ...project,
       globalVision: {
+        propertyVision: '',
         styleKeywords: [],
         moodVibe: '',
         budgetRange: '',
@@ -452,22 +461,29 @@ export default function Studio() {
   };
 
   const selectProjectSpace = (project, space) => {
-    if (!space?.roomId) return;
-    const params = new URLSearchParams({
-      projectId: project.id,
-      spaceId: space.id,
-    });
-    navigate(`/studio/${space.roomId}?${params.toString()}`);
+    navigate(`/studio/project/${project.id}/editor/${space.id}`);
+  };
+
+  const openEditorFromHub = (project) => {
+    setEditorEntryIssue(null);
+    navigate(`/studio/project/${project.id}/editor`);
   };
 
   const addProjectSpace = async (project, type = 'interior', options = {}) => {
     if (!project?.id) return;
+    const { navigateToEditor = true, ...draftOptions } = options;
+    // Prefer fresh API list over localStorage so space ↔ room links stay correct
+    const projectBase =
+      normalizeProjectPayload(projects.find((p) => p.id === project.id))
+      || normalizeProjectPayload(getProjectById(project.id))
+      || normalizeProjectPayload(project)
+      || project;
     if (type === 'interior') setCreatingInteriorSpace(true);
     else setCreatingExteriorSpace(true);
     try {
-      const draftSpace = createProjectSpaceDraft(project, type, options);
+      const draftSpace = createProjectSpaceDraft(projectBase, type, draftOptions);
       try {
-        const { data } = await api.post(`/api/projects/${project.id}/spaces`, {
+        const { data } = await api.post(`/api/projects/${projectBase.id}/spaces`, {
           type,
           name: draftSpace.name,
           category: draftSpace.category,
@@ -482,28 +498,28 @@ export default function Studio() {
         });
         const normalizedSpace = normalizeProjectPayload({ spaces: [data] })?.spaces?.[0];
         const nextProject = {
-          ...project,
-          spaces: [...(project.spaces || []), normalizedSpace],
+          ...projectBase,
+          spaces: [...(projectBase.spaces || []), normalizedSpace],
           updatedAt: new Date().toISOString(),
         };
         upsertProject(nextProject);
         setProjects((prev) => prev.map((p) => (p.id === nextProject.id ? nextProject : p)));
-        navigate(`/studio/project/${project.id}/${normalizedSpace.id}`);
+        if (navigateToEditor) navigate(`/studio/project/${projectBase.id}/editor/${normalizedSpace.id}`);
         return;
       } catch {
         // Fallback to local compatibility behavior
       }
 
       const payload = {
-        name: `${project.name} - ${draftSpace.name}`,
+        name: `${projectBase.name} - ${draftSpace.name}`,
         width: type === 'interior' ? 240 : 300,
         depth: type === 'interior' ? 180 : 220,
         height: 96,
       };
       const created = user ? await createRoom(payload) : createDraftRoom(payload);
       const nextProject = {
-        ...project,
-        spaces: [...(project.spaces || []), { ...draftSpace, roomId: created.id }],
+        ...projectBase,
+        spaces: [...(projectBase.spaces || []), { ...draftSpace, roomId: created.id }],
         updatedAt: new Date().toISOString(),
       };
       upsertProject(nextProject);
@@ -512,13 +528,62 @@ export default function Studio() {
         if (!hasProject) return [...prev, nextProject];
         return prev.map((p) => (p.id === nextProject.id ? nextProject : p));
       });
-      navigate(`/studio/project/${project.id}/${draftSpace.id}`);
+      if (navigateToEditor) navigate(`/studio/project/${projectBase.id}/editor/${draftSpace.id}`);
     } catch {
       toast.error(`Failed to add ${type === 'interior' ? 'interior space' : 'exterior area'}`);
     } finally {
       if (type === 'interior') setCreatingInteriorSpace(false);
       else setCreatingExteriorSpace(false);
     }
+  };
+
+  /** Ensures each interior project space has a linked room record (API or local draft). */
+  const resolveInteriorRoomLinks = async (proj) => {
+    const base = normalizeProjectPayload({ ...proj });
+    if (!base?.id) return base;
+    const nextSpaces = [];
+    for (const space of base.spaces || []) {
+      if (space.type === 'exterior' || getSpaceRoomId(space)) {
+        nextSpaces.push(space);
+        continue;
+      }
+      try {
+        const { data } = await api.post(`/api/projects/${base.id}/spaces`, {
+          type: 'interior',
+          name: space.name || 'Room',
+          category: space.category || 'Living Room',
+          placeholder_mode: false,
+          space_vision: space.spaceVision || {},
+          room_payload: {
+            name: `${base.name} - ${space.name || 'Room'}`,
+            width: 240,
+            depth: 180,
+            height: 96,
+          },
+        });
+        const normalizedSpace = normalizeProjectPayload({ spaces: [data] })?.spaces?.[0];
+        nextSpaces.push({
+          ...space,
+          ...(normalizedSpace || {}),
+          zoneId: space.zoneId ?? space.zone_id ?? normalizedSpace?.zoneId ?? normalizedSpace?.zone_id,
+          roomId: normalizedSpace?.roomId ?? normalizedSpace?.room_id ?? space.roomId,
+        });
+      } catch {
+        try {
+          const payload = {
+            name: `${base.name} - ${space.name || 'Room'}`,
+            width: 240,
+            depth: 180,
+            height: 96,
+          };
+          const created = user ? await createRoom(payload) : createDraftRoom(payload);
+          nextSpaces.push({ ...space, roomId: created.id });
+        } catch {
+          nextSpaces.push(space);
+        }
+      }
+    }
+    return { ...base, spaces: nextSpaces };
   };
 
   const openSpaceTypeModal = (project, type) => {
@@ -547,133 +612,483 @@ export default function Studio() {
     await addProjectSpace(spaceTypeTarget.project, spaceTypeTarget.type, {
       name: finalName,
       category: finalCategory,
+      navigateToEditor: !(matchConfirm || matchVision),
     });
+    setAdjustConfirmIssue(null);
     closeSpaceTypeModal();
   };
 
   useEffect(() => {
-    if (!projectId || !spaceId) return;
-    const p = getProjectById(projectId) || projects.find((proj) => proj.id === projectId);
-    const space = p?.spaces?.find((s) => s.id === spaceId);
-    if (space?.roomId) {
-      const params = new URLSearchParams({ projectId, spaceId });
-      navigate(`/studio/${space.roomId}?${params.toString()}`, { replace: true });
-    }
-  }, [projectId, spaceId, navigate, projects]);
-
-  useEffect(() => {
     if (!room || !currentProject || !querySpaceId) return;
-    const activeSpace = currentProject.spaces?.find((s) => s.id === querySpaceId);
+    const activeSpace = resolveSpaceByEditorId(currentProject, querySpaceId);
     if (activeSpace?.zoneId) setActiveZone(activeSpace.zoneId);
   }, [room, currentProject, querySpaceId, setActiveZone]);
 
-  const createProject = async () => {
-    if (creating) return;
-    setCreating(true);
-    setProjectCreateError('');
-    try {
-      let project = createProjectDraft({
-        name: projectForm.name || 'Untitled Project',
-        propertyType: projectForm.propertyType,
-        startMode: projectForm.startMode,
-      });
-      project.scope = projectForm.scope;
-      project.status = 'in_progress';
-
-      try {
-        const { data } = await api.post('/api/projects', {
-          name: project.name,
-          property_type: project.propertyType,
-          scope: project.scope,
-          global_vision: project.globalVision,
-          status: project.status,
-        });
-        project = normalizeProjectPayload({ ...data, spaces: data.spaces || [] }) || project;
-      } catch {
-        // Local compatibility path
-      }
-
-      if (projectForm.startMode === 'upload') {
-        upsertProject(project);
-        setProjects((prev) => {
-          const has = prev.some((p) => p.id === project.id);
-          if (has) return prev.map((p) => (p.id === project.id ? project : p));
-          return [project, ...prev];
-        });
-        setShowProjectCreate(false);
-        const params = new URLSearchParams({
-          projectId: project.id,
-          projectName: project.name,
-          propertyType: project.propertyType,
-        });
-        navigate(`/upload?${params.toString()}`);
-        return;
-      }
-
-      const shouldSeedInterior = projectForm.scope !== 'exterior_only';
-      if (shouldSeedInterior) {
-        const template = ROOM_TEMPLATES.find((t) => t.id === projectForm.templateId) || ROOM_TEMPLATES[0];
-        const seedSpace = createProjectSpaceDraft(project, 'interior', {
-          name: projectForm.startMode === 'template' ? template.name : 'Living Room',
-          category: projectForm.startMode === 'template' ? template.name : 'Living Room',
-        });
-        try {
-          const { data } = await api.post(`/api/projects/${project.id}/spaces`, {
-            type: 'interior',
-            name: seedSpace.name,
-            category: seedSpace.category,
-            placeholder_mode: false,
-            space_vision: seedSpace.spaceVision,
-            room_payload: {
-              name: `${project.name} - ${seedSpace.name}`,
-              width: projectForm.startMode === 'template' ? template.width : 240,
-              depth: projectForm.startMode === 'template' ? template.depth : 180,
-              height: projectForm.startMode === 'template' ? template.height : 96,
-            },
-          });
-          const normalizedSpace = normalizeProjectPayload({ spaces: [data] })?.spaces?.[0];
-          project.spaces = normalizedSpace ? [normalizedSpace] : [];
-        } catch {
-          try {
-            const base = projectForm.startMode === 'template'
-              ? { name: `${project.name} - ${template.name}`, width: template.width, depth: template.depth, height: template.height }
-              : { name: `${project.name} - Interior`, width: 240, depth: 180, height: 96 };
-            const created = user ? await createRoom(base) : createDraftRoom(base);
-            project.spaces = [{ ...seedSpace, roomId: created.id }];
-          } catch {
-            // Keep creation resilient: project can still open with empty state cards.
-            project.spaces = [];
-            toast.error('Project created, but initial space setup failed. Add spaces from the project page.');
-          }
-        }
-      }
-
-      project.updatedAt = new Date().toISOString();
-      upsertProject(project);
-      setProjects((prev) => {
-        const has = prev.some((p) => p.id === project.id);
-        if (has) return prev.map((p) => (p.id === project.id ? project : p));
-        return [project, ...prev];
-      });
-      setShowProjectCreate(false);
-      navigate(`/studio/project/${project.id}`);
-    } catch (e) {
-      const message = e?.response?.data?.error || e?.message || 'Failed to create project';
-      setProjectCreateError(message);
-      toast.error('Failed to create project');
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const discardDraft = () => {
-    if (!window.confirm('Discard your draft? This cannot be undone.')) return;
+  const requestDiscardDraft = () => setConfirmDialog({ kind: 'discardDraft' });
+  const confirmDiscardDraft = () => {
     clearDraft();
     toast.success('Draft discarded');
+    setConfirmDialog(null);
   };
 
+  const syncProjectFromChild = (next) => {
+    const norm = normalizeProjectPayload(next);
+    if (!norm) return;
+    upsertProject(norm);
+    setProjects((prev) => {
+      const i = prev.findIndex((p) => p.id === norm.id);
+      if (i < 0) return [...prev, norm];
+      return prev.map((p) => (p.id === norm.id ? norm : p));
+    });
+  };
+
+  // -------- Project onboarding (full-page) --------
+  if (matchConfirm) {
+    const project = currentProject;
+    if (!project) {
+      return (
+        <div className="h-[calc(100vh-4rem)] grid place-items-center">
+          <span className="eyebrow text-ink-500">Loading project…</span>
+        </div>
+      );
+    }
+    const gv = project.globalVision || {};
+    const interiorSpaces = (project?.spaces || []).filter((s) => s.type === 'interior');
+    const exteriorSpaces = (project?.spaces || []).filter((s) => s.type === 'exterior');
+    const adjustZones = buildAdjustZones(project);
+    const floorplanImageUrl = project?.floorplan?.imageUrl || null;
+    const scalePxPerInch = project?.floorplan?.scalePxPerInch || 1;
+
+    if (confirmPhase === 'spaces') {
+      return <Navigate replace to={`/studio/project/${projectId}/confirm?mode=adjust`} />;
+    }
+
+    if (confirmMode === 'adjust') {
+      const hasGeometry = adjustZones.length > 0;
+      const imageW = hasGeometry
+        ? Math.max(...adjustZones.map((z) => z.bbox?.[2] || 0), 1)
+        : 0;
+      const imageH = hasGeometry
+        ? Math.max(...adjustZones.map((z) => z.bbox?.[3] || 0), 1)
+        : 0;
+
+      const persistAdjustedSpaces = async (finalZones) => {
+        setAdjustConfirmIssue(null);
+        const nextProject = { ...project };
+        const finalById = new Map(finalZones.map((z) => [z.id, z]));
+        const existingSpaces = Array.isArray(project?.spaces) ? project.spaces : [];
+        const zoneSpaces = finalZones.map((zone, idx) => {
+          const existing = existingSpaces.find((s) => (s.zoneId || s.zone_id) === zone.id);
+          return {
+            ...(existing || {}),
+            id: existing?.id || `space-${zone.id || idx}`,
+            name: zone.name || existing?.name || `Space ${idx + 1}`,
+            type: zone.type === 'exterior' ? 'exterior' : 'interior',
+            zoneId: zone.id,
+            geometry: zone.geometry || null,
+            placeholderMode: zone.type === 'exterior',
+          };
+        });
+        const untouchedSpaces = existingSpaces.filter((space) => {
+          const zid = space.zoneId || space.zone_id;
+          return !zid || !finalById.has(zid);
+        });
+        nextProject.spaces = [...zoneSpaces, ...untouchedSpaces];
+        nextProject.floorplan = {
+          ...(project.floorplan || {}),
+          imageUrl: floorplanImageUrl,
+          zones: finalZones,
+          scalePxPerInch,
+          updatedAt: new Date().toISOString(),
+        };
+        nextProject.updatedAt = new Date().toISOString();
+        nextProject.confirmationCompletedAt = new Date().toISOString();
+
+        let resolved = await resolveInteriorRoomLinks(nextProject);
+        resolved = normalizeProjectPayload(resolved);
+        upsertProject(resolved);
+        setProjects((prev) => prev.map((p) => (p.id === resolved.id ? resolved : p)));
+
+        const target = getFirstEditableEditorSpace(resolved);
+        if (!target?.id || !getSpaceRoomId(target)) {
+          setAdjustConfirmIssue('Add at least one editable space before opening the editor.');
+          return;
+        }
+        toast.success('Opening editor');
+        navigate(`/studio/project/${project.id}/editor/${target.id}`);
+      };
+
+      const confirmAdjustSkipFloorplan = async () => {
+        setAdjustConfirmIssue(null);
+        let resolved = await resolveInteriorRoomLinks(project);
+        resolved = normalizeProjectPayload(resolved);
+        const target = getFirstEditableEditorSpace(resolved);
+        if (!target?.id || !getSpaceRoomId(target)) {
+          setAdjustConfirmIssue('Add at least one editable space before opening the editor.');
+          return;
+        }
+        resolved.confirmationCompletedAt = new Date().toISOString();
+        resolved.updatedAt = new Date().toISOString();
+        upsertProject(resolved);
+        setProjects((prev) => prev.map((p) => (p.id === resolved.id ? resolved : p)));
+        toast.success('Opening editor');
+        navigate(`/studio/project/${project.id}/editor/${target.id}`);
+      };
+
+      if (!floorplanImageUrl || !hasGeometry) {
+        return (
+          <>
+            <Helmet>
+              <title>Adjust spaces — {project?.name || 'Project'}</title>
+            </Helmet>
+            <div className="mx-auto max-w-4xl px-6 py-20">
+              <button
+                type="button"
+                className="text-[11px] uppercase tracking-editorial text-[#5b5b5b] hover:text-[#171717] mb-6"
+                onClick={() => navigate('/studio')}
+              >
+                ← Back to projects
+              </button>
+              <div className="panel p-6">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.34em] text-vs-accent mb-3">Adjust spaces</p>
+                <div className="font-display text-2xl mb-2">Start by adding spaces or uploading a floorplan.</div>
+                <p className="text-sm text-ink-600 leading-relaxed">
+                  Upload a floorplan to align rooms on the canvas, or add at least one interior space with a linked editable
+                  room before opening the editor.
+                </p>
+                {adjustConfirmIssue && (
+                  <p className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200/80 rounded-lg px-4 py-3">
+                    {adjustConfirmIssue}
+                  </p>
+                )}
+                <div className="mt-6 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="btn-ink text-[10px]"
+                    onClick={() => confirmAdjustSkipFloorplan()}
+                  >
+                    Confirm and open editor
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost text-[10px]"
+                    onClick={() =>
+                      navigate(
+                        `/studio/new?projectId=${encodeURIComponent(project.id)}&step=upload&projectName=${encodeURIComponent(project.name || '')}`,
+                      )
+                    }
+                  >
+                    Upload floorplan
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost text-[10px]"
+                    onClick={() => openSpaceTypeModal(project, 'interior')}
+                    disabled={creatingInteriorSpace || !project}
+                  >
+                    Add interior space
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost text-[10px]"
+                    onClick={() => openSpaceTypeModal(project, 'exterior')}
+                    disabled={creatingExteriorSpace || !project}
+                  >
+                    Add exterior area
+                  </button>
+                </div>
+              </div>
+            </div>
+            <AnimatePresence>
+              {showSpaceTypeModal && spaceTypeTarget && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 bg-black/35 grid place-items-center px-4"
+                >
+                  <div className="w-full max-w-xl rounded-[22px] border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] p-8">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-vs-accent mb-3">
+                      {spaceTypeTarget.type === 'interior' ? 'Add Interior Space' : 'Add Exterior Area'}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mb-5">
+                      {(spaceTypeTarget.type === 'interior' ? INTERIOR_SPACE_TYPES : EXTERIOR_AREA_TYPES).map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => setSelectedSpaceCategory(option)}
+                          className={`rounded-lg px-3 py-2 text-[11px] uppercase tracking-editorial border ${
+                            selectedSpaceCategory === option
+                              ? 'border-[#004aad] text-[#004aad] bg-[#eef4f7]'
+                              : 'border-[rgba(0,0,0,0.08)] text-[#5b5b5b]'
+                          }`}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex justify-end gap-3">
+                      <button type="button" className="btn-ghost" onClick={closeSpaceTypeModal}>
+                        Cancel
+                      </button>
+                      <button type="button" className="btn-ink" onClick={confirmAddSpaceType}>
+                        Create
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+        );
+      }
+
+      return (
+        <RoomEditor
+          imageUrl={floorplanImageUrl}
+          imageWidth={Math.max(800, imageW + 80)}
+          imageHeight={Math.max(600, imageH + 80)}
+          initialZones={adjustZones}
+          boundary={null}
+          scalePxPerInch={scalePxPerInch}
+          onConfirm={persistAdjustedSpaces}
+          onCancel={() => navigate('/studio')}
+          confirmError={adjustConfirmIssue}
+        />
+      );
+    }
+
+    const openEditorAfterConfirmation = async () => {
+      const next = {
+        ...project,
+        confirmationCompletedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      upsertProject(next);
+      setProjects((prev) => {
+        const i = prev.findIndex((p) => p.id === next.id);
+        if (i < 0) return [...prev, normalizeProjectPayload(next)];
+        return prev.map((p) => (p.id === next.id ? normalizeProjectPayload(next) : p));
+      });
+
+      setEditorEntryIssue(null);
+      const target = getFirstEditableEditorSpace(project);
+      if (target?.id && getSpaceRoomId(target)) {
+        navigate(`/studio/project/${projectId}/editor/${target.id}`);
+      } else {
+        navigate(`/studio/project/${projectId}/editor`);
+      }
+    };
+
+    const fromHub = searchParams.get('from') === 'hub';
+
+    return (
+      <>
+        <Helmet><title>Confirm project — {project?.name || 'Project'}</title></Helmet>
+        <div className="mx-auto max-w-7xl bg-[#f6f3ee] px-6 py-16 text-[#171717] md:px-8 pb-24">
+          <button
+            type="button"
+            className="text-[11px] uppercase tracking-editorial text-[#5b5b5b] hover:text-[#171717] mb-6"
+            onClick={() => navigate(`/studio/project/${projectId}`)}
+          >
+            ← Back to Project Hub
+          </button>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.34em] text-vs-accent mb-3">Confirmation</p>
+          <h1 className="display-lg mb-2">Your room is ready.</h1>
+          <p className="mt-2 text-sm text-[#5b5b5b] max-w-2xl leading-relaxed">
+            We've mapped your floorplan, set your spaces, and captured your project vision. Review the
+            summary below, then jump into the editor to start designing — or open the project hub to
+            see everything at a glance.
+          </p>
+
+          {(project.previewImageUrl || project.detectedDimensions?.width) && (
+            <section className="mt-10 rounded-[22px] border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] overflow-hidden shadow-[0_18px_40px_rgba(4,12,46,0.06)]">
+              {project.previewImageUrl && (
+                <div className="aspect-[16/9] bg-[#eef4f7] overflow-hidden">
+                  <img
+                    src={project.previewImageUrl}
+                    alt={`Floorplan preview for ${project.name}`}
+                    className="w-full h-full object-contain"
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
+                </div>
+              )}
+              <div className="p-6 border-t border-[rgba(0,0,0,0.06)] flex flex-wrap items-baseline justify-between gap-3">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-vs-accent mb-1">Detected floorplan</div>
+                  <div className="font-display text-lg text-[#171717]">{project.name}</div>
+                </div>
+                {project.detectedDimensions?.width && project.detectedDimensions?.depth && (
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b]">
+                    {inchesToFeet(project.detectedDimensions.width)} × {inchesToFeet(project.detectedDimensions.depth)}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          <div className="grid lg:grid-cols-3 gap-6 mt-10">
+            <section className="panel p-6 lg:col-span-1">
+              <div className="eyebrow text-vs-accent mb-3">Project</div>
+              <div className="font-display text-xl text-[#171717]">{project.name}</div>
+              <div className="mt-2 text-sm text-[#5b5b5b]">
+                {project.propertyType || 'House'} · {project.scope || 'interior_exterior'}
+              </div>
+              <div className="mt-6">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-2">Style & mood</div>
+                <div className="flex flex-wrap gap-2">
+                  {(gv.styleKeywords || []).length === 0 && !gv.moodVibe && (
+                    <span className="text-xs text-[#9a9a9a]">—</span>
+                  )}
+                  {(gv.styleKeywords || []).map((k) => (
+                    <span key={k} className="text-[10px] uppercase tracking-editorial px-2.5 py-1 rounded-full border border-[rgba(0,0,0,0.1)] bg-[#fffdf9]">
+                      {k}
+                    </span>
+                  ))}
+                  {gv.moodVibe ? (
+                    <span className="text-[10px] uppercase tracking-editorial px-2.5 py-1 rounded-full border border-[#004aad]/25 bg-[#eef4f7] text-[#004aad]">
+                      {gv.moodVibe}
+                    </span>
+                  ) : null}
+                </div>
+                {gv.budgetRange ? (
+                  <p className="mt-3 text-xs text-[#5b5b5b]">Budget: {gv.budgetRange}</p>
+                ) : null}
+              </div>
+            </section>
+
+            <section className="panel p-6 lg:col-span-2">
+              <div className="eyebrow text-vs-accent mb-3">Overall project vision</div>
+              <div className="w-full rounded-xl border border-[rgba(0,0,0,0.08)] bg-[#fffdf9] px-4 py-3 text-sm text-[#2d2d2d] min-h-[140px] leading-relaxed whitespace-pre-wrap">
+                {gv.propertyVision || 'No overall vision provided yet.'}
+              </div>
+              <p className="mt-2 text-[11px] text-[#8b7355]">
+                This summary is read-only here. If you need to revise, use Project Vision Assistant from the project hub.
+              </p>
+            </section>
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-8 mt-10">
+            <section className="panel p-6">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="eyebrow text-vs-accent">Interior Spaces</div>
+              </div>
+              <div className="space-y-2">
+                {interiorSpaces.map((space) => (
+                  <div key={space.id} className="rounded-lg border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] px-4 py-3 text-sm">
+                    {space.name}
+                  </div>
+                ))}
+                {interiorSpaces.length === 0 && (
+                  <p className="text-xs text-[#5b5b5b] leading-relaxed">
+                    No interior spaces yet. Add a room such as Living Room, Kitchen, Bedroom, or Office.
+                  </p>
+                )}
+              </div>
+            </section>
+            <section className="panel p-6">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="eyebrow text-vs-accent">Exterior Areas</div>
+              </div>
+              <div className="space-y-2">
+                {exteriorSpaces.map((space) => (
+                  <div key={space.id} className="rounded-lg border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] px-4 py-3 text-sm">
+                    {space.name}
+                  </div>
+                ))}
+                {exteriorSpaces.length === 0 && (
+                  <p className="text-xs text-[#5b5b5b] leading-relaxed">
+                    No exterior areas yet. Add an area such as Front Yard, Backyard, Patio, Entry, or Garden.
+                  </p>
+                )}
+              </div>
+            </section>
+          </div>
+          <section className="panel p-6 mt-8">
+            <div className="eyebrow text-vs-accent mb-2">What happens next</div>
+            <p className="text-sm text-[#2d2d2d] leading-relaxed">
+              You will enter the editor next. Use the editor&apos;s Space Assistant for room-specific layout and furniture changes.
+            </p>
+          </section>
+
+          <div className="mt-12 flex flex-wrap items-center gap-4">
+            <button
+              type="button"
+              className="btn-ink px-8 py-3 text-[11px] uppercase tracking-[0.12em]"
+              onClick={openEditorAfterConfirmation}
+            >
+              Continue to Editor →
+            </button>
+            <button
+              type="button"
+              className="btn-ghost text-[11px] uppercase tracking-[0.15em] px-6 py-3"
+              onClick={() => navigate(`/studio/project/${projectId}`)}
+            >
+              Back to Project Hub
+            </button>
+            <button
+              type="button"
+              className="text-[11px] uppercase tracking-editorial text-[#5b5b5b] hover:text-[#171717] transition px-2 py-3"
+              onClick={() =>
+                fromHub
+                  ? navigate(`/studio/project/${projectId}`)
+                  : navigate(`/studio/project/${projectId}/vision`)
+              }
+            >
+              {fromHub ? '← Return to project' : '← Back to vision'}
+            </button>
+          </div>
+          {editorEntryIssue && (
+            <div className="rounded-xl border border-sienna-500/35 bg-paper-100/90 px-5 py-4 mt-5">
+              <p className="text-sm font-medium text-ink-900">{editorEntryIssue}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn-ghost text-[10px]"
+                  onClick={() => navigate(`/studio/project/${projectId}/confirm?mode=adjust`)}
+                >
+                  Review Spaces
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost text-[10px]"
+                  onClick={() => openSpaceTypeModal(project, 'interior')}
+                  disabled={creatingInteriorSpace || !project}
+                >
+                  Add Interior Space
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost text-[10px]"
+                  onClick={() => openSpaceTypeModal(project, 'exterior')}
+                  disabled={creatingExteriorSpace || !project}
+                >
+                  Add Exterior Area
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </>
+    );
+  }
+
+  if (matchVision) {
+    const project = currentProject;
+    if (!project) {
+      return (
+        <div className="min-h-[60vh] grid place-items-center">
+          <span className="eyebrow text-ink-500">Loading project…</span>
+        </div>
+      );
+    }
+    return (
+      <ProjectVisionIntake project={project} onPersist={syncProjectFromChild} />
+    );
+  }
+
   // -------- No room selected and no project selected -> project dashboard --------
-  if (!roomId && !projectId) {
+  if (matchDashboard) {
     const waitingForAuth = authLoading;
     const guest = !user && !authLoading;
 
@@ -688,18 +1103,15 @@ export default function Studio() {
             <h1 className="display-lg max-w-3xl">
               {guest ? 'Start your floorplan project in seconds.' : 'Your floorplans and projects.'}
             </h1>
-            <button className="btn-ink" onClick={() => setShowProjectCreate(true)}>+ New Project</button>
+            <button type="button" className="btn-ink" onClick={() => navigate('/studio/new')}>+ New Project</button>
           </div>
           <p className="mb-10 max-w-3xl text-sm leading-relaxed text-[#2d2d2d]">
             Create or open a floorplan-level project. Each project contains interior spaces, exterior
             areas, layout geometry, design context, and room-specific edits.
           </p>
-          <div className="mb-8 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b]">
-            <span className="rounded-full border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] px-3 py-1">Saved automatically</span>
-            <span className="rounded-full border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] px-3 py-1">Last synced just now</span>
-            <span className="rounded-full border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] px-3 py-1">Multi-space planning enabled</span>
-            <span className="rounded-full border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] px-3 py-1">AI suggestions use project context</span>
-          </div>
+          <p className="mb-8 text-xs text-[#5b5b5b]">
+            Projects organize your floorplan into interior spaces, exterior areas, and project-wide design context.
+          </p>
           {!!queryProjectId && !currentProject && (
             <p className="mb-6 rounded-lg border border-[rgba(0,0,0,0.08)] bg-[#eef4f7] px-4 py-3 text-sm text-[#5b5b5b]">
               Project context unavailable. Showing saved spaces instead.
@@ -719,7 +1131,7 @@ export default function Studio() {
               <div className="flex gap-3">
                 <button className="btn-ink" onClick={() => openRoom(draftRoom.id)}>Continue space editing →</button>
                 <button
-                  onClick={discardDraft}
+                  onClick={requestDiscardDraft}
                   className="text-[11px] uppercase tracking-editorial text-ink-500 hover:text-ink-900 px-4"
                 >
                   Discard
@@ -739,10 +1151,8 @@ export default function Studio() {
                 {ROOM_TEMPLATES.map((t) => (
                   <button
                     key={t.id}
-                    onClick={() => {
-                      setProjectForm((s) => ({ ...s, startMode: 'template', templateId: t.id, name: t.name }));
-                      setShowProjectCreate(true);
-                    }}
+                    type="button"
+                    onClick={() => navigate(`/studio/new?startMode=template&templateId=${encodeURIComponent(t.id)}`)}
                     className="group text-left rounded-[20px] border border-[rgba(0,0,0,0.08)] bg-[#eef4f7] p-8 shadow-[0_14px_34px_rgba(4,12,46,0.05)] transition hover:bg-[#f8f8f6] hover:border-[#004aad]/35"
                   >
                     <div className="text-[10px] font-semibold uppercase tracking-[0.26em] text-vs-accent mb-6">Template</div>
@@ -761,10 +1171,8 @@ export default function Studio() {
                 </div>
                 <button
                   className="btn-ink"
-                  onClick={() => {
-                    setProjectForm((s) => ({ ...s, startMode: 'upload' }));
-                    setShowProjectCreate(true);
-                  }}
+                  type="button"
+                  onClick={() => navigate('/studio/new?startMode=upload')}
                 >
                   Upload floorplan →
                 </button>
@@ -795,7 +1203,7 @@ export default function Studio() {
                     Create your first project and choose upload, blank, or template start.
                   </p>
                 </div>
-                <button className="btn-ink" onClick={() => setShowProjectCreate(true)}>Create Project</button>
+                <button type="button" className="btn-ink" onClick={() => navigate('/studio/new')}>Create Project</button>
               </div>
             ) : (
               <div className="grid md:grid-cols-3 gap-6">
@@ -872,7 +1280,7 @@ export default function Studio() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => deleteProject(p)}
+                        onClick={() => requestDeleteProject(p)}
                         className="text-[10px] uppercase tracking-[0.2em] text-[#8f4d4d] hover:text-[#7a2f2f]"
                       >
                         Delete
@@ -888,75 +1296,27 @@ export default function Studio() {
           {waitingForAuth && (
             <div className="text-ink-500 eyebrow">Loading…</div>
           )}
-          {!waitingForAuth && (
-            <p className="mt-14 text-xs uppercase tracking-[0.2em] text-vs-dark/52">
-              Projects group interior and exterior spaces while keeping current room APIs compatible.
-            </p>
-          )}
+          {!waitingForAuth && <p className="mt-14 text-xs uppercase tracking-[0.2em] text-vs-dark/52" />}
 
-          {showProjectCreate && (
-            <div className="fixed inset-0 z-50 bg-black/35 grid place-items-center px-4">
-              <form
-                className="w-full max-w-xl rounded-[22px] border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] p-8"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  createProject();
-                }}
-              >
-                <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-vs-accent mb-4">New Project</div>
-                <label className="block mb-5">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5b5b5b] mb-2">Project Name</div>
-                  <input className="input-field bg-[#fffdf9]" value={projectForm.name} onChange={(e) => setProjectForm((s) => ({ ...s, name: e.target.value }))} placeholder="Untitled Project" />
-                </label>
-                <label className="block mb-5">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5b5b5b] mb-2">Property Type</div>
-                  <select className="input-field bg-[#fffdf9]" value={projectForm.propertyType} onChange={(e) => setProjectForm((s) => ({ ...s, propertyType: e.target.value }))}>
-                    {PROPERTY_TYPES.map((type) => <option key={type}>{type}</option>)}
-                  </select>
-                </label>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5b5b5b] mb-2">Choose how to begin</div>
-                <div className="grid grid-cols-3 gap-2 mb-5">
-                  {['upload', 'blank', 'template'].map((mode) => (
-                    <button type="button" key={mode} onClick={() => setProjectForm((s) => ({ ...s, startMode: mode }))}
-                      className={`rounded-lg px-3 py-2 text-[11px] uppercase tracking-editorial border ${projectForm.startMode === mode ? 'border-[#004aad] text-[#004aad] bg-[#eef4f7]' : 'border-[rgba(0,0,0,0.08)] text-[#5b5b5b]'}`}>
-                      {mode === 'upload' ? 'Upload Floorplan' : mode === 'blank' ? 'Start Blank' : 'Use Template'}
-                    </button>
-                  ))}
-                </div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5b5b5b] mb-2">Scope</div>
-                <div className="grid grid-cols-3 gap-2 mb-5">
-                  {PROJECT_SCOPES.map((scope) => (
-                    <button
-                      type="button"
-                      key={scope.id}
-                      onClick={() => setProjectForm((s) => ({ ...s, scope: scope.id }))}
-                      className={`rounded-lg px-3 py-2 text-[11px] uppercase tracking-editorial border ${
-                        projectForm.scope === scope.id
-                          ? 'border-[#004aad] text-[#004aad] bg-[#eef4f7]'
-                          : 'border-[rgba(0,0,0,0.08)] text-[#5b5b5b]'
-                      }`}
-                    >
-                      {scope.label}
-                    </button>
-                  ))}
-                </div>
-                {projectCreateError && (
-                  <div className="mb-4 rounded-lg border border-[rgba(143,77,77,0.3)] bg-[#fff1f1] px-3 py-2 text-sm text-[#7a2f2f]">
-                    {projectCreateError}
-                  </div>
-                )}
-                {projectForm.startMode === 'template' && (
-                  <select className="input-field bg-[#fffdf9] mb-5" value={projectForm.templateId} onChange={(e) => setProjectForm((s) => ({ ...s, templateId: e.target.value }))}>
-                    {ROOM_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
-                )}
-                <div className="flex justify-end gap-3">
-                  <button type="button" className="btn-ghost" onClick={() => { setProjectCreateError(''); setShowProjectCreate(false); }}>Cancel</button>
-                  <button type="submit" className="btn-ink" disabled={creating}>{creating ? 'Creating…' : 'Continue'}</button>
-                </div>
-              </form>
-            </div>
-          )}
+          <ConfirmModal
+            open={confirmDialog?.kind === 'deleteProject'}
+            title="Remove project?"
+            message="Remove this project from your dashboard? This does not delete backend room records."
+            confirmLabel="Remove"
+            danger
+            onConfirm={confirmDeleteProject}
+            onCancel={() => setConfirmDialog(null)}
+          />
+          <ConfirmModal
+            open={confirmDialog?.kind === 'discardDraft'}
+            title="Discard draft?"
+            message="Discard your draft? This cannot be undone."
+            confirmLabel="Discard"
+            danger
+            onConfirm={confirmDiscardDraft}
+            onCancel={() => setConfirmDialog(null)}
+          />
+
           {editingProjectId && (
             <div className="fixed inset-0 z-50 bg-black/35 grid place-items-center px-4">
               <div className="w-full max-w-md rounded-[18px] border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] p-6">
@@ -980,17 +1340,115 @@ export default function Studio() {
     );
   }
 
-  if (!roomId && projectId) {
+  if (matchProjectHub) {
     const project = currentProject;
     const interiorSpaces = (project?.spaces || []).filter((s) => s.type === 'interior');
     const exteriorSpaces = (project?.spaces || []).filter((s) => s.type === 'exterior');
+    const gv = project?.globalVision || {};
+    const visionOk = isProjectVisionComplete(gv);
+    const confirmed = isConfirmationDone(project);
+    const setupIncomplete = !visionOk || !confirmed;
+    const continueSetupPath = !visionOk
+      ? `/studio/project/${project?.id}/vision?setup=new`
+      : `/studio/project/${project?.id}/confirm?mode=adjust`;
     return (
       <>
         <Helmet><title>{project?.name || 'Project'} — Vision Studio</title></Helmet>
         <div className="mx-auto max-w-7xl bg-[#f6f3ee] px-6 py-20 text-[#171717] md:px-8">
-          <button className="text-[11px] uppercase tracking-editorial text-[#5b5b5b] hover:text-[#171717] mb-4" onClick={() => navigate('/studio')}>← Back to Projects</button>
-          <h1 className="display-lg">{project?.name || 'Project'}</h1>
-          <p className="mt-4 text-sm text-[#5b5b5b]">
+          <button type="button" className="text-[11px] uppercase tracking-editorial text-[#5b5b5b] hover:text-[#171717] mb-4" onClick={() => navigate('/studio')}>← Back to Projects</button>
+          <div className="flex flex-wrap items-end justify-between gap-6 mb-8">
+            <div>
+              <h1 className="display-lg">{project?.name || 'Project'}</h1>
+              <p className="mt-4 text-sm text-[#5b5b5b] max-w-2xl">
+                Open the editor to refine spaces, furniture layout, and geometry for this project.
+              </p>
+            </div>
+            <div className="flex flex-col items-end gap-3">
+              <button
+                type="button"
+                className="btn-ink px-8 py-3 text-[11px] uppercase tracking-[0.12em]"
+                onClick={() => project?.id && openEditorFromHub(project)}
+                disabled={!project?.id}
+              >
+                Open Editor
+              </button>
+              <div className="flex flex-wrap justify-end gap-2 max-w-md">
+                <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project?.id}/vision`)} disabled={!project?.id}>
+                  Edit Project Vision
+                </button>
+                <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project?.id}/confirm?mode=adjust`)} disabled={!project?.id}>
+                  Review Spaces
+                </button>
+                <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project?.id}/chat`)} disabled={!project?.id}>
+                  Ask Project Assistant
+                </button>
+              </div>
+              <p className="text-[10px] text-[#8a857d] text-right max-w-sm leading-relaxed">
+                Vision review, space checklist, and project chat are optional once guided setup is finished — use anytime.
+              </p>
+            </div>
+          </div>
+          {editorEntryIssue && (
+            <div className="rounded-xl border border-sienna-500/35 bg-paper-100/90 px-5 py-4 mb-8">
+              <p className="text-sm font-medium text-ink-900">{editorEntryIssue}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn-ghost text-[10px]"
+                  onClick={() => project?.id && navigate(`/studio/project/${project.id}/confirm?mode=adjust`)}
+                >
+                  Review Spaces
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost text-[10px]"
+                  onClick={() => openSpaceTypeModal(project, 'interior')}
+                  disabled={creatingInteriorSpace || !project}
+                >
+                  Add Interior Space
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost text-[10px]"
+                  onClick={() => openSpaceTypeModal(project, 'exterior')}
+                  disabled={creatingExteriorSpace || !project}
+                >
+                  Add Exterior Area
+                </button>
+              </div>
+            </div>
+          )}
+
+          {setupIncomplete && (
+            <div className="rounded-xl border border-sienna-500/35 bg-paper-100/90 px-5 py-4 mb-10">
+              <p className="text-sm font-medium text-ink-900">Continue guided setup</p>
+              <p className="mt-1 text-xs text-ink-600 max-w-2xl leading-relaxed">
+                New projects walk through vision and space confirmation first. Pick up where you left off, or use the links
+                above if you prefer to skip ahead.
+              </p>
+              <button
+                type="button"
+                className="btn-sienna mt-4 text-[10px] uppercase tracking-editorial"
+                onClick={() => project?.id && navigate(continueSetupPath)}
+                disabled={!project?.id}
+              >
+                Continue setup →
+              </button>
+            </div>
+          )}
+
+          <section className="panel p-6 mb-10">
+            <div className="eyebrow text-vs-accent mb-2">Project vision summary</div>
+            <p className="text-sm text-[#2d2d2d] leading-relaxed">
+              {[
+                gv.propertyVision,
+                gv.moodVibe,
+                gv.styleKeywords?.join(', '),
+              ].filter(Boolean).join(' · ') || 'Your whole-property vision appears here.'}
+            </p>
+          </section>
+
+          <p className="mt-4 text-sm text-[#5b5b5b] mb-10">
             Select a space to edit, or add interior and exterior areas to build out the full property.
           </p>
           {!project && (
@@ -998,8 +1456,8 @@ export default function Studio() {
               Project context unavailable. Showing saved spaces instead.
             </div>
           )}
-          <div className="grid lg:grid-cols-3 gap-8 mt-10">
-            <section className="panel p-6 lg:col-span-2">
+          <div className="grid lg:grid-cols-2 gap-8 mt-10">
+            <section className="panel p-6">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
                   <div className="eyebrow text-vs-accent">Interior Spaces</div>
@@ -1010,7 +1468,7 @@ export default function Studio() {
                   onClick={() => openSpaceTypeModal(project, 'interior')}
                   disabled={creatingInteriorSpace || !project}
                 >
-                  + Add interior space
+                  Add Interior Space
                 </button>
               </div>
               <div className="space-y-2">
@@ -1039,8 +1497,10 @@ export default function Studio() {
                     onClick={() => openSpaceTypeModal(project, 'interior')}
                     disabled={creatingInteriorSpace || !project}
                   >
-                    <div className="text-sm font-medium">{creatingInteriorSpace ? 'Creating interior space…' : '+ Add interior space'}</div>
-                    <div className="mt-1 text-[10px] uppercase tracking-[0.2em] text-vs-accent">No interior spaces yet</div>
+                    <div className="text-sm font-medium">{creatingInteriorSpace ? 'Creating interior space…' : 'Add Interior Space'}</div>
+                    <div className="mt-2 text-xs text-[#5b5b5b] leading-relaxed">
+                      No interior spaces yet. Add a room such as Living Room, Kitchen, Bedroom, or Office.
+                    </div>
                   </button>
                 )}
               </div>
@@ -1056,7 +1516,7 @@ export default function Studio() {
                   onClick={() => openSpaceTypeModal(project, 'exterior')}
                   disabled={creatingExteriorSpace || !project}
                 >
-                  + Add exterior area
+                  Add Exterior Area
                 </button>
               </div>
               <div className="space-y-2">
@@ -1085,71 +1545,14 @@ export default function Studio() {
                     onClick={() => openSpaceTypeModal(project, 'exterior')}
                     disabled={creatingExteriorSpace || !project}
                   >
-                    <div className="text-sm font-medium">{creatingExteriorSpace ? 'Creating exterior area…' : '+ Add exterior area'}</div>
-                    <div className="mt-1 text-[10px] uppercase tracking-[0.2em] text-vs-accent">No exterior areas yet</div>
+                    <div className="text-sm font-medium">{creatingExteriorSpace ? 'Creating exterior area…' : 'Add Exterior Area'}</div>
+                    <div className="mt-2 text-xs text-[#5b5b5b] leading-relaxed">
+                      No exterior areas yet. Add an area such as Front Yard, Backyard, Patio, Entry, or Garden.
+                    </div>
                   </button>
                 )}
               </div>
             </section>
-            <aside className="panel p-6">
-              <div className="eyebrow text-vs-accent mb-2">Project Vision</div>
-              <p className="text-xs text-[#5b5b5b] mb-5">
-                Keep strategic direction visible across interior and exterior decisions.
-              </p>
-              <div className="space-y-3">
-                <label className="block">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-1">Style</div>
-                  <input
-                    className="input-field bg-[#fffdf9]"
-                    value={project?.globalVision?.styleKeywords?.join(', ') || ''}
-                    onChange={(e) => updateProjectVision(project, {
-                      styleKeywords: e.target.value.split(',').map((v) => v.trim()).filter(Boolean),
-                    })}
-                    placeholder="Warm minimal, Japandi, modern coastal"
-                  />
-                </label>
-                <label className="block">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-1">Mood</div>
-                  <input
-                    className="input-field bg-[#fffdf9]"
-                    value={project?.globalVision?.moodVibe || ''}
-                    onChange={(e) => updateProjectVision(project, { moodVibe: e.target.value })}
-                    placeholder="Calm, gallery-like, inviting"
-                  />
-                </label>
-                <label className="block">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-1">Budget</div>
-                  <input
-                    className="input-field bg-[#fffdf9]"
-                    value={project?.globalVision?.budgetRange || ''}
-                    onChange={(e) => updateProjectVision(project, { budgetRange: e.target.value })}
-                    placeholder="Mid-range, premium accents"
-                  />
-                </label>
-                <label className="block">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-1">Interior Goals</div>
-                  <textarea
-                    className="w-full rounded-lg border border-[rgba(0,0,0,0.08)] bg-[#fffdf9] px-3 py-2 text-sm"
-                    value={project?.globalVision?.interiorGoals || ''}
-                    onChange={(e) => updateProjectVision(project, { interiorGoals: e.target.value })}
-                    placeholder="Flow, zoning, atmosphere, furniture strategy"
-                  />
-                </label>
-                <label className="block">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-1">Exterior Goals</div>
-                  <textarea
-                    className="w-full rounded-lg border border-[rgba(0,0,0,0.08)] bg-[#fffdf9] px-3 py-2 text-sm"
-                    value={project?.globalVision?.exteriorGoals || ''}
-                    onChange={(e) => updateProjectVision(project, { exteriorGoals: e.target.value })}
-                    placeholder="Curb appeal, entry sequence, outdoor living"
-                  />
-                </label>
-              </div>
-              <button className="btn-ink w-full mt-4 text-[10px] py-2.5">Refine with AI Assistant</button>
-              <p className="mt-3 text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b]">
-                Saved automatically · Last synced just now
-              </p>
-            </aside>
           </div>
           <AnimatePresence>
             {showSpaceTypeModal && spaceTypeTarget && (
@@ -1208,13 +1611,72 @@ export default function Studio() {
     );
   }
 
-  // -------- Space selected -> full editor --------
-  if (!room) {
+  const isProjectEditorMode = Boolean(isProjectEditorRoute && currentProject);
+  const selectedSpaceRoomId = getSpaceRoomId(selectedProjectSpace);
+  const selectedSpaceHasLinkedRoom = Boolean(selectedSpaceRoomId);
+  const showRoomScopedCanvas = Boolean(room && resolvedRoomId);
+  const assistantContextLabel = selectedProjectSpace
+    ? selectedProjectSpace.name
+    : isProjectEditorMode
+      ? 'Full Floorplan'
+      : room?.name || 'Current Space';
+
+  // -------- Legacy room editor loading states --------
+  if (!isProjectEditorMode && !room) {
+    if (loadRoomFailed) {
+      return (
+        <div className="h-[calc(100vh-4rem)] grid place-items-center">
+          <div className="panel p-6 max-w-xl mx-4">
+            <div className="font-display text-xl mb-2">Editor unavailable for this space</div>
+            <p className="text-sm text-ink-600 leading-relaxed">
+              {editorEntryIssue || 'Add or confirm a space before opening the editor.'}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn-ghost text-[10px]"
+                onClick={() => projectId && navigate(`/studio/project/${projectId}/confirm?mode=adjust`)}
+                disabled={!projectId}
+              >
+                Review Spaces
+              </button>
+              <button
+                type="button"
+                className="btn-ghost text-[10px]"
+                onClick={() => projectId && navigate(`/studio/project/${projectId}`)}
+                disabled={!projectId}
+              >
+                Back to Project Hub
+              </button>
+              <button
+                type="button"
+                className="btn-ghost text-[10px]"
+                onClick={() => projectId && navigate(`/studio/project/${projectId}`)}
+                disabled={!projectId}
+              >
+                Create Editable Space
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="h-[calc(100vh-4rem)] grid place-items-center">
         <div className="flex flex-col items-center gap-4">
           <div className="w-8 h-8 border-2 border-ink-300 border-t-ink-900 rounded-full animate-spin" />
-          <span className="eyebrow text-ink-500">Loading space…</span>
+          <span className="eyebrow text-ink-500">Loading space...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (isProjectEditorMode && selectedSpaceHasLinkedRoom && !room && !loadRoomFailed) {
+    return (
+      <div className="h-[calc(100vh-4rem)] grid place-items-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-2 border-ink-300 border-t-ink-900 rounded-full animate-spin" />
+          <span className="eyebrow text-ink-500">Loading selected space...</span>
         </div>
       </div>
     );
@@ -1223,73 +1685,23 @@ export default function Studio() {
   return (
     <>
       <Helmet>
-        <title>{room.name || 'Untitled'} — Vision Studio</title>
+        <title>{isProjectEditorMode ? currentProject?.name || 'Project Editor' : room.name || 'Untitled'} — Vision Studio</title>
       </Helmet>
-      <div className="h-[calc(100vh-4rem)] flex flex-col bg-[#f6f3ee]">
-        <StudioToolbar onToggleCatalog={() => setCatalogOpen(!catalogOpen)} catalogOpen={catalogOpen}
-          chatFullscreen={chatFullscreen} onToggleChatFullscreen={() => setChatFullscreen(f => !f)} />
-        <div className="flex-1 flex overflow-hidden relative">
-          {currentProject && (
-            <aside className="hidden lg:flex w-[240px] border-r border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] flex-col p-4 gap-4">
-              <div>
-                <div className="text-[10px] uppercase tracking-[0.22em] text-[#5b5b5b]">Project</div>
-                <div className="font-display text-lg mt-1">{currentProject.name}</div>
-              </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-[0.22em] text-vs-accent mb-2">Interior</div>
-                <div className="space-y-1">
-                  {(currentProject.spaces || []).filter((s) => s.type === 'interior').map((space) => (
-                    <button key={space.id}
-                      onClick={() => selectProjectSpace(currentProject, space)}
-                      className={`w-full text-left px-3 py-2 rounded-md border text-sm ${querySpaceId === space.id ? 'border-[#004aad]/45 bg-[#eef4f7]' : 'border-transparent hover:border-[rgba(0,0,0,0.08)]'}`}>
-                      {space.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-[0.22em] text-vs-accent mb-2">Exterior</div>
-                <div className="space-y-1">
-                  {(currentProject.spaces || []).filter((s) => s.type === 'exterior').map((space) => (
-                    <button key={space.id}
-                      onClick={() => selectProjectSpace(currentProject, space)}
-                      className={`w-full text-left px-3 py-2 rounded-md border text-sm ${querySpaceId === space.id ? 'border-[#004aad]/45 bg-[#eef4f7]' : 'border-transparent hover:border-[rgba(0,0,0,0.08)]'}`}>
-                      {space.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </aside>
-          )}
-
-          {/* Fullscreen chat overlay — shown by default, hides when AI places furniture */}
-          {chatFullscreen && (
-            <div className="absolute inset-0 z-30 bg-[#f6f3ee] flex flex-col">
-              <FullscreenChat
-                room={room}
-                onMinimize={() => setChatFullscreen(false)}
-                projectName={currentProject?.name || ''}
-                selectedContextLabel={selectedContextLabel}
-                projectId={currentProject?.id || null}
-                spaceId={activeSpace?.id || null}
-                contextType={activeSpace ? 'current_space' : currentProject ? 'whole_project' : 'current_space'}
-                globalVision={currentProject?.globalVision || currentProject?.global_vision || null}
-                spaceVision={activeSpace?.spaceVision || activeSpace?.space_vision || null}
-              />
-            </div>
-          )}
-
-          {/* Catalog */}
-          <aside className={`
-            ${catalogOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-            fixed md:relative z-20 md:z-auto inset-y-0 left-0
-            w-[320px] border-r border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] overflow-y-auto
-            transition-transform duration-300 md:transition-none
-            top-[calc(4rem+3.5rem)] md:top-0 h-[calc(100vh-4rem-3.5rem)] md:h-auto
-          `}>
-            <CatalogPanel />
-          </aside>
-
+      <div
+        className={`flex flex-col bg-[#f6f3ee] ${
+          isProjectEditorRoute ? 'h-[100dvh] min-h-0' : 'h-[calc(100vh-4rem)]'
+        }`}
+      >
+        <StudioToolbar
+          onToggleCatalog={() => setCatalogOpen(!catalogOpen)}
+          catalogOpen={catalogOpen}
+          projectIdForBack={projectId}
+          contextLabel={assistantContextLabel}
+          projectTitle={resolvedProjectTitle}
+          projectMode={isProjectEditorMode}
+          wallPointsCanvasActive={!isProjectEditorMode || showRoomScopedCanvas}
+        />
+        <div className="flex-1 flex overflow-hidden relative min-h-0">
           <AnimatePresence>
             {catalogOpen && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -1297,36 +1709,148 @@ export default function Studio() {
             )}
           </AnimatePresence>
 
+          {/* Workspace sidebar — catalog, spaces list, export (IDE-style) */}
+          <aside
+            className={`
+            ${catalogOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+            fixed md:relative z-20 md:z-auto inset-y-0 left-0
+            w-auto bg-[#f8f8f6] overflow-hidden flex flex-col min-h-0
+            transition-transform duration-300 md:transition-none
+            ${
+              isProjectEditorRoute
+                ? 'top-14 h-[calc(100dvh-3.5rem)] md:top-0 md:h-full'
+                : 'top-[calc(4rem+3.5rem)] md:top-0 h-[calc(100vh-4rem-3.5rem)] md:h-full'
+            }
+          `}
+          >
+            <EditorWorkspaceSidebar
+              project={isProjectEditorRoute ? currentProject : null}
+              onNavigateToSpace={
+                projectId
+                  ? (spaceId) => {
+                      if (!spaceId) {
+                        navigate(`/studio/project/${projectId}/editor`);
+                        return;
+                      }
+                      navigate(`/studio/project/${projectId}/editor/${spaceId}`);
+                    }
+                  : undefined
+              }
+            />
+          </aside>
+
           <section className="relative overflow-hidden flex-1 min-w-0">
             <div className="h-full flex flex-col">
               <div className="min-h-0 flex-1 relative overflow-hidden">
                 <ErrorBoundary>
-                  {viewMode === '3d' ? <RoomViewer3D /> : <RoomCanvas />}
+                  {viewMode === '3d' ? (
+                    isProjectEditorMode && !showRoomScopedCanvas ? (
+                      <ProjectViewer3D
+                        project={currentProject}
+                        selectedSpaceId={selectedProjectSpaceId}
+                      />
+                    ) : (
+                      <RoomViewer3D />
+                    )
+                  ) : isProjectEditorMode && !showRoomScopedCanvas ? (
+                    <ProjectCanvas
+                      project={currentProject}
+                      projectSpaces={projectSpaces}
+                      selectedSpaceId={selectedProjectSpaceId}
+                      onSelectSpace={(spaceId) => {
+                        if (!projectId || !spaceId) return;
+                        navigate(`/studio/project/${projectId}/editor/${spaceId}`);
+                      }}
+                    />
+                  ) : (
+                    <RoomCanvas />
+                  )}
                 </ErrorBoundary>
+                {isProjectEditorMode && selectedProjectSpaceId && !selectedSpaceHasLinkedRoom && (
+                  <div className="pointer-events-none absolute left-4 top-4 z-10 rounded-lg border border-sienna-500/40 bg-paper-100/95 px-3 py-2 text-xs text-ink-700">
+                    {selectedProjectSpace?.name || 'Space'} has no linked room yet. Previewing project-level geometry.
+                  </div>
+                )}
+                {isProjectEditorMode && projectSpaces.length === 0 && (
+                  <div className="absolute inset-0 grid place-items-center">
+                    <div className="panel p-6 max-w-lg">
+                      <div className="font-display text-xl mb-2">No spaces in this project yet</div>
+                      <p className="text-sm text-ink-600">
+                        Add interior or exterior spaces to start your floorplan editor.
+                      </p>
+                      <div className="mt-4 flex gap-2">
+                        <button
+                          type="button"
+                          className="btn-ghost text-[10px]"
+                          onClick={() => navigate(`/studio/project/${projectId}/confirm?mode=adjust`)}
+                        >
+                          Review Spaces
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-ink text-[10px]"
+                          onClick={() => navigate(`/studio/project/${projectId}`)}
+                        >
+                          Add Space
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-              <ZoneBottomBar />
+              {isProjectEditorMode ? (
+                <ProjectSpaceBottomBar
+                  spaces={projectSpaces}
+                  selectedSpaceId={selectedProjectSpaceId}
+                  onSelectAll={() => projectId && navigate(`/studio/project/${projectId}/editor`)}
+                  onSelectSpace={(spaceId) =>
+                    projectId && spaceId && navigate(`/studio/project/${projectId}/editor/${spaceId}`)
+                  }
+                  onAddInterior={() => projectId && navigate(`/studio/project/${projectId}`)}
+                  onAddExterior={() => projectId && navigate(`/studio/project/${projectId}`)}
+                />
+              ) : (
+                <ZoneBottomBar />
+              )}
             </div>
           </section>
 
           {/* Sidebar chat — only when not fullscreen */}
           <AnimatePresence>
-            {isChatOpen && !chatFullscreen && (
+            {isChatOpen && (
               <motion.aside initial={{ width: 0, opacity: 0 }} animate={{ width: 360, opacity: 1 }}
                 exit={{ width: 0, opacity: 0 }} transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-                className="hidden md:flex border-l border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] overflow-hidden flex-col">
-                <ChatPanel />
+                className="hidden md:flex border-l border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] overflow-hidden flex-col shrink-0">
+                <ChatPanel
+                  projectId={currentProjectId}
+                  spaceId={querySpaceId}
+                  spaceBranchType={activeSpace?.type}
+                  globalVision={currentProject?.globalVision}
+                  spaceVision={activeSpace?.spaceVision}
+                  contextLabel={assistantContextLabel}
+                  projectWideContext={isProjectEditorMode && !selectedProjectSpaceId}
+                />
               </motion.aside>
             )}
           </AnimatePresence>
         </div>
 
-        {/* Mobile chat overlay */}
         <AnimatePresence>
-          {isChatOpen && !chatFullscreen && (
+          {isChatOpen && (
             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-              className="md:hidden fixed inset-x-0 bottom-0 top-16 z-40 bg-[#f8f8f6] flex flex-col border-t border-[rgba(0,0,0,0.08)]">
-              <ChatPanel />
+              className={`md:hidden fixed inset-x-0 bottom-0 z-40 bg-[#f8f8f6] flex flex-col border-t border-[rgba(0,0,0,0.08)] ${
+                isProjectEditorRoute ? 'top-0' : 'top-16'
+              }`}>
+              <ChatPanel
+                projectId={currentProjectId}
+                spaceId={querySpaceId}
+                spaceBranchType={activeSpace?.type}
+                globalVision={currentProject?.globalVision}
+                spaceVision={activeSpace?.spaceVision}
+                contextLabel={assistantContextLabel}
+                projectWideContext={isProjectEditorMode && !selectedProjectSpaceId}
+              />
             </motion.div>
           )}
         </AnimatePresence>

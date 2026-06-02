@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useLayoutStore } from '@/store/layoutStore';
-import { CATEGORY_COLORS } from '@/utils/constants';
 import api from '@/lib/api';
+
+const CATALOG_DRAG_TYPE = 'application/x-vision-studio-furniture';
 
 export default function CatalogPanel() {
   const [items, setItems] = useState([]);
@@ -13,7 +14,7 @@ export default function CatalogPanel() {
   const [tab, setTab] = useState('catalog'); // 'catalog' | 'recommended'
   const initialRender = useRef(true);
 
-  const { recommendedItems, addFurniture, findOpenSlot, room } = useLayoutStore();
+  const { recommendedItems, addCatalogFurniture, room } = useLayoutStore();
 
   // Auto-switch to Recommended tab when new suggestions arrive
   useEffect(() => {
@@ -55,40 +56,38 @@ export default function CatalogPanel() {
 
   const onAdd = (it) => {
     if (!room) return;
-    const slot = findOpenSlot(it.width, it.depth);
-    addFurniture({
-      catalog_id: it.id,
-      name: it.name,
-      category: it.category,
-      provider: it.provider,
-      provider_id: it.provider_id,
-      width: it.width,
-      depth: it.depth,
-      height: it.height,
-      x_inches: slot.x,
-      y_inches: slot.y,
-      rotation: 0,
-      color: CATEGORY_COLORS[it.category] || CATEGORY_COLORS.default,
-      image_url: it.image_url || null,
-      model_url: it.model_url || null,
-    });
+    addCatalogFurniture(it);
     toast.success(`Added ${it.name}`);
+  };
+
+  const onDragStart = (event, item) => {
+    event.dataTransfer.effectAllowed = 'copy';
+    event.dataTransfer.setData(CATALOG_DRAG_TYPE, JSON.stringify(item));
+    event.dataTransfer.setData('text/plain', item.name || 'Furniture');
   };
 
   const list = tab === 'recommended' ? recommendedItems : items;
 
   return (
     <div className="flex flex-col h-full bg-surface-800">
-      <div className="p-6 border-b border-surface-700 bg-surface-800">
-        <div className="flex gap-4 mb-4 text-[11px] uppercase tracking-editorial">
+      <div className="border-b border-surface-700 bg-surface-800 px-5 pb-3 pt-3">
+        <div className="mb-3 flex gap-2 text-[11px] uppercase tracking-[0.14em]">
           <button
-            className={tab === 'catalog' ? 'text-surface-100 border-b border-blue-400 pb-1' : 'text-surface-400'}
+            className={
+              tab === 'catalog'
+                ? 'border-b border-blue-400 pb-1 text-surface-100'
+                : 'text-surface-400'
+            }
             onClick={() => setTab('catalog')}
           >
             Catalog
           </button>
           <button
-            className={tab === 'recommended' ? 'text-surface-100 border-b border-blue-400 pb-1' : 'text-surface-400'}
+            className={
+              tab === 'recommended'
+                ? 'border-b border-blue-400 pb-1 text-surface-100'
+                : 'text-surface-400'
+            }
             onClick={() => setTab('recommended')}
           >
             Recommended {recommendedItems.length > 0 && `(${recommendedItems.length})`}
@@ -98,7 +97,7 @@ export default function CatalogPanel() {
         {tab === 'catalog' && (
           <>
             <input
-              className="w-full border border-surface-600 rounded px-3 py-2 text-sm bg-surface-700 text-surface-100 placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="mb-2 w-full rounded border border-surface-600 bg-surface-700 px-3 py-1.5 text-sm text-surface-100 placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Search furniture…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -106,7 +105,7 @@ export default function CatalogPanel() {
             <div className="flex flex-wrap gap-1.5">
               <button
                 onClick={() => setCategory('')}
-                className={`text-[10px] uppercase tracking-editorial rounded-full px-3 py-1 border transition ${
+                className={`text-[10px] uppercase tracking-[0.12em] rounded-full px-2.5 py-1 border transition ${
                   category === '' ? 'bg-blue-600 text-surface-50 border-blue-600' : 'border-surface-600 text-surface-300 hover:border-surface-400 hover:text-surface-200'
                 }`}
               >All</button>
@@ -114,7 +113,7 @@ export default function CatalogPanel() {
                 <button
                   key={c}
                   onClick={() => setCategory(c)}
-                  className={`text-[10px] uppercase tracking-editorial rounded-full px-3 py-1 border transition ${
+                  className={`text-[10px] uppercase tracking-[0.12em] rounded-full px-2.5 py-1 border transition ${
                     category === c ? 'bg-blue-600 text-surface-50 border-blue-600' : 'border-surface-600 text-surface-300 hover:border-surface-400 hover:text-surface-200'
                   }`}
                 >{c.replace(/_/g, ' ')}</button>
@@ -129,17 +128,11 @@ export default function CatalogPanel() {
             <p className="text-xs text-surface-500 leading-relaxed mb-4">
               Ask the Studio assistant to suggest furniture. It will populate this panel with curated picks you can add in one click.
             </p>
-            <button
-              onClick={() => onOpenChat?.()}
-              className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
-            >
-              Open AI Assistant
-            </button>
           </div>
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+      <div className="flex-1 overflow-y-auto px-5 py-3 pr-4 space-y-2">
         {loading && tab === 'catalog' && (
           <div className="space-y-2">
             {[1, 2, 3].map(i => (
@@ -155,7 +148,9 @@ export default function CatalogPanel() {
         {list.map((it) => (
           <div
             key={it.id || it.catalog_id || it.name}
-            className="border border-surface-600 bg-surface-700 hover:border-surface-500 transition group"
+            draggable={Boolean(room)}
+            onDragStart={(event) => onDragStart(event, it)}
+            className="border border-surface-600 bg-surface-700 hover:border-surface-500 transition group cursor-grab active:cursor-grabbing"
           >
             {it.image_url && (
               <div className="aspect-[4/3] overflow-hidden bg-surface-600">
@@ -176,6 +171,9 @@ export default function CatalogPanel() {
               </div>
               <div className="text-[11px] uppercase tracking-editorial text-surface-400 mb-3">
                 {it.provider || 'Catalog'} · {it.width}"W × {it.depth}"D
+              </div>
+              <div className="mb-3 text-[10px] text-surface-500">
+                Drag into the room or add to the next open spot.
               </div>
               <button
                 onClick={() => onAdd(it)}

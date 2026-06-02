@@ -6,7 +6,34 @@ import { useLayoutStore } from '@/store/layoutStore';
 import MessageBubble from './MessageBubble';
 import StylePrompts from './StylePrompts';
 
-export default function ChatPanel() {
+/** Resolve a placement by id first, then by unique name match (avoids wrong item when names collide). */
+function findFurnitureByRef(furniture, { placementId, name }) {
+  if (placementId) {
+    const byId = furniture.find((f) => f.id === placementId);
+    if (byId) return byId;
+  }
+  if (!name || typeof name !== 'string') return null;
+  const needle = name.toLowerCase().trim();
+  if (!needle) return null;
+  const matches = furniture.filter((f) => {
+    const n = f.name?.toLowerCase();
+    return n === needle || n?.includes(needle);
+  });
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0];
+  const exact = matches.filter((f) => f.name?.toLowerCase() === needle);
+  return exact.length === 1 ? exact[0] : null;
+}
+
+export default function ChatPanel({
+  projectId: projectIdProp = null,
+  spaceId: spaceIdProp = null,
+  spaceBranchType = null,
+  globalVision: globalVisionProp = null,
+  spaceVision: spaceVisionProp = null,
+  contextLabel = null,
+  projectWideContext = false,
+} = {}) {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const scrollRef = useRef(null);
@@ -40,9 +67,23 @@ export default function ChatPanel() {
     setInput('');
     setSending(true);
     try {
+      const spaceVisionOut =
+        spaceBranchType
+          ? {
+              ...(spaceVisionProp && typeof spaceVisionProp === 'object' ? spaceVisionProp : {}),
+              space_type: spaceBranchType,
+            }
+          : spaceVisionProp && typeof spaceVisionProp === 'object'
+            ? spaceVisionProp
+            : null;
       const { data } = await api.post('/api/chat/message', {
         room_id: room.id,
         message: text,
+        context_type: 'current_space',
+        ...(projectIdProp && { project_id: projectIdProp }),
+        ...(spaceIdProp && { space_id: spaceIdProp }),
+        ...(globalVisionProp && typeof globalVisionProp === 'object' && { global_vision: globalVisionProp }),
+        ...(spaceVisionOut && { space_vision: spaceVisionOut }),
         // For draft rooms, send room context since the server doesn't have it
         ...(room.id?.startsWith?.('draft-') && {
           room_context: {
@@ -102,26 +143,25 @@ export default function ChatPanel() {
               }
               case 'move_furniture':
               case 'rotate_furniture': {
-                // Find the item by name and update it
-                const name = action.args?.furniture_name?.toLowerCase();
-                if (name) {
-                  const match = store.furniture.find(f => f.name?.toLowerCase().includes(name));
-                  if (match) {
-                    const patch = {};
-                    if (action.args.x_inches != null) patch.x_inches = action.args.x_inches;
-                    if (action.args.y_inches != null) patch.y_inches = action.args.y_inches;
-                    if (action.args.rotation != null) patch.rotation = action.args.rotation;
-                    store.updateFurniture(match.id, patch);
-                  }
+                const match = findFurnitureByRef(store.furniture, {
+                  placementId: r.placement_id,
+                  name: action.args?.furniture_name,
+                });
+                if (match) {
+                  const patch = {};
+                  if (action.args.x_inches != null) patch.x_inches = action.args.x_inches;
+                  if (action.args.y_inches != null) patch.y_inches = action.args.y_inches;
+                  if (action.args.rotation != null) patch.rotation = action.args.rotation;
+                  store.updateFurniture(match.id, patch);
                 }
                 break;
               }
               case 'remove_furniture': {
-                const name = action.args?.furniture_name?.toLowerCase();
-                if (name) {
-                  const match = store.furniture.find(f => f.name?.toLowerCase().includes(name));
-                  if (match) store.removeFurniture(match.id);
-                }
+                const match = findFurnitureByRef(store.furniture, {
+                  placementId: r.placement_id,
+                  name: action.args?.furniture_name,
+                });
+                if (match) store.removeFurniture(match.id);
                 break;
               }
               case 'clear_room':
@@ -129,11 +169,11 @@ export default function ChatPanel() {
                 for (const f of [...store.furniture]) store.removeFurniture(f.id);
                 break;
               case 'swap_furniture': {
-                const removedName = r.removed_name?.toLowerCase();
-                if (removedName) {
-                  const match = store.furniture.find(f => f.name?.toLowerCase().includes(removedName));
-                  if (match) store.removeFurniture(match.id);
-                }
+                const removed = findFurnitureByRef(store.furniture, {
+                  placementId: r.removed_placement_id,
+                  name: r.removed_name,
+                });
+                if (removed) store.removeFurniture(removed.id);
                 const added = r.added_item;
                 if (added) {
                   store.addFurniture({
@@ -182,9 +222,13 @@ export default function ChatPanel() {
                   })),
                 });
                 for (const u of (arranged.placements || [])) {
-                  const match = useLayoutStore.getState().furniture.find(f => f.name === u.name);
+                  const state = useLayoutStore.getState();
+                  const match = findFurnitureByRef(state.furniture, {
+                    placementId: u.id,
+                    name: u.name,
+                  });
                   if (match) {
-                    useLayoutStore.getState().updateFurniture(match.id, {
+                    state.updateFurniture(match.id, {
                       x_inches: u.x_inches, y_inches: u.y_inches, rotation: u.rotation,
                     });
                   }
@@ -237,7 +281,7 @@ export default function ChatPanel() {
               <span className="text-xs text-paper-50 font-bold">V</span>
             </div>
             <div>
-              <div className="font-display text-base leading-tight">Studio Assistant</div>
+              <div className="font-display text-base leading-tight">Space Assistant</div>
               <div className="text-[10px] uppercase tracking-editorial text-ink-500 mt-0.5">
                 {sending ? 'Thinking…' : 'Online'}
               </div>
@@ -254,7 +298,9 @@ export default function ChatPanel() {
           )}
         </div>
         <p className="text-xs text-ink-500 leading-relaxed mt-2">
-          Describe your space goals, style preferences, or ask to move, add, and arrange furniture — all by chatting.
+          {projectWideContext
+            ? 'Context: Full Floorplan. Guidance is project-level while you refine space structure.'
+            : `Context: ${contextLabel || room?.name || 'Current Space'}`}
         </p>
       </div>
 
@@ -297,7 +343,7 @@ export default function ChatPanel() {
             <textarea
               ref={textareaRef}
               className="w-full bg-paper-100 border border-ink-900/10 rounded-xl px-4 py-3 pr-12 text-sm text-ink-900 placeholder:text-ink-400 resize-none focus:outline-none focus:border-ink-900/30 focus:ring-1 focus:ring-ink-900/10 transition min-h-[44px] max-h-[120px]"
-              placeholder={room ? 'Describe your space goals…' : 'Select a space first'}
+              placeholder={room ? 'Describe your space goals…' : 'Select a linked space first'}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -327,7 +373,11 @@ export default function ChatPanel() {
         </div>
         <div className="flex items-center justify-between mt-2 px-1">
           <span className="text-[10px] text-ink-400">
-            {room ? `Space: ${room.name}` : 'No space selected'}
+            {projectWideContext
+              ? 'Context: Full Floorplan'
+              : room
+                ? `Context: ${contextLabel || room.name}`
+                : 'No linked space selected'}
           </span>
           <span className="text-[10px] text-ink-400 hidden sm:inline">
             Enter to send · Shift+Enter for new line

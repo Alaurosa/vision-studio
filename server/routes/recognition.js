@@ -4,7 +4,7 @@ import FormData from 'form-data';
 import multer from 'multer';
 import { optionalAuth } from '../middleware/auth.js';
 import { log } from '../services/logger.js';
-import { useDb, supabaseAdmin, fallback } from '../services/db.js';
+import { useDb, supabaseAdmin, fallback, hasDbUserId } from '../services/db.js';
 import { saveFileLocally } from '../services/fileStorage.js';
 
 const router = express.Router();
@@ -21,7 +21,7 @@ router.post('/room-photo/:room_id', optionalAuth, upload.single('file'), async (
   const { room_id } = req.params;
   const file = req.file;
   if (!file) return res.status(400).json({ error: 'No file provided' });
-  const db = await useDb();
+  const db = (await useDb()) && hasDbUserId(req.user?.id);
 
   try {
     let publicUrl = null;

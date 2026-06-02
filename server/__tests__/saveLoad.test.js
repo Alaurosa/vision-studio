@@ -22,7 +22,19 @@ const SUPABASE_ANON_KEY =
   process.env.SUPABASE_ANON_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-const haveCreds = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY && SUPABASE_ANON_KEY;
+const looksLikePlaceholder = (v) =>
+  typeof v === 'string' &&
+  (/^</.test(v) ||
+    /(^|\/)your[-_]?project(\.|$)/i.test(v) ||
+    /^your[-_]?(service|anon|public|api)/i.test(v));
+
+const haveCreds =
+  SUPABASE_URL &&
+  SUPABASE_SERVICE_ROLE_KEY &&
+  SUPABASE_ANON_KEY &&
+  !looksLikePlaceholder(SUPABASE_URL) &&
+  !looksLikePlaceholder(SUPABASE_SERVICE_ROLE_KEY) &&
+  !looksLikePlaceholder(SUPABASE_ANON_KEY);
 const d = haveCreds ? describe : describe.skip;
 
 d('save/load persistence (S2-5)', () => {

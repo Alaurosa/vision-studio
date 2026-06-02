@@ -24,7 +24,7 @@ Full-stack implementation — monorepo with React/Vite client, separate Next.js 
 | Python AI     | FastAPI 0.115 + OpenAI Vision gpt-5.4 (20×20 grid + wall-snap room segmentation) + Replicate (Grounding DINO + SAM 2 for room photos; constant currently named `SAM3_MODEL`) + OpenCV fallback |
 | Database      | Supabase (PostgreSQL + Auth + Storage)         |
 | 3D Models     | Kenney Furniture Kit (CC0 GLBs in `client/public/models/kenney/`): starter catalog sets `modelUrl` in `furnitureCatalog.js`; API catalog via `server/services/kenneyMapping.js` at seed time. GLBs are visual-only; catalog dimensions stay source of truth. Procedural fallback when `modelUrl` is missing or load fails. Meshy v2 route exists for future batch generation, not the live editor. |
-| 3D Viewer     | React Three Fiber 8.18 + @react-three/drei 9.122 + GLTFLoader |
+| 3D Viewer     | React Three Fiber 8.18 + @react-three/drei 9.122 + GLTFLoader; camera nav = smooth OrbitControls + per-frame collision + top-down minimap (`client/src/utils/cameraNav.js`) |
 | Marketing     | Next.js 16.2 + React 19.2 + Tailwind CSS 4 + Supabase SSR helpers |
 | SEO           | react-helmet-async 3.0                        |
 | Notifications | react-hot-toast 2.6                           |
@@ -98,6 +98,24 @@ Pure logic: `client/src/utils/__tests__/furniture3d.test.js` (`resolveFurnitureM
 
 Meshy/Tripo and other external 3D APIs are **not** called from the editor viewer; procedural fallback remains required when GLB is absent or fails.
 
+## Client testing — 3D camera navigation
+
+Sprint 4 US3 (camera & navigation). Pure math: `client/src/utils/__tests__/cameraNav.test.js` (24 cases) — furniture world boxes, `resolveCameraCollision` (floor + furniture push-out), `clampTargetToRoom`, zoom-distance bounds, default/reset pose, and minimap projection (`minimapProjection` / `worldToMinimap` / `furnitureFootprintCorners`) — exercised across varied room sizes and furniture densities. Run with `cd client && npm test`.
+
+Camera nav lives in `RoomViewer3D` only (room-scoped viewer): smooth damped `OrbitControls` (pan/orbit/zoom, room-scaled min/max distance, polar clamp so it can't orbit under the floor), `CameraCollider` (per-frame: keeps the camera above the floor and out of furniture, clamps the orbit target inside the room), and the `Minimap` overlay (`MinimapTracker` paints a top-down canvas of room + furniture footprints + live camera position/cone). The Three.js/Canvas interaction itself is not unit-tested — see the manual checklist.
+
+**Manual usability checklist (RoomCanvas → 3D view), across small and large rooms + sparse/dense furniture:**
+
+1. Switch the editor to **3D** view (`StudioToolbar` 2D/3D toggle) with furniture placed.
+2. **Orbit**: drag to rotate — motion is smooth (damped) and can't roll under the floor.
+3. **Zoom**: scroll/pinch — bounded; can't zoom past the room center or infinitely far.
+4. **Pan**: right-drag — the view stays focused on the room (target stays inside).
+5. **Collision**: orbit/zoom toward a sofa or wall — the camera bumps and never clips inside furniture or below the floor.
+6. **Minimap**: bottom-right panel shows the room, furniture footprints, and a blue camera marker + view cone that track as you move; **Hide/Show map** toggles it.
+7. **Reset view**: returns to the default framing.
+8. Repeat in a small room (e.g. 60×60) and a large one (e.g. 480×360) and with many items — controls stay usable and the minimap rescales.
+9. Confirm no console errors when switching 2D ↔ 3D or toggling the minimap.
+
 ## Monorepo Structure
 
 ```
@@ -143,6 +161,7 @@ vision-studio/
 │       │   ├── furniturePlacement.js   # createPlacedFurnitureFromCatalogItem, getFurnitureFootprintSize (catalog → placement)
 │       │   ├── furniture3d.js          # 3D render helpers: modelUrl resolution, starter category→procedural map, inches→meters dimensions
 │       │   ├── collision.js      # AABB detection (arbitrary rotation), overlap check, room bounds validation
+│       │   ├── cameraNav.js      # 3D camera-nav math (US3): furniture world boxes, camera collision resolve (floor + furniture), target clamp, zoom-distance bounds, default/reset pose, minimap projection
 │       │   ├── floorplanGeometry.js # Shared floorplan geometry normalization for project-level 2D/3D overlays (rect + polygon)
 │       │   ├── projectCompat.js  # Frontend-only project compatibility layer (localStorage `vs-projects-v1`) + helper metadata for Phase 2 schema planning
 │       │   ├── chatRouting.js    # Global `/chat` intent routing helper (project/space name matching → Studio routes or suggestion options)
@@ -184,10 +203,12 @@ vision-studio/
 │       │   │   ├── FurnitureCatalogPanel.jsx # Starter catalog browse/search/filter in editor Furniture tab
 │       │   │   └── FurnitureCard.jsx  # Reusable starter-catalog card (name, category, dimensions, preview)
 │       │   ├── viewer/
-│       │   │   ├── RoomViewer3D.jsx   # Room-level R3F viewer: live `selectVisibleFurniture` from layoutStore; GLB/procedural via SmartFurnitureModel (no Canvas-level Suspense)
+│       │   │   ├── RoomViewer3D.jsx   # Room-level R3F viewer: live `selectVisibleFurniture` from layoutStore; GLB/procedural via SmartFurnitureModel (no Canvas-level Suspense); camera navigation = smooth OrbitControls + CameraCollider + Minimap + Reset-view HUD (US3)
 │       │   │   ├── ProjectViewer3D.jsx # Project-level 3D fallback preview: places linked rooms in relative bounding boxes (no per-space layout)
 │       │   │   ├── SmartFurnitureModel.jsx # GLB when model_url/modelUrl set; else ProceduralFurniture via furniture3d category map
-│       │   │   └── ProceduralFurniture.jsx # Category-specific Three.js primitives (legacy API + starter: seating→sofa, tables, beds, storage, lamp, decor)
+│       │   │   ├── ProceduralFurniture.jsx # Category-specific Three.js primitives (legacy API + starter: seating→sofa, tables, beds, storage, lamp, decor)
+│       │   │   ├── CameraCollider.jsx # Per-frame camera collision (US3 3.2): above-floor + out-of-furniture push-out, orbit-target clamp; needs makeDefault OrbitControls
+│       │   │   └── Minimap.jsx        # Top-down 2D minimap (US3 3.3): MinimapTracker (in-canvas useFrame draw) + MinimapPanel (HTML overlay)
 │       │   └── chatbot/
 │       │       ├── ChatPanel.jsx      # Enhanced agentic chat sidebar — rich messages, style prompts, textarea input, auto-refresh
 │       │       ├── MessageBubble.jsx  # Rich message renderer — inline markdown, action result cards, assistant avatar

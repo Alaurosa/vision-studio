@@ -5,19 +5,16 @@ import { useLayoutStore, selectVisibleFurniture } from '@/store/layoutStore';
 import { CATEGORY_COLORS } from '@/utils/constants';
 import { getRotatedBoundingBox } from '@/utils/scale';
 import SmartFurnitureModel from './SmartFurnitureModel';
-import {
-  getFurnitureRenderDimensionsInches,
-  INCHES_TO_METERS,
-} from '@/utils/furniture3d';
+import RoomShell3D from './RoomShell3D';
+import { getFurnitureRenderDimensionsInches, INCHES_TO_METERS } from '@/utils/furniture3d';
+import { getRoomShellDimensionsMeters } from '@/utils/roomShell3d';
 
 const IN_TO_M = INCHES_TO_METERS;
 
 export default function RoomViewer3D() {
   const room = useLayoutStore((s) => s.room);
   const furniture = useLayoutStore(selectVisibleFurniture);
-  const w = (room?.width || 180) * IN_TO_M;
-  const d = (room?.depth || 144) * IN_TO_M;
-  const h = (room?.height || 96) * IN_TO_M;
+  const { widthM: w, depthM: d, heightM: h } = getRoomShellDimensionsMeters(room);
 
   return (
     <div className="w-full h-full bg-paper-100 relative">
@@ -34,29 +31,7 @@ export default function RoomViewer3D() {
           <Environment preset="apartment" />
         </Suspense>
 
-        {/* Floor */}
-        <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[w / 2, 0, d / 2]}>
-          <planeGeometry args={[w, d]} />
-          <meshStandardMaterial color="#ebe3d1" roughness={0.85} />
-        </mesh>
-
-        {/* Walls */}
-        <mesh position={[w / 2, h / 2, 0]} receiveShadow>
-          <boxGeometry args={[w, h, 0.06]} />
-          <meshStandardMaterial color="#faf7f1" />
-        </mesh>
-        <mesh position={[w / 2, h / 2, d]} receiveShadow>
-          <boxGeometry args={[w, h, 0.06]} />
-          <meshStandardMaterial color="#faf7f1" />
-        </mesh>
-        <mesh position={[0, h / 2, d / 2]} receiveShadow>
-          <boxGeometry args={[0.06, h, d]} />
-          <meshStandardMaterial color="#faf7f1" />
-        </mesh>
-        <mesh position={[w, h / 2, d / 2]} receiveShadow>
-          <boxGeometry args={[0.06, h, d]} />
-          <meshStandardMaterial color="#faf7f1" />
-        </mesh>
+        <RoomShell3D widthM={w} depthM={d} heightM={h} />
 
         {/* Furniture — each SmartFurnitureModel suspends locally; do not wrap Canvas in Suspense */}
         {furniture.map((it) => {

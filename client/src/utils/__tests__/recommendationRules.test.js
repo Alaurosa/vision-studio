@@ -3,6 +3,7 @@ import { STARTER_FURNITURE_CATALOG } from '@/data/furnitureCatalog';
 import {
   computeLargestFreeRect,
   computeRoomBucket,
+  recommendForRoom,
   recommendFurniture,
 } from '@/utils/recommendationRules';
 
@@ -332,6 +333,48 @@ describe('recommendFurniture — soft scoring', () => {
       options: { maxResults: 1 },
     });
     expect(result.items).toHaveLength(1);
+  });
+});
+
+// recommendForRoom ------------------------------------------------------
+
+describe('recommendForRoom', () => {
+  it('returns no items when room dimensions are unknown', () => {
+    const result = recommendForRoom({
+      room: null,
+      placements: [],
+      catalog: STARTER_FURNITURE_CATALOG,
+    });
+    expect(result.items).toEqual([]);
+    expect(result.metrics).toBeNull();
+  });
+
+  it('merges top picks across categories when no category filter is set', () => {
+    const result = recommendForRoom({
+      room: { width: 216, depth: 168 },
+      placements: [],
+      catalog: STARTER_FURNITURE_CATALOG,
+    });
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(result.items.length).toBeLessThanOrEqual(5);
+    const ids = result.items.map((e) => e.item.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('delegates to category-specific recommendations when a category is passed', () => {
+    const scoped = recommendForRoom({
+      room: { width: 216, depth: 168 },
+      placements: [],
+      catalog: STARTER_FURNITURE_CATALOG,
+      category: 'storage',
+    });
+    const direct = recommendFurniture({
+      room: { width: 216, depth: 168 },
+      placements: [],
+      catalog: STARTER_FURNITURE_CATALOG,
+      category: 'storage',
+    });
+    expect(scoped.items.map((e) => e.item.id)).toEqual(direct.items.map((e) => e.item.id));
   });
 });
 

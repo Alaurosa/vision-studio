@@ -11,6 +11,10 @@ function setLayoutState(patch) {
   useLayoutStore.setState(patch, false);
 }
 
+function expandRecommendations() {
+  fireEvent.click(screen.getByTestId('recommended-collapsible-trigger'));
+}
+
 beforeEach(() => {
   useLayoutStore.setState(INITIAL_LAYOUT_STATE, true);
 });
@@ -120,73 +124,86 @@ describe('FurnitureCatalogPanel', () => {
     });
   });
 
-  describe('Recommended mode', () => {
-    it('disables the toggle when room dimensions are unknown', () => {
+  describe('Recommended for this room section', () => {
+    it('renders a collapsed callout by default with the catalog visible', () => {
+      setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
+
       render(<FurnitureCatalogPanel />);
 
-      const toggle = screen.getByRole('button', { name: /^Recommended/ });
-      expect(toggle).toBeDisabled();
-      expect(toggle).toHaveAttribute('aria-pressed', 'false');
+      const trigger = screen.getByTestId('recommended-collapsible-trigger');
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByTestId('recommended-collapsible-panel')).not.toBeInTheDocument();
+      expect(screen.getByRole('list', { name: 'Furniture catalog results' })).toBeInTheDocument();
+      expect(screen.getByText(/picks for this room/i)).toBeInTheDocument();
+    });
+
+    it('prompts to set room dimensions when expanded and the room is unknown', () => {
+      render(<FurnitureCatalogPanel />);
+
       expect(screen.getByText(/room dimensions unknown/i)).toBeInTheDocument();
+      expect(screen.getByText(/set room size to unlock/i)).toBeInTheDocument();
+      expandRecommendations();
+      expect(screen.getByTestId('recommended-empty-state')).toHaveTextContent(
+        /set room dimensions/i,
+      );
     });
 
-    it('enables the toggle and shows the room label once dimensions are known', () => {
+    it('expands to show recommendations while keeping the catalog below', () => {
       setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
 
       render(<FurnitureCatalogPanel />);
+      expandRecommendations();
 
-      const toggle = screen.getByRole('button', { name: /^Recommended/ });
-      expect(toggle).not.toBeDisabled();
-      // 216" = 18.0', 168" = 14.0'
-      expect(screen.getByText(/18\.0'.*14\.0'/)).toBeInTheDocument();
-    });
-
-    it('prompts for a category when toggle is on and no category is selected', () => {
-      setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
-
-      render(<FurnitureCatalogPanel />);
-      fireEvent.click(screen.getByRole('button', { name: /^Recommended/ }));
-
-      expect(screen.getByText(/pick a category to see recommendations/i)).toBeInTheDocument();
+      expect(screen.getByTestId('recommended-collapsible-trigger')).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      );
       expect(
-        screen.queryByRole('list', { name: 'Furniture catalog results' }),
-      ).not.toBeInTheDocument();
+        screen.getByRole('list', { name: 'Recommended furniture for this room' }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('list', { name: 'Furniture catalog results' })).toBeInTheDocument();
     });
 
-    it('filters the list to rule-based recommendations once a category is chosen', () => {
-      // 96" × 96" = 64 sq ft → tiny. The Starter Queen Bed (60×80) actually
-      // fits geometrically, but the bed-in-tiny rule is gentle (only kings
-      // are excluded), so we instead test the Tables category: a tiny room
-      // should drop the Dining Table but keep the Coffee Table only when a
-      // sofa exists. Here there's no sofa, so both tables drop out.
+    it('shows cross-category picks without requiring a category filter', () => {
+      setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
+
+      render(<FurnitureCatalogPanel />);
+      expandRecommendations();
+
+      const recList = screen.getByRole('list', { name: 'Recommended furniture for this room' });
+      const recButtons = within(recList).getAllByRole('button');
+      expect(recButtons.length).toBeGreaterThan(0);
+      expect(recButtons.length).toBeLessThanOrEqual(5);
+    });
+
+    it('shows an empty recommended state for categories with no fits', () => {
       setLayoutState({ room: { id: 'r1', width: 96, depth: 96 }, furniture: [] });
 
       render(<FurnitureCatalogPanel />);
-      fireEvent.click(screen.getByRole('button', { name: /^Recommended/ }));
       fireEvent.click(screen.getByRole('button', { name: 'Tables' }));
+      expandRecommendations();
 
-      // No tables should be recommended in a tiny, empty room.
-      expect(screen.getByText(/no items fit this category right now/i)).toBeInTheDocument();
+      expect(screen.getByTestId('recommended-empty-state')).toHaveTextContent(/no pieces fit/i);
     });
 
-    it('shows reasons under recommended items', () => {
+    it('shows reasons under recommended items when expanded', () => {
       setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
 
       render(<FurnitureCatalogPanel />);
-      fireEvent.click(screen.getByRole('button', { name: /^Recommended/ }));
       fireEvent.click(screen.getByRole('button', { name: 'Storage' }));
+      expandRecommendations();
 
       const reason = screen.getByTestId('recommendation-reason-starter-bookshelf');
       expect(reason).toBeInTheDocument();
       expect(reason.textContent || '').toMatch(/fits/i);
     });
 
-    it('renders metrics summary (room bucket + open area) in recommended mode', () => {
+    it('renders metrics summary (room bucket + open area) when expanded', () => {
       setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
 
       render(<FurnitureCatalogPanel />);
-      fireEvent.click(screen.getByRole('button', { name: /^Recommended/ }));
       fireEvent.click(screen.getByRole('button', { name: 'Storage' }));
+      expandRecommendations();
 
       const metrics = screen.getByTestId('recommendation-metrics');
       expect(metrics).toBeInTheDocument();
@@ -195,8 +212,6 @@ describe('FurnitureCatalogPanel', () => {
     });
 
     it('uses available space — placing a blocker shrinks recommendations', () => {
-      // A 12'×12' room (144×144) with a giant 130×130 blocker leaves almost no
-      // free area, so the 3-Seat Sofa should be excluded by the clearance rule.
       setLayoutState({
         room: { id: 'r1', width: 144, depth: 144 },
         furniture: [
@@ -214,10 +229,22 @@ describe('FurnitureCatalogPanel', () => {
       });
 
       render(<FurnitureCatalogPanel />);
-      fireEvent.click(screen.getByRole('button', { name: /^Recommended/ }));
-      fireEvent.click(screen.getByRole('button', { name: 'Seating' }));
+      expandRecommendations();
 
-      expect(screen.queryByText('Starter 3-Seat Sofa')).not.toBeInTheDocument();
+      const recPanel = screen.getByTestId('recommended-collapsible-panel');
+      expect(within(recPanel).queryByText('Starter 3-Seat Sofa')).not.toBeInTheDocument();
+    });
+
+    it('keeps search enabled while recommendations are collapsed', () => {
+      setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
+
+      render(<FurnitureCatalogPanel />);
+
+      const search = screen.getByLabelText('Search furniture');
+      expect(search).not.toBeDisabled();
+      fireEvent.change(search, { target: { value: 'queen' } });
+      const browseList = screen.getByRole('list', { name: 'Furniture catalog results' });
+      expect(within(browseList).getByText('Starter Queen Bed')).toBeInTheDocument();
     });
   });
 

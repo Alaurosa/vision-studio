@@ -92,7 +92,19 @@ export const ROOM_AREA_BUCKETS = [
 ];
 
 const DEFAULT_MAX_RESULTS = 5;
+const DEFAULT_ROOM_SECTION_MAX_RESULTS = 5;
+const DEFAULT_PER_CATEGORY_PICKS = 1;
 const OCCUPANCY_STEP_INCHES = 12;
+
+/** Starter-catalog bucket ids used for cross-category room recommendations. */
+export const ROOM_RECOMMENDATION_CATEGORY_IDS = [
+  'seating',
+  'tables',
+  'storage',
+  'beds',
+  'lighting',
+  'decor',
+];
 
 /**
  * @typedef {Object} RecommendationMetrics
@@ -546,5 +558,85 @@ export function recommendFurniture({ room, placements = [], catalog = [], catego
     roomBucket,
     metrics,
     items: entries.slice(0, maxResults),
+  };
+}
+
+/**
+ * Room-level recommendations for the furniture panel section.
+ * When no category is passed, takes the top pick from each bucket and merges
+ * by score. When a category is passed, delegates to {@link recommendFurniture}.
+ *
+ * @param {{
+ *   room: { width?: number, depth?: number } | null | undefined,
+ *   placements?: Array<object>,
+ *   catalog: Array<import('@/data/furnitureCatalog.js').FurnitureCatalogItem>,
+ *   category?: string,
+ *   options?: { maxResults?: number, perCategoryMax?: number, styleHint?: string, providerHint?: string },
+ * }} params
+ * @returns {Omit<RecommendationResult, 'category'> & { category?: string }}
+ */
+export function recommendForRoom({
+  room,
+  placements = [],
+  catalog = [],
+  category = '',
+  options = {},
+}) {
+  const maxResults = options.maxResults ?? DEFAULT_ROOM_SECTION_MAX_RESULTS;
+
+  if (category) {
+    const result = recommendFurniture({
+      room,
+      placements,
+      catalog,
+      category,
+      options: { ...options, maxResults },
+    });
+    return {
+      category: result.category,
+      roomBucket: result.roomBucket,
+      metrics: result.metrics,
+      items: result.items,
+    };
+  }
+
+  const roomWidth = Number(room?.width) || 0;
+  const roomDepth = Number(room?.depth) || 0;
+  if (!(roomWidth > 0 && roomDepth > 0)) {
+    return { roomBucket: 'unknown', metrics: null, items: [] };
+  }
+
+  const perCategoryMax = options.perCategoryMax ?? DEFAULT_PER_CATEGORY_PICKS;
+  const seen = new Set();
+  /** @type {RecommendationEntry[]} */
+  const merged = [];
+  let roomBucket = 'unknown';
+  let metrics = null;
+
+  for (const bucketId of ROOM_RECOMMENDATION_CATEGORY_IDS) {
+    const result = recommendFurniture({
+      room,
+      placements,
+      catalog,
+      category: bucketId,
+      options: { ...options, maxResults: perCategoryMax },
+    });
+    if (!metrics && result.metrics) {
+      roomBucket = result.roomBucket;
+      metrics = result.metrics;
+    }
+    for (const entry of result.items) {
+      if (seen.has(entry.item.id)) continue;
+      seen.add(entry.item.id);
+      merged.push(entry);
+    }
+  }
+
+  merged.sort((a, b) => b.score - a.score);
+
+  return {
+    roomBucket,
+    metrics,
+    items: merged.slice(0, maxResults),
   };
 }

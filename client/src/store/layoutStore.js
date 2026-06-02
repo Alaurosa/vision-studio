@@ -64,6 +64,13 @@ function furnitureBelongsToZone(item, zone) {
   return center.x >= bounds.left && center.x <= bounds.right && center.y >= bounds.top && center.y <= bounds.bottom;
 }
 
+/** Pure selector for room-scoped 3D/2D furniture lists (active zone filters by center point). */
+export function selectVisibleFurniture(state) {
+  const { furniture, zones, activeZoneId } = state;
+  if (!activeZoneId) return furniture;
+  const activeZone = zones.find((zone) => zone.id === activeZoneId) || null;
+  if (!activeZone) return furniture;
+  return furniture.filter((item) => furnitureBelongsToZone(item, activeZone));
 function clampPlacementToBounds({ x, y, width, depth, rotation = 0 }, bounds) {
   const box = getRotatedBoundingBox(width || 0, depth || 0, rotation || 0);
   const rightLimit = Math.max(bounds.left, bounds.right - box.width);
@@ -518,12 +525,7 @@ export const useLayoutStore = create(
         return zones.find((zone) => zone.id === activeZoneId) || null;
       },
 
-      getVisibleFurniture: () => {
-        const { furniture } = get();
-        const activeZone = get().getActiveZone();
-        if (!activeZone) return furniture;
-        return furniture.filter((item) => furnitureBelongsToZone(item, activeZone));
-      },
+      getVisibleFurniture: () => selectVisibleFurniture(get()),
 
       // ---------- explicit save ----------
       // Force-flush all pending edits and persist current state.

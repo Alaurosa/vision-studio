@@ -71,6 +71,8 @@ export function selectVisibleFurniture(state) {
   const activeZone = zones.find((zone) => zone.id === activeZoneId) || null;
   if (!activeZone) return furniture;
   return furniture.filter((item) => furnitureBelongsToZone(item, activeZone));
+}
+
 function clampPlacementToBounds({ x, y, width, depth, rotation = 0 }, bounds) {
   const box = getRotatedBoundingBox(width || 0, depth || 0, rotation || 0);
   const rightLimit = Math.max(bounds.left, bounds.right - box.width);

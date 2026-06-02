@@ -7,6 +7,8 @@
  * Dimensions are in meters.
  */
 
+import * as THREE from 'three';
+
 // Helper: cushion-looking box with slight rounding via scale/pos.
 function Cushion({ w, h, d, x = 0, y = 0, z = 0, color = '#c8a97e', opacity = 1 }) {
   return (

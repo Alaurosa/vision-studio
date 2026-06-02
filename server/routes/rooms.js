@@ -14,6 +14,14 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const hasDbUserId = (userId) => typeof userId === 'string' && UUID_RE.test(userId);
 
+function attachInteriorFields(room) {
+  if (!room) return room;
+  if (!room.interior && room.detected_objects?.interior) {
+    room.interior = room.detected_objects.interior;
+  }
+  return room;
+}
+
 // POST /api/rooms — create a new room
 router.post('/', optionalAuth, async (req, res) => {
   const { name, unit, width, depth } = req.body;
@@ -64,17 +72,17 @@ router.get('/:id', optionalAuth, async (req, res) => {
     if (!data.zones && data.detected_objects?.zones) {
       data.zones = data.detected_objects.zones;
     }
-    const enriched = await enrichRoomPlacements(data, true);
+    const enriched = attachInteriorFields(await enrichRoomPlacements(data, true));
     return res.json(enriched);
   }
   const room = fallback.getRoom(req.params.id, req.user.id);
   if (!room) return res.status(404).json({ error: 'Room not found' });
-  res.json(await enrichRoomPlacements(room, false));
+  res.json(attachInteriorFields(await enrichRoomPlacements(room, false)));
 });
 
 // PUT /api/rooms/:id
 router.put('/:id', optionalAuth, async (req, res) => {
-  const { name, width, depth, height, walls, scale_px_per_inch, unit, zones } = req.body;
+  const { name, width, depth, height, walls, scale_px_per_inch, unit, zones, interior } = req.body;
   const updates = {};
   if (name !== undefined) updates.name = name;
   if (width !== undefined) updates.width = width;
@@ -86,6 +94,20 @@ router.put('/:id', optionalAuth, async (req, res) => {
   if (zones !== undefined) updates.zones = zones;
 
   const dbEnabled = (await useDb()) && hasDbUserId(req.user?.id);
+  if (interior !== undefined) {
+    if (dbEnabled) {
+      const { data: current } = await supabaseAdmin
+        .from('rooms')
+        .select('detected_objects')
+        .eq('id', req.params.id)
+        .eq('user_id', req.user.id)
+        .maybeSingle();
+      updates.detected_objects = { ...(current?.detected_objects || {}), interior };
+    } else {
+      updates.interior = interior;
+    }
+  }
+
   if (dbEnabled) {
     updates.updated_at = new Date().toISOString();
     let { data, error } = await supabaseAdmin
@@ -114,11 +136,15 @@ router.put('/:id', optionalAuth, async (req, res) => {
       }
     }
     if (error) return res.status(400).json({ error: error.message });
-    return res.json(data);
+    return res.json(attachInteriorFields(data));
   }
   const room = fallback.updateRoom(req.params.id, req.user.id, updates);
   if (!room) return res.status(404).json({ error: 'Room not found' });
-  res.json(room);
+  if (interior !== undefined && !room.interior) {
+    room.interior = interior;
+    room.detected_objects = { ...(room.detected_objects || {}), interior };
+  }
+  return res.json(attachInteriorFields(room));
 });
 
 // DELETE /api/rooms/:id

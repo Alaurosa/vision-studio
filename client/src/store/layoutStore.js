@@ -5,6 +5,7 @@ import api from '@/lib/api';
 import { getAABB, overlaps, withinRoom, validateAll } from '@/utils/collision';
 import { CATEGORY_COLORS, GRID_SNAP_INCHES, getZoneColor } from '@/utils/constants';
 import { computeRotation, getRotatedBoundingBox } from '@/utils/scale';
+import { normalizeRoomInterior, roomWithInterior } from '@/data/roomInterior';
 
 const snapToGrid = (value, gridSize) => Math.round(value / gridSize) * gridSize;
 
@@ -206,7 +207,7 @@ export const useLayoutStore = create(
           const { data } = await api.get(`/api/rooms/${roomId}`);
           const fallbackZones = normalizeZoneObjects(data);
           set({
-            room: data,
+            room: roomWithInterior(data),
             furniture: data.placements || [],
             detections: normalizeDetectedObjects(data.detected_objects),
             zones: fallbackZones,
@@ -240,7 +241,7 @@ export const useLayoutStore = create(
       // Create a local draft room (guest mode — no server call)
       createDraftRoom: (payload) => {
         const id = newDraftId();
-        const room = {
+        const room = roomWithInterior({
           id,
           name: payload.name || 'Draft Room',
           unit: payload.unit || 'inches',
@@ -249,7 +250,8 @@ export const useLayoutStore = create(
           height: payload.height || null,
           scale_px_per_inch: payload.scale_px_per_inch || null,
           walls: payload.walls || null,
-        };
+          interior: payload.interior,
+        });
         const zones = normalizeZonesArray(payload.zones || []);
         set({
           room,
@@ -283,10 +285,17 @@ export const useLayoutStore = create(
         const { room } = get();
         if (!room) return;
         const previous = room;
-        set({ room: { ...room, ...patch } });
+        const nextPatch = { ...patch };
+        if (nextPatch.interior !== undefined) {
+          nextPatch.interior = normalizeRoomInterior({
+            ...room.interior,
+            ...nextPatch.interior,
+          });
+        }
+        set({ room: { ...room, ...nextPatch } });
         if (!isDraftId(room.id)) {
           try {
-            await api.put(`/api/rooms/${room.id}`, patch);
+            await api.put(`/api/rooms/${room.id}`, nextPatch);
           } catch (e) {
             set({ room: previous });
             const msg = e?.response?.data?.error || e.message || 'Failed to save room';
@@ -294,6 +303,14 @@ export const useLayoutStore = create(
             throw e;
           }
         }
+      },
+
+      updateRoomInterior: async (patch) => {
+        const { room, updateRoom } = get();
+        if (!room) return;
+        return updateRoom({
+          interior: normalizeRoomInterior({ ...room.interior, ...patch }),
+        });
       },
 
       // ---------- furniture ----------
@@ -551,6 +568,7 @@ export const useLayoutStore = create(
           zones,
           walls: room.walls || null,
           scale_px_per_inch: room.scale_px_per_inch || null,
+          interior: room.interior || null,
         });
 
         await Promise.all(
@@ -598,6 +616,7 @@ export const useLayoutStore = create(
               zones: zones || [],
               scale_px_per_inch: room.scale_px_per_inch || null,
               walls: room.walls || null,
+              interior: room.interior || null,
             });
           } catch (e) {
             console.warn('Saved room but zone/geometry save failed:', e.message);
@@ -628,14 +647,14 @@ export const useLayoutStore = create(
           const { data } = await api.get(`/api/rooms/${serverRoom.id}`);
           const fallbackZones = normalizeZoneObjects(data);
           set({
-            room: data,
+            room: roomWithInterior(data),
             furniture: data.placements || savedPlacements,
             zones: fallbackZones.length ? fallbackZones : zones,
             activeZoneId: (fallbackZones[0] || zones[0])?.id || null,
           });
         } catch (e) {
           set({
-            room: serverRoom,
+            room: roomWithInterior(serverRoom),
             furniture: savedPlacements,
           });
         }

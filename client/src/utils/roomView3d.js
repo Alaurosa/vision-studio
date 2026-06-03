@@ -114,3 +114,37 @@ export function getRoomViewShellRoom(room, viewContext) {
     height: viewContext.heightIn,
   };
 }
+
+/**
+ * Resolve layoutStore zone id for a project space (zone link, centroid match, or floorplan zone).
+ * @param {object[]} zones
+ * @param {{ id?: string, zoneId?: string, zone_id?: string, geometry?: object, name?: string }} space
+ * @param {object | null} [project]
+ * @returns {string | null}
+ */
+export function resolveActiveZoneIdForSpace(zones, space, project = null) {
+  if (!space) return null;
+  const zid = space.zoneId || space.zone_id;
+  if (zid && zones.some((z) => z.id === zid)) return zid;
+
+  if (space.geometry) {
+    const g = normalizeGeometry(space.geometry);
+    const cx = g.bbox.x + g.bbox.width / 2;
+    const cy = g.bbox.y + g.bbox.height / 2;
+    const match = zones.find((z) => {
+      const b = getZoneBoundsInches(z);
+      return b && cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom;
+    });
+    if (match) return match.id;
+  }
+
+  const floorZones = Array.isArray(project?.floorplan?.zones) ? project.floorplan.zones : [];
+  const fz = floorZones.find(
+    (z) =>
+      z.id === zid ||
+      (space.name && String(z.name || '').toLowerCase() === String(space.name).toLowerCase()),
+  );
+  if (fz?.id && zones.some((z) => z.id === fz.id)) return fz.id;
+
+  return null;
+}

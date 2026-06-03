@@ -35,6 +35,8 @@ import {
   normalizeGlobalVision,
   prepareGlobalVisionForSave,
 } from '@/utils/projectVision';
+import { resolveActiveZoneIdForSpace } from '@/utils/roomView3d';
+import { applyVisionDesignToEditor, deriveStyleHintFromVision } from '@/utils/visionDesignApply';
 import ProjectVisionIntake from '@/components/project/ProjectVisionIntake';
 import RoomEditor from '@/components/upload/RoomEditor';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -213,6 +215,9 @@ export default function Studio() {
   const { user, loading: authLoading } = useAuth();
   const {
     room,
+    furniture,
+    zones,
+    activeZoneId,
     loadRoom,
     viewMode,
     isChatOpen,
@@ -222,6 +227,9 @@ export default function Studio() {
     clearChat,
     setActiveZone,
     loadRoomFailed,
+    updateRoomInterior,
+    addFurniture,
+    setRecommendedItems,
   } = useLayoutStore();
   const [rooms, setRooms] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -282,9 +290,13 @@ export default function Studio() {
 
   const resolvedRoomId = useMemo(() => {
     if (roomId) return roomId;
-    if (isProjectEditorRoute && editorSpaceId && currentProject) {
-      const sp = resolveSpaceByEditorId(currentProject, editorSpaceId);
-      return getSpaceRoomId(sp);
+    if (isProjectEditorRoute && currentProject) {
+      if (editorSpaceId) {
+        const sp = resolveSpaceByEditorId(currentProject, editorSpaceId);
+        return getSpaceRoomId(sp);
+      }
+      const fallback = getFirstEditableEditorSpace(currentProject);
+      return getSpaceRoomId(fallback);
     }
     return null;
   }, [roomId, editorSpaceId, currentProject, isProjectEditorRoute]);
@@ -619,10 +631,46 @@ export default function Studio() {
   };
 
   useEffect(() => {
-    if (!room || !currentProject || !querySpaceId) return;
+    if (!room || !currentProject || !isProjectEditorRoute) return;
+    if (!querySpaceId) {
+      setActiveZone(null);
+      return;
+    }
     const activeSpace = resolveSpaceByEditorId(currentProject, querySpaceId);
-    if (activeSpace?.zoneId) setActiveZone(activeSpace.zoneId);
-  }, [room, currentProject, querySpaceId, setActiveZone]);
+    const zoneId = resolveActiveZoneIdForSpace(
+      useLayoutStore.getState().zones,
+      activeSpace,
+      currentProject,
+    );
+    if (zoneId) setActiveZone(zoneId);
+  }, [room, currentProject, querySpaceId, setActiveZone, isProjectEditorRoute]);
+
+  const visionStyleHint = useMemo(
+    () => deriveStyleHintFromVision(currentProject?.globalVision),
+    [currentProject?.globalVision],
+  );
+
+  useEffect(() => {
+    if (!isProjectEditorRoute || !room || !currentProject?.globalVision) return;
+    const activeZone = activeZoneId ? zones.find((z) => z.id === activeZoneId) : null;
+    applyVisionDesignToEditor({
+      globalVision: currentProject.globalVision,
+      room,
+      zones,
+      furniture,
+      activeZone,
+      updateRoomInterior,
+      addFurniture,
+      setRecommendedItems,
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    room?.id,
+    room?.interior?.visionRevision,
+    currentProject?.globalVision,
+    activeZoneId,
+    isProjectEditorRoute,
+  ]);
 
   const requestDiscardDraft = () => setConfirmDialog({ kind: 'discardDraft' });
   const confirmDiscardDraft = () => {
@@ -1739,6 +1787,7 @@ export default function Studio() {
           >
             <EditorWorkspaceSidebar
               project={isProjectEditorRoute ? currentProject : null}
+              visionStyleHint={visionStyleHint}
               onNavigateToSpace={
                 projectId
                   ? (spaceId) => {

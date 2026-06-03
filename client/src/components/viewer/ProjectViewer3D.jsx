@@ -1,46 +1,96 @@
-import { Suspense, useMemo } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Grid } from '@react-three/drei';
-import { projectFloorplanOverlays, toBboxArray } from '@/utils/floorplanGeometry';
+import { OrbitControls, Environment } from '@react-three/drei';
+import { useLayoutStore, furnitureBelongsToZoneId } from '@/store/layoutStore';
+import { CATEGORY_COLORS } from '@/utils/constants';
+import { getRotatedBoundingBox } from '@/utils/scale';
+import SmartFurnitureModel from '@/components/viewer/SmartFurnitureModel';
+import ProjectSpaceShell3D from '@/components/viewer/ProjectSpaceShell3D';
+import {
+  buildProject3dSpaces,
+  getProjectOverviewCamera,
+  INCHES_TO_METERS,
+} from '@/utils/projectFloorplan3d';
+import { toLocalFurnitureInches } from '@/utils/roomView3d';
+import { getFurnitureRenderDimensionsInches } from '@/utils/furniture3d';
+import { normalizeRoomInterior } from '@/data/roomInterior';
 
-const IN_TO_M = 0.0254;
+const IN_TO_M = INCHES_TO_METERS;
 
-function buildBlocksFromGeometry(overlays = []) {
-  const blocks = overlays.map((space, index) => {
-    // Polygon extrusion can be added later; for now, use confirmed polygon bbox as stable MVP.
-    const [x1, y1, x2, y2] = toBboxArray(space.geometry);
-    return {
-      id: space.id || `space-${index}`,
-      type: space.type === 'exterior' ? 'exterior' : 'interior',
-      x: x1,
-      y: y1,
-      width: Math.max(24, x2 - x1),
-      depth: Math.max(24, y2 - y1),
-      height: space.type === 'exterior' ? 42 : 78,
-    };
-  });
-  if (blocks.length === 0) return { blocks: [], maxX: 0, maxY: 0 };
-  const maxX = Math.max(...blocks.map((b) => b.x + b.width));
-  const maxY = Math.max(...blocks.map((b) => b.y + b.depth));
-  return { blocks, maxX, maxY };
+function ProjectFurnitureGroup({ space, furniture, roomInterior }) {
+  const items = furniture.filter((it) => furnitureBelongsToZoneId(it, space.zoneId, space._zones || []));
+  if (!items.length) return null;
+
+  const ox = space.leftIn;
+  const oy = space.topIn;
+
+  return (
+    <group>
+      {items.map((it) => {
+        const dimsIn = getFurnitureRenderDimensionsInches(it);
+        const fw = dimsIn.width * IN_TO_M;
+        const fd = dimsIn.depth * IN_TO_M;
+        const fh = dimsIn.height * IN_TO_M;
+        const bbox = getRotatedBoundingBox(dimsIn.width, dimsIn.depth, it.rotation || 0);
+        const local = toLocalFurnitureInches(it, ox, oy);
+        const x = (space.leftIn * IN_TO_M) + (local.x + bbox.width / 2) * IN_TO_M;
+        const z = (space.topIn * IN_TO_M) + (local.y + bbox.depth / 2) * IN_TO_M;
+        const color = it.color || CATEGORY_COLORS[it.category] || CATEGORY_COLORS.default;
+        const rotY = -(it.rotation || 0) * Math.PI / 180;
+        return (
+          <group key={it.id} position={[x, fh / 2, z]} rotation={[0, rotY, 0]}>
+            <SmartFurnitureModel item={it} w={fw} d={fd} h={fh} color={color} />
+          </group>
+        );
+      })}
+    </group>
+  );
 }
 
 export default function ProjectViewer3D({ project = null, selectedSpaceId = null }) {
-  const { overlays } = useMemo(() => projectFloorplanOverlays(project), [project]);
-  const { blocks, maxX, maxY } = useMemo(
-    () => buildBlocksFromGeometry(overlays),
-    [overlays],
+  const furniture = useLayoutStore((s) => s.furniture);
+  const zones = useLayoutStore((s) => s.zones);
+  const room = useLayoutStore((s) => s.room);
+  const [resetSignal, setResetSignal] = useState(0);
+
+  const layout = useMemo(
+    () => buildProject3dSpaces(project, zones),
+    [project, zones],
   );
-  const worldW = Math.max(6, maxX * IN_TO_M);
-  const worldD = Math.max(6, maxY * IN_TO_M);
-  const camHeight = Math.max(worldW, worldD) * 0.8;
+
+  const camera = useMemo(
+    () => getProjectOverviewCamera(layout),
+    [layout],
+  );
+
+  const interior = useMemo(() => normalizeRoomInterior(room?.interior), [room?.interior]);
+
+  const spacesWithZones = useMemo(
+    () => layout.spaces.map((s) => ({ ...s, _zones: zones })),
+    [layout.spaces, zones],
+  );
+
+  const { worldW, worldD } = layout;
 
   return (
     <div className="relative h-full w-full bg-paper-100">
       <p className="pointer-events-none absolute left-3 top-3 z-10 text-[10px] font-medium uppercase tracking-editorial text-ink-900/70">
         All spaces · floorplan overview
       </p>
-      {blocks.length === 0 ? (
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-wrap gap-2 p-3">
+        <p className="text-[10px] uppercase tracking-editorial text-ink-900/50 w-full">
+          Drag to orbit · Scroll to zoom · Inspect room shells and interiors from any angle
+        </p>
+        <button
+          type="button"
+          className="pointer-events-auto rounded-md border border-ink-900/12 bg-paper-50/90 px-2.5 py-1 text-[10px] font-medium uppercase tracking-editorial text-ink-900/80 backdrop-blur-sm hover:border-ink-900/25"
+          onClick={() => setResetSignal((n) => n + 1)}
+        >
+          Reset view
+        </button>
+      </div>
+
+      {layout.spaces.length === 0 ? (
         <div className="absolute inset-0 grid place-items-center">
           <div className="panel max-w-md p-5 text-center">
             <p className="eyebrow mb-2 text-ink-500">3D Preview Unavailable</p>
@@ -51,45 +101,60 @@ export default function ProjectViewer3D({ project = null, selectedSpaceId = null
         </div>
       ) : (
         <Suspense fallback={null}>
-          <Canvas camera={{ position: [worldW * 0.55, camHeight, worldD * 1.05], fov: 42 }}>
+          <Canvas
+            key={resetSignal}
+            shadows
+            camera={{ position: camera.position, fov: camera.fov }}
+          >
             <color attach="background" args={['#f4efe4']} />
-            <ambientLight intensity={0.62} />
-            <directionalLight intensity={1.0} position={[8, 12, 8]} />
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[worldW / 2, 0, worldD / 2]} receiveShadow>
-              <planeGeometry args={[Math.max(worldW * 1.25, 10), Math.max(worldD * 1.25, 10)]} />
-              <meshStandardMaterial color="#e8dec7" />
-            </mesh>
-            {blocks.map((space) => {
-              const width = space.width * IN_TO_M;
-              const depth = space.depth * IN_TO_M;
-              const height = space.height * IN_TO_M;
-              const x = (space.x + space.width / 2) * IN_TO_M;
-              const z = (space.y + space.depth / 2) * IN_TO_M;
-              const selected = selectedSpaceId === space.id;
-              return (
-                <mesh key={space.id} position={[x, height / 2, z]} castShadow receiveShadow>
-                  <boxGeometry args={[width, height, depth]} />
-                  <meshStandardMaterial
-                    color={
-                      space.type === 'exterior'
-                        ? selected
-                          ? '#5b9ac8'
-                          : '#7aa8ca'
-                        : selected
-                          ? '#d19c58'
-                          : '#bea07a'
-                    }
-                    transparent
-                    opacity={0.9}
-                  />
-                </mesh>
-              );
-            })}
-            <Grid
-              args={[Math.max(worldW * 1.3, 12), Math.max(worldD * 1.3, 12)]}
-              position={[worldW / 2, 0.001, worldD / 2]}
+            <ambientLight intensity={0.55} />
+            <directionalLight
+              castShadow
+              intensity={1.05}
+              position={[worldW * 0.6, layout.worldH * 2.5, worldD * 0.5]}
+              shadow-mapSize={[2048, 2048]}
             />
-            <OrbitControls target={[worldW / 2, 0.4, worldD / 2]} />
+            <Suspense fallback={null}>
+              <Environment preset="apartment" />
+            </Suspense>
+
+            <mesh
+              rotation={[-Math.PI / 2, 0, 0]}
+              position={[worldW / 2, 0, worldD / 2]}
+              receiveShadow
+            >
+              <planeGeometry args={[worldW * 1.15, worldD * 1.15]} />
+              <meshStandardMaterial color="#e8dec7" roughness={0.92} />
+            </mesh>
+
+            {spacesWithZones.map((space) => (
+              <ProjectSpaceShell3D
+                key={space.id}
+                leftIn={space.leftIn}
+                topIn={space.topIn}
+                widthIn={space.widthIn}
+                depthIn={space.depthIn}
+                heightIn={space.heightIn}
+                interior={interior}
+                selected={selectedSpaceId === space.id}
+                showWalls
+              />
+            ))}
+
+            {spacesWithZones.map((space) => (
+              <ProjectFurnitureGroup
+                key={`furn-${space.id}`}
+                space={space}
+                furniture={furniture}
+              />
+            ))}
+
+            <OrbitControls
+              target={camera.target}
+              minDistance={Math.max(worldW, worldD) * 0.35}
+              maxDistance={Math.max(worldW, worldD) * 3.5}
+              maxPolarAngle={Math.PI / 2.05}
+            />
           </Canvas>
         </Suspense>
       )}

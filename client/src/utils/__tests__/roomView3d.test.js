@@ -3,6 +3,7 @@ import {
   getRoomViewContext,
   getRoomViewShellRoom,
   getZoneBoundsInches,
+  resolveActiveZoneIdForSpace,
   toLocalFurnitureInches,
 } from '@/utils/roomView3d';
 
@@ -57,5 +58,14 @@ describe('roomView3d', () => {
     expect(ctx.widthIn).toBe(120);
     expect(ctx.originX).toBe(10);
     expect(ctx.originY).toBe(20);
+  });
+
+  it('resolveActiveZoneIdForSpace matches zone by geometry centroid', () => {
+    const zones = [livingZone];
+    const space = {
+      id: 'sp-living',
+      geometry: { type: 'rect', bbox: { x: 24, y: 36, width: 216, height: 164 } },
+    };
+    expect(resolveActiveZoneIdForSpace(zones, space, null)).toBe('zone-living');
   });
 });

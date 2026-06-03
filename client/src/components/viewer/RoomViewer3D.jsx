@@ -126,7 +126,7 @@ export default function RoomViewer3D({ spaceGeometry = null, viewLabel = null })
           <Environment preset="apartment" />
         </Suspense>
 
-        <RoomShell3D widthM={w} depthM={d} heightM={h} />
+        <RoomShell3D widthM={w} depthM={d} heightM={h} showWalls />
         <RoomInterior3D interior={room?.interior} roomW={w} roomD={d} roomH={h} />
 
         {furniture.map((it) => {

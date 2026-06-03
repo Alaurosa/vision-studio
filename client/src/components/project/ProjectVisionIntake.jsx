@@ -9,6 +9,7 @@ import { getProjectById, upsertProject } from '@/utils/projectCompat';
 import {
   buildSpacesContextFromProject,
   normalizeGlobalVision,
+  prepareGlobalVisionForSave,
   PROJECT_VISION_MOOD_CHIPS,
   PROJECT_VISION_PRIORITY_KEYWORDS,
   tagsFromChips,
@@ -157,12 +158,12 @@ export default function ProjectVisionIntake({ project, onPersist }) {
     const chips = project.theme?.styleChips || [];
     if (!themePrompt && chips.length === 0) return;
     themeMergedRef.current = true;
-    const nextGv = normalizeGlobalVision(
+    const nextGv = prepareGlobalVisionForSave(
       {
-        ...gv,
         summary: gv.summary || themePrompt,
-        styleKeywords: [...(gv.styleKeywords || []), ...chips],
+        moodTags: [...(gv.moodTags || []), ...chips],
       },
+      gv,
       project,
     );
     const next = {
@@ -200,8 +201,9 @@ export default function ProjectVisionIntake({ project, onPersist }) {
     const thread = nextMessages
       .filter((m) => m.id !== 'welcome')
       .map(({ id, role, content }) => ({ id, role, content }));
-    const normalized = normalizeGlobalVision(
+    const normalized = prepareGlobalVisionForSave(
       { ...nextGv, visionIntakeThread: thread, spacesContext },
+      p.globalVision || {},
       p,
     );
     const next = {
@@ -221,13 +223,10 @@ export default function ProjectVisionIntake({ project, onPersist }) {
     if (!summary && moodTags.length > 0) {
       summary = `Whole-property direction: ${moodTags.slice(0, 5).join(', ')}.`;
     }
-    persistFull(messages, {
-      ...g0,
-      summary,
-      moodTags,
-      priorities,
-      styleKeywords: moodTags,
-    });
+    persistFull(
+      messages,
+      prepareGlobalVisionForSave({ summary, moodTags, priorities, styleKeywords: moodTags }, g0, p0),
+    );
   };
 
   const toggleChip = (chip) => {
@@ -261,15 +260,15 @@ export default function ProjectVisionIntake({ project, onPersist }) {
     } else if (!summary && moodTags.length > 0) {
       summary = `Whole-property direction: ${moodTags.slice(0, 5).join(', ')}.`;
     }
-    const nextGv = normalizeGlobalVision(
+    const nextGv = prepareGlobalVisionForSave(
       {
-        ...g0,
-        summary,
+        summary: summary || g0.summary,
         notes: trimmed,
         moodTags,
         priorities,
         styleKeywords: moodTags,
       },
+      g0,
       p0,
     );
     persistFull(nextMessages, nextGv);
@@ -291,10 +290,14 @@ export default function ProjectVisionIntake({ project, onPersist }) {
       const assistantMsg = { id: `a-${Date.now()}`, role: 'assistant', content: assistantText };
       const withAssistant = [...nextMessages, assistantMsg];
       setMessages(withAssistant);
-      persistFull(withAssistant, {
-        ...nextGv,
-        visionIntakeAssistantSummary: assistantText.slice(0, 2000),
-      });
+      persistFull(
+        withAssistant,
+        prepareGlobalVisionForSave(
+          { visionIntakeAssistantSummary: assistantText.slice(0, 2000) },
+          nextGv,
+          p0,
+        ),
+      );
     } catch {
       toast.error('Could not reach the assistant. Your choices are saved — try again in a moment.');
       const bullets = buildDeterministicVisionSuggestions(nextGv);
@@ -339,12 +342,15 @@ export default function ProjectVisionIntake({ project, onPersist }) {
     try {
       const next = {
         ...project,
-        globalVision: {
-          ...effectiveGv,
-          visionIntakeThread: messages
-            .filter((m) => m.id !== 'welcome')
-            .map(({ id, role, content }) => ({ id, role, content })),
-        },
+        globalVision: prepareGlobalVisionForSave(
+          {
+            visionIntakeThread: messages
+              .filter((m) => m.id !== 'welcome')
+              .map(({ id, role, content }) => ({ id, role, content })),
+          },
+          effectiveGv,
+          project,
+        ),
         visionIntakeCompletedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };

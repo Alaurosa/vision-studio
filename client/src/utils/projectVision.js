@@ -74,7 +74,8 @@ export function normalizeGlobalVision(gv = {}, project = null) {
   const constraints = dedupeTags(gv.constraints || []);
   const rawSummary = gv.summary || gv.propertyVision || '';
   const summary = dedupeSummaryText(rawSummary);
-  const notes = dedupeSummaryText(gv.notes || '');
+  const rawNotes = gv.notes || gv.inspirationNotes || '';
+  const notes = dedupeSummaryText(rawNotes);
   const spacesContext =
     Array.isArray(gv.spacesContext) && gv.spacesContext.length > 0
       ? gv.spacesContext
@@ -91,7 +92,78 @@ export function normalizeGlobalVision(gv = {}, project = null) {
     constraints,
     notes,
     spacesContext,
+    inspirationNotes: notes,
   };
+}
+
+/**
+ * Merge a vision patch onto existing data with overwrite semantics (never string-append).
+ * Always run before persisting to localStorage/API payloads.
+ *
+ * @param {object} patch — fields to overwrite (summary, notes, moodTags, priorities, …)
+ * @param {object | null | undefined} existingGv
+ * @param {object | null | undefined} [project]
+ */
+export function prepareGlobalVisionForSave(patch = {}, existingGv = {}, project = null) {
+  const base = normalizeGlobalVision(existingGv, project);
+  const next = { ...base };
+
+  if (typeof patch.summary === 'string') {
+    next.summary = patch.summary;
+  } else if (typeof patch.propertyVision === 'string' && patch.propertyVision.trim()) {
+    next.summary = patch.propertyVision;
+  }
+
+  if (typeof patch.notes === 'string') {
+    next.notes = patch.notes;
+  } else if (typeof patch.inspirationNotes === 'string') {
+    next.notes = patch.inspirationNotes;
+  }
+
+  if (patch.moodTags !== undefined || patch.styleKeywords !== undefined) {
+    next.moodTags = dedupeTags(patch.moodTags ?? patch.styleKeywords ?? base.moodTags);
+  }
+  if (patch.priorities !== undefined) {
+    next.priorities = dedupeTags(patch.priorities);
+  }
+  if (patch.constraints !== undefined) {
+    next.constraints = dedupeTags(patch.constraints);
+  }
+
+  if (patch.moodVibe !== undefined) next.moodVibe = patch.moodVibe;
+  if (patch.budgetRange !== undefined) next.budgetRange = patch.budgetRange;
+  if (patch.interiorGoals !== undefined) next.interiorGoals = patch.interiorGoals;
+  if (patch.exteriorGoals !== undefined) next.exteriorGoals = patch.exteriorGoals;
+  if (patch.spacesContext !== undefined) next.spacesContext = patch.spacesContext;
+  if (patch.visionIntakeThread !== undefined) next.visionIntakeThread = patch.visionIntakeThread;
+  if (patch.visionIntakeAssistantSummary !== undefined) {
+    next.visionIntakeAssistantSummary = patch.visionIntakeAssistantSummary;
+  }
+
+  return normalizeGlobalVision(next, project);
+}
+
+/**
+ * Merge API + local vision overlays, then normalize (no duplicated sentences).
+ */
+export function mergeGlobalVisionSources(apiGv, localGv, project = null) {
+  const api = apiGv && typeof apiGv === 'object' ? apiGv : {};
+  const local = localGv && typeof localGv === 'object' ? localGv : {};
+  return prepareGlobalVisionForSave(
+    {
+      ...api,
+      ...local,
+      summary: local.summary || api.summary || local.propertyVision || api.propertyVision,
+      notes: local.notes || api.notes || local.inspirationNotes || api.inspirationNotes,
+      moodTags: local.moodTags || local.styleKeywords || api.moodTags || api.styleKeywords,
+      priorities: local.priorities || api.priorities,
+      constraints: local.constraints || api.constraints,
+      spacesContext: local.spacesContext || api.spacesContext,
+      visionIntakeThread: local.visionIntakeThread || api.visionIntakeThread,
+    },
+    {},
+    project,
+  );
 }
 
 /**
@@ -116,7 +188,7 @@ export function formatProjectVisionSummary(gv, project = null) {
   if (n.constraints.length > 0) {
     segments.push(`Constraints: ${n.constraints.join(', ')}.`);
   }
-  if (n.moodTags.length > 0 && n.summary) {
+  if (n.moodTags.length > 0) {
     segments.push(`Style direction: ${n.moodTags.join(', ')}.`);
   }
   if (n.notes && n.notes.toLowerCase() !== (n.summary || '').toLowerCase()) {

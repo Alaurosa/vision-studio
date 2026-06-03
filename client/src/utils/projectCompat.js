@@ -1,3 +1,5 @@
+import { normalizeGlobalVision } from '@/utils/projectVision';
+
 const STORAGE_KEY = 'vs-projects-v1';
 
 const uid = (prefix = 'id') =>
@@ -19,13 +21,23 @@ export function saveProjectState(state) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+function normalizeProjectForStorage(project) {
+  if (!project || typeof project !== 'object') return project;
+  if (!project.globalVision || typeof project.globalVision !== 'object') return project;
+  return {
+    ...project,
+    globalVision: normalizeGlobalVision(project.globalVision, project),
+  };
+}
+
 export function upsertProject(project) {
+  const normalized = normalizeProjectForStorage(project);
   const state = loadProjectState();
-  const idx = state.projects.findIndex((p) => p.id === project.id);
-  if (idx >= 0) state.projects[idx] = project;
-  else state.projects.push(project);
+  const idx = state.projects.findIndex((p) => p.id === normalized.id);
+  if (idx >= 0) state.projects[idx] = normalized;
+  else state.projects.push(normalized);
   saveProjectState(state);
-  return project;
+  return normalized;
 }
 
 export function getProjectById(projectId) {
@@ -48,13 +60,19 @@ export function createProjectDraft({ name, propertyType, startMode }) {
     startMode: startMode || 'blank',
     status: 'in_progress',
     globalVision: {
+      summary: '',
       propertyVision: '',
+      moodTags: [],
       styleKeywords: [],
+      priorities: [],
+      constraints: [],
+      notes: '',
       moodVibe: '',
       budgetRange: '',
       inspirationNotes: '',
       exteriorGoals: '',
       interiorGoals: '',
+      spacesContext: [],
     },
     theme: null,
     spaces: [],

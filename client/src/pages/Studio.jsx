@@ -29,7 +29,12 @@ import {
   upsertProject,
 } from '@/utils/projectCompat';
 import { isProjectVisionComplete } from '@/utils/visionGate';
-import { formatProjectVisionSummary } from '@/utils/projectVision';
+import {
+  formatProjectVisionSummary,
+  mergeGlobalVisionSources,
+  normalizeGlobalVision,
+  prepareGlobalVisionForSave,
+} from '@/utils/projectVision';
 import ProjectVisionIntake from '@/components/project/ProjectVisionIntake';
 import RoomEditor from '@/components/upload/RoomEditor';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -90,10 +95,13 @@ function normalizeProjectPayload(project) {
   const gvRaw = project.globalVision ?? project.global_vision;
   const gv =
     gvRaw && typeof gvRaw === 'object'
-      ? {
-          propertyVision: gvRaw.propertyVision ?? gvRaw.property_vision ?? '',
-          ...gvRaw,
-        }
+      ? normalizeGlobalVision(
+          {
+            propertyVision: gvRaw.propertyVision ?? gvRaw.property_vision ?? '',
+            ...gvRaw,
+          },
+          project,
+        )
       : {};
   return {
     ...project,
@@ -138,10 +146,11 @@ function mergeDashboardProjects(apiProjects, localProjects) {
       if (!localProject) return apiProject;
       return normalizeProjectPayload({
         ...apiProject,
-        globalVision: {
-          ...(typeof apiProject.globalVision === 'object' ? apiProject.globalVision : {}),
-          ...(typeof localProject.globalVision === 'object' ? localProject.globalVision : {}),
-        },
+        globalVision: mergeGlobalVisionSources(
+          apiProject.globalVision,
+          localProject.globalVision,
+          apiProject,
+        ),
         confirmationCompletedAt:
           localProject.confirmationCompletedAt ?? apiProject.confirmationCompletedAt ?? null,
         visionIntakeCompletedAt:
@@ -253,11 +262,11 @@ export default function Studio() {
         ...fromApi,
         ...fromLocal,
         name: fromLocal.name || fromApi.name,
-        globalVision: {
-          ...(typeof fromApi.globalVision === 'object' ? fromApi.globalVision : {}),
-          ...(typeof fromApi.global_vision === 'object' ? fromApi.global_vision : {}),
-          ...(fromLocal.globalVision && typeof fromLocal.globalVision === 'object' ? fromLocal.globalVision : {}),
-        },
+        globalVision: mergeGlobalVisionSources(
+          fromApi.globalVision ?? fromApi.global_vision,
+          fromLocal.globalVision,
+          fromApi,
+        ),
         spaces:
           Array.isArray(fromApi.spaces) && fromApi.spaces.length > 0
             ? fromApi.spaces
@@ -440,17 +449,7 @@ export default function Studio() {
     if (!project?.id) return;
     const nextProject = {
       ...project,
-      globalVision: {
-        propertyVision: '',
-        styleKeywords: [],
-        moodVibe: '',
-        budgetRange: '',
-        inspirationNotes: '',
-        exteriorGoals: '',
-        interiorGoals: '',
-        ...(project.globalVision || {}),
-        ...patch,
-      },
+      globalVision: prepareGlobalVisionForSave(patch, project.globalVision || {}, project),
       updatedAt: new Date().toISOString(),
     };
     upsertProject(nextProject);

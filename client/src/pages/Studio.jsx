@@ -1345,7 +1345,7 @@ export default function Studio() {
     const interiorSpaces = (project?.spaces || []).filter((s) => s.type === 'interior');
     const exteriorSpaces = (project?.spaces || []).filter((s) => s.type === 'exterior');
     const gv = project?.globalVision || {};
-    const visionOk = isProjectVisionComplete(gv);
+    const visionOk = isProjectVisionComplete(gv, project);
     const confirmed = isConfirmationDone(project);
     const setupIncomplete = !visionOk || !confirmed;
     const continueSetupPath = !visionOk

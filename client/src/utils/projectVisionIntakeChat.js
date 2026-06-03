@@ -1,6 +1,9 @@
 /** Stable id for the offline/save-status assistant card (upserted, not stacked). */
 export const VISION_SAVE_STATUS_MESSAGE_ID = 'vision-save-status';
 
+/** Stable id for guided chip-step acknowledgment (upserted, not stacked). */
+export const GUIDED_STEP_SUMMARY_MESSAGE_ID = 'vision-guided-step-summary';
+
 const SAVE_STATUS_PREFIX = 'Your direction is saved.';
 
 /**
@@ -43,6 +46,25 @@ export function isVisionSaveStatusMessage(message) {
 export function upsertAssistantStatusMessage(messages, statusMessage) {
   const withoutStatus = (messages || []).filter((m) => !isVisionSaveStatusMessage(m));
   return [...withoutStatus, statusMessage];
+}
+
+/**
+ * @param {object | null | undefined} message
+ */
+export function isGuidedStepSummaryMessage(message) {
+  return message?.id === GUIDED_STEP_SUMMARY_MESSAGE_ID;
+}
+
+/**
+ * @param {Array<{ id?: string, role: string, content: string, type?: string }>} messages
+ * @param {string} content
+ */
+export function upsertGuidedStepSummaryMessage(messages, content) {
+  const without = (messages || []).filter((m) => !isGuidedStepSummaryMessage(m));
+  return [
+    ...without,
+    { id: GUIDED_STEP_SUMMARY_MESSAGE_ID, role: 'assistant', content },
+  ];
 }
 
 /**

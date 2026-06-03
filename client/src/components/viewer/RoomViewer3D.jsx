@@ -6,7 +6,11 @@ import { CATEGORY_COLORS } from '@/utils/constants';
 import { getRotatedBoundingBox } from '@/utils/scale';
 import SmartFurnitureModel from './SmartFurnitureModel';
 import RoomShell3D from './RoomShell3D';
-import { getFurnitureRenderDimensionsInches, INCHES_TO_METERS } from '@/utils/furniture3d';
+import RoomInterior3D from './RoomInterior3D';
+import {
+  getFurnitureRenderDimensionsInches,
+  INCHES_TO_METERS,
+} from '@/utils/furniture3d';
 import { getRoomShellDimensionsMeters } from '@/utils/roomShell3d';
 
 const IN_TO_M = INCHES_TO_METERS;
@@ -32,6 +36,7 @@ export default function RoomViewer3D() {
         </Suspense>
 
         <RoomShell3D widthM={w} depthM={d} heightM={h} />
+        <RoomInterior3D interior={room?.interior} roomW={w} roomD={d} roomH={h} />
 
         {/* Furniture — each SmartFurnitureModel suspends locally; do not wrap Canvas in Suspense */}
         {furniture.map((it) => {

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useLayoutStore } from '@/store/layoutStore';
-import { CATEGORY_COLORS } from '@/utils/constants';
 import api from '@/lib/api';
+
+const CATALOG_DRAG_TYPE = 'application/x-vision-studio-furniture';
 
 export default function CatalogPanel() {
   const [items, setItems] = useState([]);
@@ -13,7 +14,7 @@ export default function CatalogPanel() {
   const [tab, setTab] = useState('catalog'); // 'catalog' | 'recommended'
   const initialRender = useRef(true);
 
-  const { recommendedItems, addFurniture, findOpenSlot, room } = useLayoutStore();
+  const { recommendedItems, addCatalogFurniture, room } = useLayoutStore();
 
   // Auto-switch to Recommended tab when new suggestions arrive
   useEffect(() => {
@@ -55,24 +56,14 @@ export default function CatalogPanel() {
 
   const onAdd = (it) => {
     if (!room) return;
-    const slot = findOpenSlot(it.width, it.depth);
-    addFurniture({
-      catalog_id: it.id,
-      name: it.name,
-      category: it.category,
-      provider: it.provider,
-      provider_id: it.provider_id,
-      width: it.width,
-      depth: it.depth,
-      height: it.height,
-      x_inches: slot.x,
-      y_inches: slot.y,
-      rotation: 0,
-      color: CATEGORY_COLORS[it.category] || CATEGORY_COLORS.default,
-      image_url: it.image_url || null,
-      model_url: it.model_url || null,
-    });
+    addCatalogFurniture(it);
     toast.success(`Added ${it.name}`);
+  };
+
+  const onDragStart = (event, item) => {
+    event.dataTransfer.effectAllowed = 'copy';
+    event.dataTransfer.setData(CATALOG_DRAG_TYPE, JSON.stringify(item));
+    event.dataTransfer.setData('text/plain', item.name || 'Furniture');
   };
 
   const list = tab === 'recommended' ? recommendedItems : items;
@@ -157,7 +148,9 @@ export default function CatalogPanel() {
         {list.map((it) => (
           <div
             key={it.id || it.catalog_id || it.name}
-            className="border border-surface-600 bg-surface-700 hover:border-surface-500 transition group"
+            draggable={Boolean(room)}
+            onDragStart={(event) => onDragStart(event, it)}
+            className="border border-surface-600 bg-surface-700 hover:border-surface-500 transition group cursor-grab active:cursor-grabbing"
           >
             {it.image_url && (
               <div className="aspect-[4/3] overflow-hidden bg-surface-600">
@@ -178,6 +171,9 @@ export default function CatalogPanel() {
               </div>
               <div className="text-[11px] uppercase tracking-editorial text-surface-400 mb-3">
                 {it.provider || 'Catalog'} · {it.width}"W × {it.depth}"D
+              </div>
+              <div className="mb-3 text-[10px] text-surface-500">
+                Drag into the room or add to the next open spot.
               </div>
               <button
                 onClick={() => onAdd(it)}

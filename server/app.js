@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { errorHandler } from './middleware/errorHandler.js';
+import { createCorsOriginValidator } from './config/corsOrigins.js';
 import { log } from './services/logger.js';
 
 import authRoutes from './routes/auth.js';
@@ -32,18 +33,11 @@ export function createApp() {
     contentSecurityPolicy: false, // CSP handled by frontend
   }));
 
-  // ---------- CORS ----------
-  const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:4173')
-    .split(',')
-    .map(o => o.trim());
-
+  // ---------- CORS (credentials on — no wildcard "*") ----------
   app.use(cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (mobile apps, curl, server-to-server)
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      callback(new Error('Not allowed by CORS'));
-    },
+    origin: createCorsOriginValidator(process.env, {
+      warn: (msg) => log.warn(msg),
+    }),
     credentials: true,
   }));
 

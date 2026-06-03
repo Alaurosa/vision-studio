@@ -49,6 +49,14 @@ describe('filterStarterFurnitureCatalog', () => {
     expect(results.some((item) => item.id === 'starter-sofa-3seat')).toBe(false);
   });
 
+  it('filters by style tag id', () => {
+    const minimal = filterStarterFurnitureCatalog(STARTER_FURNITURE_CATALOG, {
+      styleTagId: 'minimal',
+    });
+    expect(minimal.some((item) => item.id === 'starter-coffee-table')).toBe(true);
+    expect(minimal.some((item) => item.id === 'starter-sofa-3seat')).toBe(false);
+  });
+
   it('applies category and search together', () => {
     const results = filterStarterFurnitureCatalog(STARTER_FURNITURE_CATALOG, {
       categoryId: 'tables',

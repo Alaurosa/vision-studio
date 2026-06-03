@@ -25,7 +25,7 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
     if (!selected || !groupRef.current || !transformerRef.current) return;
     transformerRef.current.nodes([groupRef.current]);
     transformerRef.current.getLayer()?.batchDraw();
-  }, [selected, w, d]);
+  }, [selected, w, d, rot]);
 
   const [mounted, setMounted] = useState(item._animDelay == null);
 
@@ -145,12 +145,16 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
     const node = groupRef.current;
     if (!node) return;
     const rotation = normalizeRotation(node.rotation());
-    const rotatedBox = getRotatedBoundingBox(item.width || 0, item.depth || 0, rotation);
+    const nextWidth = Math.max(6, Math.abs((item.width || 0) * node.scaleX()));
+    const nextDepth = Math.max(6, Math.abs((item.depth || 0) * node.scaleY()));
+    const rotatedBox = getRotatedBoundingBox(nextWidth, nextDepth, rotation);
     const xInches = Math.max(0, (node.x() - offsetX) / pxPerInch - rotatedBox.width / 2 + viewOriginX);
     const yInches = Math.max(0, (node.y() - offsetY) / pxPerInch - rotatedBox.depth / 2 + viewOriginY);
     node.scaleX(1);
     node.scaleY(1);
     const patch = {
+      width: Number(nextWidth.toFixed(2)),
+      depth: Number(nextDepth.toFixed(2)),
       rotation,
       x_inches: snapToGrid(xInches, GRID_SNAP_INCHES),
       y_inches: snapToGrid(yInches, GRID_SNAP_INCHES),
@@ -216,7 +220,16 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
       {selected && (
         <Transformer
           ref={transformerRef}
-          enabledAnchors={[]}
+          enabledAnchors={[
+            'top-left',
+            'top-center',
+            'top-right',
+            'middle-left',
+            'middle-right',
+            'bottom-left',
+            'bottom-center',
+            'bottom-right',
+          ]}
           rotateEnabled
           rotateAnchorOffset={24}
           borderStroke="#3b82f6"
@@ -225,8 +238,11 @@ export default function FurnitureItem({ item, pxPerInch, offsetX, offsetY, selec
           anchorStroke="#3b82f6"
           anchorFill="#ffffff"
           anchorSize={10}
-          keepRatio
-          boundBoxFunc={(oldBox) => oldBox}
+          keepRatio={false}
+          boundBoxFunc={(oldBox, newBox) => {
+            if (Math.abs(newBox.width) < 12 || Math.abs(newBox.height) < 12) return oldBox;
+            return newBox;
+          }}
         />
       )}
 

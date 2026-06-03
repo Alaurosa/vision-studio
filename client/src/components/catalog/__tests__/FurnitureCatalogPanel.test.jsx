@@ -1,7 +1,23 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import FurnitureCatalogPanel from '@/components/catalog/FurnitureCatalogPanel';
 import { STARTER_FURNITURE_CATALOG } from '@/data/furnitureCatalog';
+import { useLayoutStore } from '@/store/layoutStore';
+
+// Snapshot the initial layoutStore state so each test can reset cleanly.
+const INITIAL_LAYOUT_STATE = useLayoutStore.getState();
+
+function setLayoutState(patch) {
+  useLayoutStore.setState(patch, false);
+}
+
+function expandRecommendations() {
+  fireEvent.click(screen.getByTestId('recommended-collapsible-trigger'));
+}
+
+beforeEach(() => {
+  useLayoutStore.setState(INITIAL_LAYOUT_STATE, true);
+});
 
 afterEach(() => {
   cleanup();
@@ -105,6 +121,145 @@ describe('FurnitureCatalogPanel', () => {
       footprint: sample.footprint,
       modelStatus: sample.modelStatus,
       tags: sample.tags,
+    });
+  });
+
+  describe('Recommended for this room section', () => {
+    it('renders a collapsed callout by default with the catalog visible', () => {
+      setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
+
+      render(<FurnitureCatalogPanel />);
+
+      const trigger = screen.getByTestId('recommended-collapsible-trigger');
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByTestId('recommended-collapsible-panel')).not.toBeInTheDocument();
+      expect(screen.getByRole('list', { name: 'Furniture catalog results' })).toBeInTheDocument();
+      expect(screen.getByText(/picks for this room/i)).toBeInTheDocument();
+    });
+
+    it('prompts to set room dimensions when expanded and the room is unknown', () => {
+      render(<FurnitureCatalogPanel />);
+
+      expect(screen.getByText(/room dimensions unknown/i)).toBeInTheDocument();
+      expect(screen.getByText(/set room size to unlock/i)).toBeInTheDocument();
+      expandRecommendations();
+      expect(screen.getByTestId('recommended-empty-state')).toHaveTextContent(
+        /set room dimensions/i,
+      );
+    });
+
+    it('expands to show recommendations while keeping the catalog below', () => {
+      setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
+
+      render(<FurnitureCatalogPanel />);
+      expandRecommendations();
+
+      expect(screen.getByTestId('recommended-collapsible-trigger')).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      );
+      expect(
+        screen.getByRole('list', { name: 'Recommended furniture for this room' }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('list', { name: 'Furniture catalog results' })).toBeInTheDocument();
+    });
+
+    it('shows cross-category picks without requiring a category filter', () => {
+      setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
+
+      render(<FurnitureCatalogPanel />);
+      expandRecommendations();
+
+      const recList = screen.getByRole('list', { name: 'Recommended furniture for this room' });
+      const recButtons = within(recList).getAllByRole('button');
+      expect(recButtons.length).toBeGreaterThan(0);
+      expect(recButtons.length).toBeLessThanOrEqual(5);
+    });
+
+    it('shows an empty recommended state for categories with no fits', () => {
+      setLayoutState({ room: { id: 'r1', width: 96, depth: 96 }, furniture: [] });
+
+      render(<FurnitureCatalogPanel />);
+      fireEvent.click(screen.getByRole('button', { name: 'Tables' }));
+      expandRecommendations();
+
+      expect(screen.getByTestId('recommended-empty-state')).toHaveTextContent(/no pieces fit/i);
+    });
+
+    it('shows reasons under recommended items when expanded', () => {
+      setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
+
+      render(<FurnitureCatalogPanel />);
+      fireEvent.click(screen.getByRole('button', { name: 'Storage' }));
+      expandRecommendations();
+
+      const reason = screen.getByTestId('recommendation-reason-starter-bookshelf');
+      expect(reason).toBeInTheDocument();
+      expect(reason.textContent || '').toMatch(/fits/i);
+    });
+
+    it('renders metrics summary (room bucket + open area) when expanded', () => {
+      setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
+
+      render(<FurnitureCatalogPanel />);
+      fireEvent.click(screen.getByRole('button', { name: 'Storage' }));
+      expandRecommendations();
+
+      const metrics = screen.getByTestId('recommendation-metrics');
+      expect(metrics).toBeInTheDocument();
+      expect(metrics.textContent || '').toMatch(/medium|large/i);
+      expect(metrics.textContent || '').toMatch(/open area/i);
+    });
+
+    it('uses available space — placing a blocker shrinks recommendations', () => {
+      setLayoutState({
+        room: { id: 'r1', width: 144, depth: 144 },
+        furniture: [
+          {
+            id: 'blocker',
+            name: 'Blocker',
+            category: 'tables',
+            width: 130,
+            depth: 130,
+            x_inches: 0,
+            y_inches: 0,
+            rotation: 0,
+          },
+        ],
+      });
+
+      render(<FurnitureCatalogPanel />);
+      expandRecommendations();
+
+      const recPanel = screen.getByTestId('recommended-collapsible-panel');
+      expect(within(recPanel).queryByText('Starter 3-Seat Sofa')).not.toBeInTheDocument();
+    });
+
+    it('filters catalog and recommendations by style tag', () => {
+      setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
+
+      render(<FurnitureCatalogPanel />);
+      fireEvent.click(screen.getByRole('button', { name: 'Minimal' }));
+      expandRecommendations();
+
+      const browseList = screen.getByRole('list', { name: 'Furniture catalog results' });
+      expect(within(browseList).getByText('Starter Coffee Table')).toBeInTheDocument();
+      expect(within(browseList).queryByText('Starter 3-Seat Sofa')).not.toBeInTheDocument();
+
+      const recPanel = screen.getByTestId('recommended-collapsible-panel');
+      expect(within(recPanel).getByText(/minimal/i)).toBeInTheDocument();
+    });
+
+    it('keeps search enabled while recommendations are collapsed', () => {
+      setLayoutState({ room: { id: 'r1', width: 216, depth: 168 }, furniture: [] });
+
+      render(<FurnitureCatalogPanel />);
+
+      const search = screen.getByLabelText('Search furniture');
+      expect(search).not.toBeDisabled();
+      fireEvent.change(search, { target: { value: 'queen' } });
+      const browseList = screen.getByRole('list', { name: 'Furniture catalog results' });
+      expect(within(browseList).getByText('Starter Queen Bed')).toBeInTheDocument();
     });
   });
 

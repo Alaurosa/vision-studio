@@ -295,9 +295,9 @@ Server and Python load the root `.env` file. The React client reads Vite env var
 - `OPENAI_API_KEY` (required for chat assistant)
 - `REPLICATE_API_TOKEN` (optional — for AI room photo detection)
 - `MESHY_API_KEY` (optional — for 3D model generation)
-- `PORT` (default: 3001), `PYTHON_SERVICE_URL` (default: `http://localhost:5001`)
+- `PORT` (default: 3001), `PYTHON_SERVICE_URL` (default: `http://localhost:5001`; Render: `https://vision-studio-python.onrender.com`)
 - `NODE_ENV` (development/production)
-- `ALLOWED_ORIGINS` (comma-separated, default: `http://localhost:5173,http://localhost:4173`)
+- **CORS** (`server/config/corsOrigins.js`): always allows `http://localhost:5173`, `http://localhost:3000`, `http://localhost:4173`. Also merges `CLIENT_ORIGIN` (single), `CLIENT_ORIGINS` (comma-separated), and legacy `ALLOWED_ORIGINS`. Requests with **no `Origin` header** are allowed (curl/health/server-to-server). Set `ALLOW_VERCEL_PREVIEWS=true` to allow any `https://*.vercel.app` preview host (credentials stay on — no `*`). Blocked origins are logged in non-production only.
 - `LOG_LEVEL` (debug/info/warn/error, default: `info`)
 
 Current hosted DB status (expected baseline):

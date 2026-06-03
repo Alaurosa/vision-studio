@@ -47,7 +47,7 @@ function ProjectFurnitureGroup({ space, furniture, roomInterior }) {
   );
 }
 
-export default function ProjectViewer3D({ project = null, selectedSpaceId = null }) {
+export default function ProjectViewer3D({ project = null, selectedSpaceId: _selectedSpaceId = null }) {
   const furniture = useLayoutStore((s) => s.furniture);
   const zones = useLayoutStore((s) => s.zones);
   const room = useLayoutStore((s) => s.room);

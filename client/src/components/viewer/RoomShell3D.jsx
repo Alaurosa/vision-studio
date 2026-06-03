@@ -7,6 +7,9 @@ const WALL_COLOR = '#ddd4c4';
 /**
  * Rectangular room shell for 3D preview: floor + optional translucent ceiling + optional walls.
  * Aligns with 2D RoomCanvas inches → meters (origin at room corner 0,0).
+ *
+ * Not mounted in RoomViewer3D since interior restore (RoomInterior3D owns walls).
+ * All-spaces mode uses ProjectSpaceShell3D instead. Kept for reference and roomShell3d tests.
  */
 export default function RoomShell3D({
   widthM: w,

@@ -15,7 +15,12 @@ const TABS = [
 /**
  * IDE-style left workspace: tabs + catalog / export / validation / space list.
  */
-export default function EditorWorkspaceSidebar({ project, onNavigateToSpace, visionStyleHint = null }) {
+export default function EditorWorkspaceSidebar({
+  project,
+  onNavigateToSpace,
+  visionStyleHint = null,
+  onApplyVisionLayout = null,
+}) {
   const [tab, setTab] = useState('furniture');
   const furnitureItems = useLayoutStore(selectVisibleFurniture);
   const selectedCatalogItem = useLayoutStore((s) => s.selectedCatalogItem);
@@ -137,7 +142,12 @@ export default function EditorWorkspaceSidebar({ project, onNavigateToSpace, vis
               </div>
             )}
 
-            {tab === 'materials' && <InteriorDesignPanel />}
+            {tab === 'materials' && (
+              <InteriorDesignPanel
+                globalVision={project?.globalVision}
+                onApplyVisionLayout={onApplyVisionLayout}
+              />
+            )}
 
             {tab === 'layers' && (
               <div className="p-4">

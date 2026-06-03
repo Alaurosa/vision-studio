@@ -136,8 +136,6 @@ export default function ProjectViewer3D({ project = null, selectedSpaceId = null
                 depthIn={space.depthIn}
                 heightIn={space.heightIn}
                 interior={interior}
-                selected={selectedSpaceId === space.id}
-                showWalls
               />
             ))}
 

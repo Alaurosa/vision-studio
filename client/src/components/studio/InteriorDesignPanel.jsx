@@ -12,7 +12,10 @@ import {
 } from '@/data/roomInterior';
 import { evaluateLayoutGuidance } from '@/utils/layoutGuidance';
 
-export default function InteriorDesignPanel() {
+export default function InteriorDesignPanel({
+  globalVision = null,
+  onApplyVisionLayout = null,
+}) {
   const room = useLayoutStore((s) => s.room);
   const furniture = useLayoutStore((s) => s.furniture);
   const updateRoomInterior = useLayoutStore((s) => s.updateRoomInterior);
@@ -49,6 +52,32 @@ export default function InteriorDesignPanel() {
           Wall finishes, art, and layout intent update the 2D and 3D views.
         </p>
       </div>
+
+      {globalVision && typeof onApplyVisionLayout === 'function' && (
+        <section className="rounded-lg border border-[#004aad]/25 bg-[#eef4f7] p-3">
+          <p className="text-[10px] uppercase tracking-[0.14em] text-[#004aad] mb-2">
+            Project vision
+          </p>
+          <p className="text-[11px] text-[#5b5b5b] mb-3 leading-relaxed">
+            Apply your guided vision to this room&apos;s layout, materials (if not manually edited), and
+            furniture in empty zones.
+          </p>
+          <button
+            type="button"
+            className="btn-ink w-full py-2 text-[10px] uppercase tracking-[0.12em]"
+            onClick={() => onApplyVisionLayout({ force: false })}
+          >
+            Apply Vision to Layout
+          </button>
+          <button
+            type="button"
+            className="mt-2 w-full text-[10px] uppercase tracking-[0.12em] text-[#5b5b5b] underline hover:text-[#171717]"
+            onClick={() => onApplyVisionLayout({ force: true })}
+          >
+            Regenerate layout from vision
+          </button>
+        </section>
+      )}
 
       <section>
         <h3 className="mb-2 text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">Wall color</h3>

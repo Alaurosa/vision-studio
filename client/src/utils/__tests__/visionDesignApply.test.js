@@ -1,19 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildVisionDesignPlan,
   computeVisionDesignRevision,
   deriveInteriorFromVision,
   deriveStyleHintFromVision,
   pickVisionStarterPlacements,
 } from '@/utils/visionDesignApply';
+import { isInteriorUserEdited, markInteriorUserPatch, normalizeRoomInterior } from '@/data/roomInterior';
+
+const gv = {
+  moodTags: ['Warm', 'Modern'],
+  priorities: ['Better flow', 'Hosting guests'],
+  constraints: ['Pet-friendly'],
+  roomSpecificNeeds: { 'z-dining': ['Hosting'] },
+};
 
 describe('visionDesignApply', () => {
-  const gv = {
-    moodTags: ['Warm', 'Modern'],
-    priorities: ['Better flow', 'Hosting guests'],
-    constraints: ['Pet-friendly'],
-    roomSpecificNeeds: { 'z-dining': ['Hosting'] },
-  };
-
   it('derives style hint from mood tags', () => {
     expect(deriveStyleHintFromVision(gv)).toBe('cozy');
   });
@@ -22,28 +24,46 @@ describe('visionDesignApply', () => {
     const interior = deriveInteriorFromVision(gv, {});
     expect(interior.wallColor).toBeTruthy();
     expect(interior.layoutIntent).toBe('open-flow');
+    expect(interior.source).toBe('vision');
     expect(interior.visionRevision).toBe(computeVisionDesignRevision(gv));
   });
 
-  it('suggests starter placements for empty zones', () => {
-    const zone = { id: 'z-dining', bbox: [200, 0, 320, 150], width: 120, depth: 150 };
-    const picks = pickVisionStarterPlacements({
-      globalVision: gv,
-      room: { width: 320, depth: 150, height: 96 },
-      zone,
-      existingFurniture: [],
+  it('does not overwrite manual interior when user edited', () => {
+    const userInterior = markInteriorUserPatch({
+      wallColor: '#d4ddd0',
+      wallpaperId: 'stripe',
     });
-    expect(picks.length).toBeGreaterThan(0);
-    expect(picks[0].zone_id).toBe('z-dining');
+    const plan = buildVisionDesignPlan({
+      globalVision: gv,
+      room: { id: 'r1', interior: userInterior, width: 240, depth: 180 },
+      zones: [{ id: 'z-dining', bbox: [200, 0, 320, 150], width: 120, depth: 150, name: 'Dining' }],
+      activeZone: { id: 'z-dining', bbox: [200, 0, 320, 150], name: 'Dining' },
+      furniture: [],
+    });
+    expect(plan.interiorPatch).toBeNull();
+    expect(isInteriorUserEdited(userInterior)).toBe(true);
   });
 
-  it('does not add starters when zone already has furniture', () => {
-    const zone = { id: 'z-dining', bbox: [200, 0, 320, 150], width: 120, depth: 150 };
-    const picks = pickVisionStarterPlacements({
+  it('buildVisionDesignPlan includes furniture with zone_id for empty zones', () => {
+    const plan = buildVisionDesignPlan({
       globalVision: gv,
-      room: { width: 320, depth: 150, height: 96 },
-      zone,
-      existingFurniture: [
+      room: { id: 'r1', width: 320, depth: 150, height: 96 },
+      zones: [{ id: 'z-dining', bbox: [200, 0, 320, 150], width: 120, depth: 150, name: 'Dining Room' }],
+      activeZone: { id: 'z-dining', bbox: [200, 0, 320, 150], name: 'Dining Room' },
+      activeSpace: { name: 'Dining Room', category: 'Dining' },
+      furniture: [],
+    });
+    expect(plan.furniturePlan.placements.length).toBeGreaterThan(0);
+    expect(plan.furniturePlan.placements[0].zone_id).toBe('z-dining');
+  });
+
+  it('skips furniture plan when zone already has items', () => {
+    const plan = buildVisionDesignPlan({
+      globalVision: gv,
+      room: { id: 'r1', width: 320, depth: 150 },
+      zones: [{ id: 'z-dining', bbox: [200, 0, 320, 150], width: 120, depth: 150 }],
+      activeZone: { id: 'z-dining', bbox: [200, 0, 320, 150] },
+      furniture: [
         {
           id: 'p1',
           zone_id: 'z-dining',
@@ -54,6 +74,26 @@ describe('visionDesignApply', () => {
         },
       ],
     });
-    expect(picks).toHaveLength(0);
+    expect(plan.furniturePlan.placements).toHaveLength(0);
+  });
+
+  it('pickVisionStarterPlacements returns placements for empty zone', () => {
+    const zone = { id: 'z-dining', bbox: [200, 0, 320, 150], width: 120, depth: 150, name: 'Dining' };
+    const picks = pickVisionStarterPlacements({
+      globalVision: gv,
+      room: { width: 320, depth: 150, height: 96 },
+      zone,
+      existingFurniture: [],
+    });
+    expect(picks.length).toBeGreaterThan(0);
+    expect(picks[0].zone_id).toBe('z-dining');
+  });
+});
+
+describe('roomInterior user edit protection', () => {
+  it('markInteriorUserPatch sets source and timestamp', () => {
+    const n = normalizeRoomInterior(markInteriorUserPatch({ wallColor: '#abcabc' }));
+    expect(n.source).toBe('user');
+    expect(n.userEditedAt).toBeTruthy();
   });
 });

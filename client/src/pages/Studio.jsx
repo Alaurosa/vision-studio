@@ -1764,7 +1764,10 @@ export default function Studio() {
                         selectedSpaceId={selectedProjectSpaceId}
                       />
                     ) : (
-                      <RoomViewer3D />
+                      <RoomViewer3D
+                        spaceGeometry={selectedProjectSpace?.geometry || null}
+                        viewLabel={selectedProjectSpace?.name || room?.name || null}
+                      />
                     )
                   ) : isProjectEditorMode && !showRoomScopedCanvas ? (
                     <ProjectCanvas

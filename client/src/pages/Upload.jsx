@@ -8,7 +8,12 @@ import { useAuth } from '@/hooks/useAuth';
 import { useLayoutStore } from '@/store/layoutStore';
 import AnalysisWorkflow from '@/components/upload/AnalysisWorkflow';
 import RoomEditor from '@/components/upload/RoomEditor';
+import ProjectSaveAuthModal from '@/components/project/ProjectSaveAuthModal';
 import { createProjectDraft, getProjectById, upsertProject } from '@/utils/projectCompat';
+import {
+  persistFloorplanRoomToServer,
+  syncProjectToServerIfPossible,
+} from '@/utils/projectSaveAuth';
 
 export default function Upload({ embedInWizard = false }) {
   const navigate = useNavigate();
@@ -28,6 +33,7 @@ export default function Upload({ embedInWizard = false }) {
   const [editorData, setEditorData] = useState(null);
   const [spaceReview, setSpaceReview] = useState(null);
   const [savingSpaces, setSavingSpaces] = useState(false);
+  const [showSaveAuthGate, setShowSaveAuthGate] = useState(false);
 
   const inputRef = useRef(null);
   const projectIdParam = searchParams.get('projectId');
@@ -177,7 +183,7 @@ export default function Upload({ embedInWizard = false }) {
   };
 
   /** Persist confirmed spaces/floorplan onto project (vision collected separately on /vision). */
-  const persistSpaceReviewToProject = async () => {
+  const persistSpaceReviewToProject = async (authenticated = false) => {
     if (!spaceReview) return null;
     let project = projectIdParam ? getProjectById(projectIdParam) : null;
     const nameFromWizard =
@@ -192,16 +198,33 @@ export default function Upload({ embedInWizard = false }) {
       project = { ...project, name: nameFromWizard };
     }
 
-    let roomId = spaceReview.sourceRoomId;
-    const payload = {
-      zones: spaceReview.normalizedZones,
-      width: spaceReview.roomWidth,
-      depth: spaceReview.roomDepth,
-    };
-
     const displayProjectName = resolvedProjectTitle || projectName?.trim();
+    let roomId = spaceReview.sourceRoomId;
 
-    if (isGuest) {
+    const isAuthed = authenticated || Boolean(user);
+    if (isAuthed) {
+      try {
+        roomId = await persistFloorplanRoomToServer(
+          spaceReview,
+          displayProjectName || `${project.name} - Floorplan`,
+        );
+      } catch (err) {
+        console.error('Failed to save room updates:', err);
+        const draft = createDraftRoom({
+          name: displayProjectName || `${project.name} - Floorplan`,
+          width: spaceReview.roomWidth,
+          depth: spaceReview.roomDepth,
+          scale_px_per_inch: spaceReview.scale,
+          zones: spaceReview.normalizedZones,
+        });
+        roomId = draft.id;
+      }
+      try {
+        project = await syncProjectToServerIfPossible(project);
+      } catch {
+        // local project remains valid
+      }
+    } else {
       const draft = createDraftRoom({
         name: displayProjectName || `${project.name} - Floorplan`,
         width: spaceReview.roomWidth,
@@ -210,12 +233,6 @@ export default function Upload({ embedInWizard = false }) {
         zones: spaceReview.normalizedZones,
       });
       roomId = draft.id;
-    } else {
-      try {
-        await api.put(`/api/rooms/${spaceReview.sourceRoomId}`, payload);
-      } catch (err) {
-        console.error('Failed to save room updates:', err);
-      }
     }
 
     const mergedSpaces = spaceReview.spaces.map((space) => ({
@@ -243,11 +260,11 @@ export default function Upload({ embedInWizard = false }) {
     return project;
   };
 
-  const continueToProjectVision = async () => {
+  const finalizeAndGoToVision = async (authenticated = false) => {
     if (!spaceReview || savingSpaces) return;
     setSavingSpaces(true);
     try {
-      const project = await persistSpaceReviewToProject();
+      const project = await persistSpaceReviewToProject(authenticated);
       if (!project?.id) {
         toast.error('Could not save spaces. Please try again.');
         return;
@@ -259,6 +276,20 @@ export default function Upload({ embedInWizard = false }) {
     } finally {
       setSavingSpaces(false);
     }
+  };
+
+  const continueToProjectVision = () => {
+    if (!spaceReview || savingSpaces) return;
+    if (!user) {
+      setShowSaveAuthGate(true);
+      return;
+    }
+    finalizeAndGoToVision();
+  };
+
+  const onSaveAuthComplete = () => {
+    setShowSaveAuthGate(false);
+    finalizeAndGoToVision(true);
   };
 
   const onEditorCancel = () => {
@@ -470,6 +501,13 @@ export default function Upload({ embedInWizard = false }) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {showSaveAuthGate && (
+        <ProjectSaveAuthModal
+          onClose={() => setShowSaveAuthGate(false)}
+          onAuthed={onSaveAuthComplete}
+        />
+      )}
     </div>
   );
 }

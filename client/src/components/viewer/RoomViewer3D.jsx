@@ -5,20 +5,20 @@ import { useLayoutStore, selectVisibleFurniture } from '@/store/layoutStore';
 import { CATEGORY_COLORS } from '@/utils/constants';
 import { getRotatedBoundingBox } from '@/utils/scale';
 import SmartFurnitureModel from './SmartFurnitureModel';
+import RoomShell3D from './RoomShell3D';
 import RoomInterior3D from './RoomInterior3D';
 import {
   getFurnitureRenderDimensionsInches,
   INCHES_TO_METERS,
 } from '@/utils/furniture3d';
+import { getRoomShellDimensionsMeters } from '@/utils/roomShell3d';
 
 const IN_TO_M = INCHES_TO_METERS;
 
 export default function RoomViewer3D() {
   const room = useLayoutStore((s) => s.room);
   const furniture = useLayoutStore(selectVisibleFurniture);
-  const w = (room?.width || 180) * IN_TO_M;
-  const d = (room?.depth || 144) * IN_TO_M;
-  const h = (room?.height || 96) * IN_TO_M;
+  const { widthM: w, depthM: d, heightM: h } = getRoomShellDimensionsMeters(room);
 
   return (
     <div className="w-full h-full bg-paper-100 relative">
@@ -35,6 +35,7 @@ export default function RoomViewer3D() {
           <Environment preset="apartment" />
         </Suspense>
 
+        <RoomShell3D widthM={w} depthM={d} heightM={h} />
         <RoomInterior3D interior={room?.interior} roomW={w} roomD={d} roomH={h} />
 
         {/* Furniture — each SmartFurnitureModel suspends locally; do not wrap Canvas in Suspense */}

@@ -15,6 +15,12 @@ import {
   tagsFromChips,
 } from '@/utils/projectVision';
 import { isProjectVisionComplete } from '@/utils/visionGate';
+import {
+  buildVisionSaveStatusMessage,
+  dedupeAssistantFallbackMessages,
+  normalizeVisionIntakeThread,
+  upsertAssistantStatusMessage,
+} from '@/utils/projectVisionIntakeChat';
 
 const GUIDED_QUESTIONS = [
   'What feeling should guests have when they enter?',
@@ -90,17 +96,6 @@ export function getVisionChatRoomBinding(project) {
   };
 }
 
-function normalizeThread(raw) {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((m) => m && typeof m.content === 'string')
-    .map((m, i) => ({
-      id: m.id || `m-${i}-${m.role}`,
-      role: m.role,
-      content: m.content,
-    }));
-}
-
 function buildWelcomeMessage(spaces) {
   const base =
     "I found your project spaces. Let's define the overall feeling, priorities, and constraints before editing individual rooms.";
@@ -141,7 +136,7 @@ export default function ProjectVisionIntake({ project, onPersist }) {
   });
 
   const [messages, setMessages] = useState(() => {
-    const saved = normalizeThread(gv.visionIntakeThread);
+    const saved = normalizeVisionIntakeThread(gv.visionIntakeThread);
     if (saved.length > 0) return saved;
     return [
       {
@@ -200,7 +195,7 @@ export default function ProjectVisionIntake({ project, onPersist }) {
     if (!p?.id) return;
     const thread = nextMessages
       .filter((m) => m.id !== 'welcome')
-      .map(({ id, role, content }) => ({ id, role, content }));
+      .map(({ id, role, content, type }) => ({ id, role, content, ...(type ? { type } : {}) }));
     const normalized = prepareGlobalVisionForSave(
       { ...nextGv, visionIntakeThread: thread, spacesContext },
       p.globalVision || {},
@@ -301,14 +296,10 @@ export default function ProjectVisionIntake({ project, onPersist }) {
     } catch {
       toast.error('Could not reach the assistant. Your choices are saved — try again in a moment.');
       const bullets = buildDeterministicVisionSuggestions(nextGv);
-      const fallbackMsg = {
-        id: `a-${Date.now()}`,
-        role: 'assistant',
-        content: `Your direction is saved. Quick suggestions:\n\n- ${bullets.join('\n- ')}\n\nAdd chips or a short note, then review project & spaces when ready.`,
-      };
-      const withFb = [...nextMessages, fallbackMsg];
-      setMessages(withFb);
-      persistFull(withFb, nextGv);
+      const statusMsg = buildVisionSaveStatusMessage(bullets);
+      const withStatus = upsertAssistantStatusMessage(nextMessages, statusMsg);
+      setMessages(withStatus);
+      persistFull(withStatus, nextGv);
     } finally {
       setSending(false);
     }
@@ -344,9 +335,14 @@ export default function ProjectVisionIntake({ project, onPersist }) {
         ...project,
         globalVision: prepareGlobalVisionForSave(
           {
-            visionIntakeThread: messages
-              .filter((m) => m.id !== 'welcome')
-              .map(({ id, role, content }) => ({ id, role, content })),
+            visionIntakeThread: dedupeAssistantFallbackMessages(
+              messages.filter((m) => m.id !== 'welcome'),
+            ).map(({ id, role, content, type }) => ({
+              id,
+              role,
+              content,
+              ...(type ? { type } : {}),
+            })),
           },
           effectiveGv,
           project,

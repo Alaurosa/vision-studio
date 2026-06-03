@@ -1,15 +1,21 @@
 /**
- * Apply structured project globalVision to editable editor state (interior, catalog hints, starter placements).
+ * Apply structured project globalVision to editable editor state.
  */
 
 import { STARTER_FURNITURE_CATALOG } from '@/data/furnitureCatalog';
-import { DEFAULT_ROOM_INTERIOR, WALL_COLOR_PRESETS } from '@/data/roomInterior';
+import {
+  DEFAULT_ROOM_INTERIOR,
+  WALL_COLOR_PRESETS,
+  isInteriorUserEdited,
+  normalizeRoomInterior,
+} from '@/data/roomInterior';
 import { normalizeGlobalVision } from '@/utils/projectVision';
-import { normalizeGuidedVisionFields } from '@/utils/guidedVisionFlow';
+import { normalizeGuidedVisionFields, inferRoomChipType } from '@/utils/guidedVisionFlow';
 import { recommendForRoom } from '@/utils/recommendationRules';
 import { createPlacedFurnitureFromCatalogItem } from '@/utils/furniturePlacement';
 import { getZoneBoundsInches } from '@/utils/roomView3d';
-import { getAABB } from '@/utils/collision';
+import { getAABB, overlaps } from '@/utils/collision';
+import { GRID_SNAP_INCHES } from '@/utils/constants';
 
 function itemInZone(item, zone) {
   if (!zone) return false;
@@ -20,7 +26,10 @@ function itemInZone(item, zone) {
   const cx = (box.left + box.right) / 2;
   const cy = (box.top + box.bottom) / 2;
   return (
-    cx >= bounds.left && cx <= bounds.right && cy >= bounds.top && cy <= bounds.bottom
+    cx >= bounds.left &&
+    cx <= bounds.right &&
+    cy >= bounds.top &&
+    cy <= bounds.bottom
   );
 }
 
@@ -56,21 +65,47 @@ const PRIORITY_TO_LAYOUT_INTENT = {
   'multi-functional rooms': 'balanced',
 };
 
-const ROOM_NEED_TO_CATEGORY = {
-  'conversation seating': 'seating',
-  'tv watching': 'seating',
-  hosting: 'seating',
-  'reading nook': 'seating',
-  'more storage': 'storage',
-  'better storage': 'storage',
-  'calm sleeping area': 'beds',
-  productivity: 'tables',
+const ROOM_TYPE_LAYOUT = {
+  living: [
+    { category: 'seating', relX: 0.5, relY: 0.62 },
+    { category: 'tables', relX: 0.5, relY: 0.48 },
+    { category: 'lighting', relX: 0.22, relY: 0.28 },
+  ],
+  dining: [
+    { category: 'tables', relX: 0.5, relY: 0.5 },
+    { category: 'seating', relX: 0.38, relY: 0.55 },
+    { category: 'seating', relX: 0.62, relY: 0.55 },
+  ],
+  kitchen: [
+    { category: 'storage', relX: 0.2, relY: 0.35 },
+    { category: 'tables', relX: 0.55, relY: 0.5 },
+  ],
+  bedroom: [
+    { category: 'beds', relX: 0.55, relY: 0.55 },
+    { category: 'storage', relX: 0.2, relY: 0.45 },
+  ],
+  office: [
+    { category: 'tables', relX: 0.45, relY: 0.5 },
+    { category: 'storage', relX: 0.78, relY: 0.4 },
+    { category: 'lighting', relX: 0.45, relY: 0.28 },
+  ],
+  default: [
+    { category: 'seating', relX: 0.5, relY: 0.55 },
+    { category: 'storage', relX: 0.25, relY: 0.4 },
+  ],
 };
 
-/**
- * Stable revision string — when vision chips change, design re-applies.
- * @param {object | null | undefined} gv
- */
+const NEED_TO_CATEGORIES = {
+  hosting: ['seating', 'tables'],
+  'conversation seating': ['seating'],
+  'tv watching': ['seating', 'tables'],
+  'more storage': ['storage'],
+  'better storage': ['storage'],
+  'calm sleeping area': ['beds'],
+  productivity: ['tables', 'lighting'],
+  'reading nook': ['seating', 'lighting'],
+};
+
 export function computeVisionDesignRevision(gv) {
   const n = normalizeGuidedVisionFields(normalizeGlobalVision(gv));
   return JSON.stringify({
@@ -83,10 +118,6 @@ export function computeVisionDesignRevision(gv) {
   });
 }
 
-/**
- * @param {object | null | undefined} gv
- * @returns {string | null}
- */
 export function deriveStyleHintFromVision(gv) {
   const n = normalizeGuidedVisionFields(normalizeGlobalVision(gv));
   for (const mood of n.moodTags) {
@@ -98,12 +129,11 @@ export function deriveStyleHintFromVision(gv) {
 }
 
 /**
- * @param {object | null | undefined} gv
- * @param {object} [existingInterior]
+ * Vision-derived interior (source: vision). Does not overwrite user edits when applied via guard.
  */
 export function deriveInteriorFromVision(gv, existingInterior = {}) {
   const n = normalizeGuidedVisionFields(normalizeGlobalVision(gv));
-  const base = { ...DEFAULT_ROOM_INTERIOR, ...existingInterior };
+  const base = normalizeRoomInterior({ ...DEFAULT_ROOM_INTERIOR, ...existingInterior });
 
   let layoutIntent = base.layoutIntent || 'balanced';
   for (const p of n.priorities) {
@@ -125,112 +155,213 @@ export function deriveInteriorFromVision(gv, existingInterior = {}) {
   }
   const preset = WALL_COLOR_PRESETS.find((p) => p.id === wallPresetId) || WALL_COLOR_PRESETS[0];
 
-  return {
+  let wallpaperId = base.wallpaperId;
+  if (!wallpaperId && n.moodTags.some((m) => /organic|coastal/i.test(m))) {
+    wallpaperId = n.moodTags.some((m) => /organic/i.test(m)) ? 'botanical' : 'linen';
+  }
+  if (n.constraints.some((c) => /minimal/i.test(c))) wallpaperId = null;
+
+  return normalizeRoomInterior({
     ...base,
     wallColor: preset.color,
+    wallpaperId,
     layoutIntent,
+    source: 'vision',
     visionRevision: computeVisionDesignRevision(gv),
     visionMoodTags: n.moodTags,
     visionPriorities: n.priorities,
-  };
+    appliedFromVisionRevision: computeVisionDesignRevision(gv),
+  });
 }
 
 /**
- * Pick starter catalog placements for a zone that has no furniture yet.
  * @param {object} params
+ * @returns {object}
  */
-export function pickVisionStarterPlacements({
+export function buildVisionDesignPlan({
+  globalVision,
+  room,
+  zones = [],
+  activeZone = null,
+  activeSpace = null,
+  furniture = [],
+}) {
+  const revision = computeVisionDesignRevision(globalVision);
+  const styleHint = deriveStyleHintFromVision(globalVision);
+  const zone = activeZone || zones[0] || null;
+  const roomName = activeSpace?.name || activeZone?.name || room?.name || 'Room';
+  const n = normalizeGuidedVisionFields(normalizeGlobalVision(globalVision));
+
+  const needsForZone =
+    (activeZone?.id && n.roomSpecificNeeds[activeZone.id]) ||
+    Object.values(n.roomSpecificNeeds || {}).flat();
+
+  const interiorPatch = isInteriorUserEdited(room?.interior)
+    ? null
+    : deriveInteriorFromVision(globalVision, room?.interior);
+
+  const furniturePlan = buildFurnitureLayoutPlan({
+    globalVision,
+    room,
+    zone,
+    activeSpace,
+    furniture,
+    needsLabels: needsForZone,
+  });
+
+  return {
+    roomId: room?.id || null,
+    roomName,
+    zoneId: zone?.id || null,
+    interiorPatch,
+    furniturePlan,
+    layoutIntent: interiorPatch?.layoutIntent || room?.interior?.layoutIntent,
+    recommendations: furniturePlan.recommendations,
+    styleHint,
+    appliedFromVisionRevision: revision,
+  };
+}
+
+function findOpenSlotInBounds(w, d, bounds, existing) {
+  const step = GRID_SNAP_INCHES;
+  const minX = Math.max(step, bounds.left + step);
+  const minY = Math.max(step, bounds.top + step);
+  const maxX = bounds.right - step;
+  const maxY = bounds.bottom - step;
+  for (let y = minY; y + d <= maxY; y += step) {
+    for (let x = minX; x + w <= maxX; x += step) {
+      const box = { left: x, top: y, right: x + w, bottom: y + d };
+      const clash = existing.some((f) => overlaps(box, getAABB(f)));
+      if (!clash) return { x, y };
+    }
+  }
+  return {
+    x: minX,
+    y: minY,
+  };
+}
+
+function buildFurnitureLayoutPlan({
   globalVision,
   room,
   zone,
-  existingFurniture = [],
+  activeSpace,
+  furniture,
+  needsLabels = [],
 }) {
-  const n = normalizeGuidedVisionFields(normalizeGlobalVision(globalVision));
   const bounds = getZoneBoundsInches(zone);
-  if (!bounds || !room) return [];
+  if (!bounds || !room) {
+    return { placements: [], recommendations: [] };
+  }
 
-  const inZone = existingFurniture.filter((f) => itemInZone(f, zone));
-  if (inZone.length > 0) return [];
+  const inZone = furniture.filter((f) => itemInZone(f, zone));
+  if (inZone.length > 0) {
+    return { placements: [], recommendations: [], skipped: 'zone_has_furniture' };
+  }
 
   const styleHint = deriveStyleHintFromVision(globalVision);
-  const zoneRoom = {
-    width: bounds.width,
-    depth: bounds.depth,
-    height: room.height || 96,
-  };
+  const zoneRoom = { width: bounds.width, depth: bounds.depth, height: room.height || 96 };
+  const roomType = inferRoomChipType(activeSpace || { name: zone?.name, category: zone?.name });
+  const layoutSlots = [...(ROOM_TYPE_LAYOUT[roomType] || ROOM_TYPE_LAYOUT.default)];
 
-  const needLabels = Object.values(n.roomSpecificNeeds || {}).flat();
   const categories = new Set();
-  for (const label of needLabels) {
-    const cat = ROOM_NEED_TO_CATEGORY[String(label).toLowerCase()];
-    if (cat) categories.add(cat);
+  for (const label of needsLabels) {
+    const cats = NEED_TO_CATEGORIES[String(label).toLowerCase()];
+    if (cats) cats.forEach((c) => categories.add(c));
   }
-  if (categories.size === 0) {
-    if (n.priorities.some((p) => /host/i.test(p))) categories.add('seating');
-    if (n.priorities.some((p) => /storage/i.test(p))) categories.add('storage');
-    if (categories.size === 0) categories.add('seating');
+  const n = normalizeGuidedVisionFields(normalizeGlobalVision(globalVision));
+  if (n.priorities.some((p) => /host/i.test(p))) categories.add('seating');
+  if (n.priorities.some((p) => /storage/i.test(p))) categories.add('storage');
+  for (const c of categories) {
+    if (!layoutSlots.some((s) => s.category === c)) {
+      layoutSlots.push({ category: c, relX: 0.5, relY: 0.5 });
+    }
   }
 
   const placements = [];
-  const cx = bounds.left + bounds.width / 2;
-  const cy = bounds.top + bounds.height / 2;
+  const placed = [];
+  const recommendations = [];
 
-  for (const category of [...categories].slice(0, 2)) {
+  for (const slot of layoutSlots.slice(0, 4)) {
     const result = recommendForRoom({
       room: zoneRoom,
-      placements: inZone,
+      placements: [...inZone, ...placed],
       catalog: STARTER_FURNITURE_CATALOG,
-      category,
+      category: slot.category,
       options: { styleHint: styleHint || undefined, maxResults: 1, perCategoryMax: 1 },
     });
     const entry = result?.items?.[0];
     if (!entry?.item) continue;
-    const offset = placements.length * 36;
-    placements.push(
-      createPlacedFurnitureFromCatalogItem(
-        entry.item,
-        { x_inches: cx + offset, y_inches: cy },
-        { center: true },
-      ),
+    recommendations.push(entry.item);
+
+    const { width, depth } = entry.item.footprint || entry.item.dimensions || { width: 24, depth: 24 };
+    const targetX = bounds.left + bounds.width * slot.relX;
+    const targetY = bounds.top + bounds.depth * slot.relY;
+    const slotPos = findOpenSlotInBounds(width, depth, bounds, [...inZone, ...placed]);
+    const useX = Math.abs(slotPos.x - targetX) < bounds.width * 0.4 ? slotPos.x : targetX - width / 2;
+    const useY = Math.abs(slotPos.y - targetY) < bounds.depth * 0.4 ? slotPos.y : targetY - depth / 2;
+
+    const placement = createPlacedFurnitureFromCatalogItem(
+      entry.item,
+      { x_inches: useX, y_inches: useY },
+      { center: false },
     );
+    placement.zone_id = zone.id;
+    placements.push(placement);
+    placed.push(placement);
   }
 
-  return placements.map((p) => ({ ...p, zone_id: zone.id }));
+  return { placements, recommendations };
 }
 
 /**
- * Apply vision to room interior + optional starter furniture (idempotent per revision).
- * @param {{
- *   globalVision: object,
- *   room: object,
- *   zones: object[],
- *   furniture: object[],
- *   activeZone: object | null,
- *   updateRoomInterior: (patch: object) => Promise<unknown>,
- *   addFurniture: (item: object) => Promise<unknown>,
- *   setRecommendedItems?: (items: object[]) => void,
- * }} params
+ * @param {object} params
+ * @param {{ force?: boolean, applyInterior?: boolean, applyFurniture?: boolean }} [options]
  */
-export async function applyVisionDesignToEditor({
-  globalVision,
-  room,
-  zones,
-  furniture,
-  activeZone,
-  updateRoomInterior,
-  addFurniture,
-  setRecommendedItems,
-}) {
+export async function applyVisionDesignToEditor(
+  {
+    globalVision,
+    room,
+    zones,
+    furniture,
+    activeZone,
+    activeSpace = null,
+    updateRoom,
+    addFurniture,
+    setRecommendedItems,
+  },
+  options = {},
+) {
   if (!room || !globalVision) return { applied: false };
 
-  const revision = computeVisionDesignRevision(globalVision);
+  const { force = false, applyInterior = true, applyFurniture = true } = options;
+  const plan = buildVisionDesignPlan({
+    globalVision,
+    room,
+    zones,
+    activeZone,
+    activeSpace,
+    furniture,
+  });
+  const revision = plan.appliedFromVisionRevision;
   const currentInterior = room.interior || {};
-  if (currentInterior.visionRevision !== revision) {
-    const nextInterior = deriveInteriorFromVision(globalVision, currentInterior);
-    await updateRoomInterior(nextInterior);
+
+  let interiorUpdated = false;
+  if (
+    applyInterior &&
+    plan.interiorPatch &&
+    (!isInteriorUserEdited(currentInterior) || force)
+  ) {
+    const alreadyApplied = currentInterior.appliedFromVisionRevision === revision;
+    if (!alreadyApplied || force) {
+      await updateRoom({
+        interior: plan.interiorPatch,
+      });
+      interiorUpdated = true;
+    }
   }
 
-  const styleHint = deriveStyleHintFromVision(globalVision);
+  const styleHint = plan.styleHint;
   const zone = activeZone || zones[0] || null;
   const zoneRoom = zone
     ? {
@@ -246,35 +377,73 @@ export async function applyVisionDesignToEditor({
       placements: furniture,
       catalog: STARTER_FURNITURE_CATALOG,
       category: 'seating',
-      options: { styleHint: styleHint || undefined, maxResults: 5 },
+      options: { styleHint: styleHint || undefined, maxResults: 6, perCategoryMax: 2 },
     });
     setRecommendedItems(rec?.items?.map((e) => e.item) || []);
   }
 
   let added = 0;
   const placementsRevision = currentInterior.visionPlacementsRevision;
-  if (placementsRevision !== revision) {
-    const targets = activeZone ? [activeZone] : zones.slice(0, 3);
+  const canPlaceFurniture =
+    applyFurniture && (force || placementsRevision !== revision);
+
+  if (canPlaceFurniture) {
+    const targets = force
+      ? zones.filter((z) => furniture.filter((f) => itemInZone(f, z)).length === 0).slice(0, 4)
+      : activeZone
+        ? [activeZone]
+        : [];
+
     for (const z of targets) {
-      const starters = pickVisionStarterPlacements({
-        globalVision,
-        room,
-        zone: z,
-        existingFurniture: furniture,
-      });
-      for (const placement of starters) {
+      const zonePlan =
+        z.id === plan.zoneId
+          ? plan.furniturePlan
+          : buildFurnitureLayoutPlan({
+              globalVision,
+              room,
+              zone: z,
+              activeSpace,
+              furniture: [...furniture],
+              needsLabels: [],
+            });
+      if (!zonePlan.placements?.length) continue;
+      for (const placement of zonePlan.placements) {
         // eslint-disable-next-line no-await-in-loop
         await addFurniture(placement);
         added += 1;
       }
     }
     if (added > 0) {
-      await updateRoomInterior({
-        ...deriveInteriorFromVision(globalVision, room.interior),
-        visionPlacementsRevision: revision,
+      await updateRoom({
+        interior: normalizeRoomInterior({
+          ...(room.interior || {}),
+          visionPlacementsRevision: revision,
+        }),
       });
     }
   }
 
-  return { applied: true, revision, placementsAdded: added, styleHint };
+  return {
+    applied: true,
+    plan,
+    revision,
+    placementsAdded: added,
+    styleHint,
+    interiorUpdated,
+  };
+}
+
+/** @deprecated use buildFurnitureLayoutPlan */
+export function pickVisionStarterPlacements(params) {
+  const needsLabels = Object.values(
+    normalizeGuidedVisionFields(normalizeGlobalVision(params.globalVision)).roomSpecificNeeds || {},
+  ).flat();
+  return buildFurnitureLayoutPlan({
+    globalVision: params.globalVision,
+    room: params.room,
+    zone: params.zone,
+    activeSpace: null,
+    furniture: params.existingFurniture || [],
+    needsLabels,
+  }).placements;
 }

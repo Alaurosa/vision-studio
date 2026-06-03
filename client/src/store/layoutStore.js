@@ -5,7 +5,11 @@ import api from '@/lib/api';
 import { getAABB, overlaps, withinRoom, validateAll } from '@/utils/collision';
 import { CATEGORY_COLORS, GRID_SNAP_INCHES, getZoneColor } from '@/utils/constants';
 import { computeRotation, getRotatedBoundingBox } from '@/utils/scale';
-import { normalizeRoomInterior, roomWithInterior } from '@/data/roomInterior';
+import {
+  markInteriorUserPatch,
+  normalizeRoomInterior,
+  roomWithInterior,
+} from '@/data/roomInterior';
 import { getZoneBoundsInches } from '@/utils/roomView3d';
 
 const snapToGrid = (value, gridSize) => Math.round(value / gridSize) * gridSize;
@@ -304,10 +308,17 @@ export const useLayoutStore = create(
         const previous = room;
         const nextPatch = { ...patch };
         if (nextPatch.interior !== undefined) {
-          nextPatch.interior = normalizeRoomInterior({
+          const merged = normalizeRoomInterior({
             ...room.interior,
             ...nextPatch.interior,
           });
+          nextPatch.interior = merged;
+          nextPatch.detected_objects = {
+            ...(room.detected_objects && typeof room.detected_objects === 'object'
+              ? room.detected_objects
+              : {}),
+            interior: merged,
+          };
         }
         set({ room: { ...room, ...nextPatch } });
         if (!isDraftId(room.id)) {
@@ -326,7 +337,7 @@ export const useLayoutStore = create(
         const { room, updateRoom } = get();
         if (!room) return;
         return updateRoom({
-          interior: normalizeRoomInterior({ ...room.interior, ...patch }),
+          interior: normalizeRoomInterior(markInteriorUserPatch({ ...room.interior, ...patch })),
         });
       },
 

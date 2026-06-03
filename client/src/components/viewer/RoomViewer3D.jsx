@@ -5,7 +5,6 @@ import { useLayoutStore, selectVisibleFurniture } from '@/store/layoutStore';
 import { CATEGORY_COLORS } from '@/utils/constants';
 import { getRotatedBoundingBox } from '@/utils/scale';
 import SmartFurnitureModel from './SmartFurnitureModel';
-import RoomShell3D from './RoomShell3D';
 import RoomInterior3D from './RoomInterior3D';
 import RoomSceneControls from './RoomSceneControls';
 import {
@@ -126,7 +125,6 @@ export default function RoomViewer3D({ spaceGeometry = null, viewLabel = null })
           <Environment preset="apartment" />
         </Suspense>
 
-        <RoomShell3D widthM={w} depthM={d} heightM={h} showWalls />
         <RoomInterior3D interior={room?.interior} roomW={w} roomD={d} roomH={h} />
 
         {furniture.map((it) => {

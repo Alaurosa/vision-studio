@@ -227,7 +227,7 @@ export default function Studio() {
     clearChat,
     setActiveZone,
     loadRoomFailed,
-    updateRoomInterior,
+    updateRoom,
     addFurniture,
     setRecommendedItems,
   } = useLayoutStore();
@@ -650,27 +650,41 @@ export default function Studio() {
     [currentProject?.globalVision],
   );
 
-  useEffect(() => {
-    if (!isProjectEditorRoute || !room || !currentProject?.globalVision) return;
+  const handleApplyVisionLayout = async (opts = {}) => {
+    if (!room || !currentProject?.globalVision) {
+      toast.error('Complete Project Vision first, then apply to this layout.');
+      return;
+    }
     const activeZone = activeZoneId ? zones.find((z) => z.id === activeZoneId) : null;
-    applyVisionDesignToEditor({
-      globalVision: currentProject.globalVision,
-      room,
-      zones,
-      furniture,
-      activeZone,
-      updateRoomInterior,
-      addFurniture,
-      setRecommendedItems,
-    }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    room?.id,
-    room?.interior?.visionRevision,
-    currentProject?.globalVision,
-    activeZoneId,
-    isProjectEditorRoute,
-  ]);
+    const toastId = toast.loading('Applying vision to layout…');
+    try {
+      const result = await applyVisionDesignToEditor(
+        {
+          globalVision: currentProject.globalVision,
+          room,
+          zones,
+          furniture,
+          activeZone,
+          activeSpace: selectedProjectSpace,
+          updateRoom,
+          addFurniture,
+          setRecommendedItems,
+        },
+        { force: opts.force === true, applyInterior: true, applyFurniture: true },
+      );
+      const parts = [];
+      if (result.interiorUpdated) parts.push('interior');
+      if (result.placementsAdded > 0) parts.push(`${result.placementsAdded} piece(s)`);
+      toast.success(
+        parts.length
+          ? `Vision applied: ${parts.join(', ')}.`
+          : 'Vision synced — recommendations updated. Empty zones can receive new pieces.',
+        { id: toastId },
+      );
+    } catch {
+      toast.error('Could not apply vision to layout.', { id: toastId });
+    }
+  };
 
   const requestDiscardDraft = () => setConfirmDialog({ kind: 'discardDraft' });
   const confirmDiscardDraft = () => {
@@ -1788,6 +1802,9 @@ export default function Studio() {
             <EditorWorkspaceSidebar
               project={isProjectEditorRoute ? currentProject : null}
               visionStyleHint={visionStyleHint}
+              onApplyVisionLayout={
+                isProjectEditorRoute && currentProject?.globalVision ? handleApplyVisionLayout : null
+              }
               onNavigateToSpace={
                 projectId
                   ? (spaceId) => {
@@ -1895,6 +1912,9 @@ export default function Studio() {
                   spaceVision={activeSpace?.spaceVision}
                   contextLabel={assistantContextLabel}
                   projectWideContext={isProjectEditorMode && !selectedProjectSpaceId}
+                  onApplyVisionLayout={
+                    currentProject?.globalVision ? () => handleApplyVisionLayout({ force: false }) : null
+                  }
                 />
               </motion.aside>
             )}
@@ -1916,6 +1936,9 @@ export default function Studio() {
                 spaceVision={activeSpace?.spaceVision}
                 contextLabel={assistantContextLabel}
                 projectWideContext={isProjectEditorMode && !selectedProjectSpaceId}
+                onApplyVisionLayout={
+                  currentProject?.globalVision ? () => handleApplyVisionLayout({ force: false }) : null
+                }
               />
             </motion.div>
           )}

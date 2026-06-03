@@ -33,6 +33,7 @@ export default function ChatPanel({
   spaceVision: spaceVisionProp = null,
   contextLabel = null,
   projectWideContext = false,
+  onApplyVisionLayout = null,
 } = {}) {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -112,6 +113,19 @@ export default function ChatPanel({
         .filter((a) => ['suggest_furniture', 'furnish_room'].includes(a.function))
         .flatMap((a) => a.result?.suggestions || []);
       if (suggestions.length) setRecommendedItems(suggestions);
+
+      const layoutIntent =
+        /host|furnish|layout|vision|arrange|storage|cozy|minimal|modern/i.test(text);
+      const furnished = (data.actions || []).some(
+        (a) => a.function === 'furnish_room' && a.result?.success,
+      );
+      if (onApplyVisionLayout && globalVisionProp && (layoutIntent || furnished)) {
+        try {
+          await onApplyVisionLayout({ force: furnished });
+        } catch {
+          /* parent handles toast */
+        }
+      }
 
       // Apply mutations to the active space
       const mutatingTools = ['move_furniture', 'rotate_furniture', 'add_furniture',

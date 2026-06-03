@@ -1,3 +1,7 @@
+/**
+ * Legacy API-backed catalog (drag-to-add). Editor sidebar uses FurnitureCatalogPanel instead.
+ * Kept for reference; not imported by EditorWorkspaceSidebar.
+ */
 import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useLayoutStore } from '@/store/layoutStore';

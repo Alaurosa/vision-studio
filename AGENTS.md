@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-**Vision Studio** is a full-stack AI-powered spatial layout design application. Users can upload floor plans or room photos, get AI-detected room geometry, place furniture in a 2D Konva editor (starter Kenney catalog + API IKEA/Ashley via chat), style interiors (Materials tab), preview in open-wall 3D, chat with AI assistants for layout and project vision, and export to JSON/SVG/DXF. Built for CSE 115A Spring 2026 Capstone at UCSC by William Liu, Ethan Cao, Sriya Katreddi, and Ashley Kim.
+**Vision Studio** is a full-stack AI-powered spatial layout design application. Users can upload floor plans or room photos, get AI-detected room geometry, complete guided **Project Vision**, explicitly **Apply Vision to Layout**, place furniture in a 2D Konva editor (starter Kenney catalog + API IKEA/Ashley via chat), style interiors in the **Materials** tab (wall paint, wallpaper, wall art), preview in 2D/3D (Materials sync to `RoomInterior3D`), chat with AI assistants, and export to JSON/SVG/DXF. Built for CSE 115A Spring 2026 Capstone at UCSC by William Liu, Ethan Cao, Sriya Katreddi, and Ashley Kim.
 
 ### Current Phase
 
@@ -213,9 +213,10 @@ vision-studio/
 │       │   ├── viewer/
 │       │   │   ├── RoomViewer3D.jsx
 │       │   │   ├── RoomSceneControls.jsx
-│       │   │   ├── RoomShell3D.jsx       # Floor + translucent ceiling only (no 3D walls)
-│       │   │   ├── RoomInterior3D.jsx    # Materials floor color overlay only in 3D
-│       │   │   ├── ProjectViewer3D.jsx
+│       │   │   ├── RoomShell3D.jsx       # Legacy shell mesh (not mounted in RoomViewer3D; see ProjectSpaceShell3D)
+│       │   │   ├── RoomInterior3D.jsx    # Selected-room 3D: floor, wall planes, wallpaper, wall art
+│       │   │   ├── ProjectSpaceShell3D.jsx # All-spaces per-zone shells + interior
+│       │   │   ├── ProjectViewer3D.jsx   # All-spaces floorplan overview + furniture
 │       │   │   ├── SmartFurnitureModel.jsx
 │       │   │   └── ProceduralFurniture.jsx
 │       │   └── chatbot/
@@ -315,20 +316,33 @@ vision-studio/
 
 Server and Python load the root `.env` file. The React client reads Vite env vars from `client/.env.local` or the shell when run from `client/`; the marketing app reads Next env vars from `marketing/.env.local` or the shell.
 
-### Client (`client/.env.local`)
+### Client (`client/.env.local`) — Vercel / local Vite only
+
+**Never put server secrets here** (`OPENAI_API_KEY`, `REPLICATE_API_TOKEN`, `SUPABASE_SERVICE_ROLE_KEY`, `MESHY_API_KEY`). The browser calls Express; keys stay on Render.
+
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — preferred public Supabase client vars
 - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` — legacy aliases still accepted by client code
-- `VITE_API_URL` — Backend URL (default: `http://localhost:3001`)
+- `VITE_API_URL` — Express API URL (default: `http://localhost:3001`; production: your Render server URL)
+
+See `client/.env.example`.
 
 ### Marketing (`marketing/.env.local`)
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — used by the Supabase SSR/browser helpers in `marketing/src/utils/supabase/`
+
+### Deployed services (typical Render + Vercel)
+
+| Service | Host | Required env |
+| -------- | ------ | ------------- |
+| **vision-studio** (Vite client) | Vercel | `VITE_API_URL`, `VITE_SUPABASE_*` or `NEXT_PUBLIC_SUPABASE_*` only |
+| **vision-studio-server** (Express) | Render | `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_PUBLIC_ANON_KEY`, `PYTHON_SERVICE_URL`, CORS (`CLIENT_ORIGIN` / `CLIENT_ORIGINS` / `ALLOW_VERCEL_PREVIEWS`) |
+| **vision-studio-python** (FastAPI) | Render | `OPENAI_API_KEY` (floorplan parse); `REPLICATE_API_TOKEN` only if using `/detect-objects` or `/segment-room` |
 
 ### Server (`root/.env`)
 - `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL`
 - `SUPABASE_PUBLIC_ANON_KEY` or `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (for auth verification client)
 - `SUPABASE_SERVICE_ROLE_KEY` (required for DB/admin operations)
 - `OPENAI_API_KEY` (required for chat assistant)
-- `REPLICATE_API_TOKEN` (optional — for AI room photo detection)
+- `REPLICATE_API_TOKEN` (optional on server — room-photo routes proxy to Python)
 - `MESHY_API_KEY` (optional — for 3D model generation)
 - `PORT` (default: 3001), `PYTHON_SERVICE_URL` (default: `http://localhost:5001`; Render: `https://vision-studio-python.onrender.com`)
 - `NODE_ENV` (development/production)
@@ -550,19 +564,32 @@ All tables use Row Level Security — users can only access their own data. The 
 | **API (IKEA/Ashley)** | `GET /api/furniture/catalog` (27 seeded items) | **Space Assistant** / **Project Assistant** tool calls (`add_furniture`, `suggest_furniture`, etc.) | Server placements linked to `furniture_catalog` ids |
 | **Legacy** | Same API | `CatalogPanel.jsx` (drag/add + Recommended tab) | Not mounted in `EditorWorkspaceSidebar`; kept for reference/tests |
 
+### Editor architecture (project flow)
+
+1. **Create project** — wizard (`/studio/new`) or upload intake; guests may hit `ProjectSaveAuthModal` before vision.
+2. **Review spaces** — `RoomEditor` at `/confirm?mode=adjust`; zones persist on project + linked rooms.
+3. **Project Vision** — guided chips + live chat (`ProjectVisionIntake`, `guidedVisionFlow.js`) → `globalVision` on project.
+4. **Editor** — `/studio/project/:id/editor/:spaceId`; no silent vision apply on load.
+5. **Apply Vision to Layout** — explicit button in Materials tab (`InteriorDesignPanel`) and optional chat callback (`handleApplyVisionLayout` in `Studio.jsx`, `visionDesignApply.js`). Skips interior overwrite when `isInteriorUserEdited(room.interior)` unless user chooses **Regenerate layout from vision** (`force: true`).
+6. **Materials** — manual wall color, wallpaper, wall art, layout intent (`markInteriorUserPatch` on user edits).
+7. **Furniture** — starter catalog click-to-place on `RoomCanvas`; API catalog via chat tools.
+8. **2D / 3D** — zone-scoped `RoomViewer3D`; all-spaces `ProjectViewer3D` + `projectFloorplan3d.js`.
+
 ### Materials (2D vs 3D)
 
-- **Materials tab** (`InteriorDesignPanel` + `roomInterior.js`): wall paint presets, wallpaper, wall art placement, layout-intent guidance. Persisted on `room.interior` via `updateRoomInterior` → `PUT /api/rooms/:id` (stored in `detected_objects.interior` and/or `interior` column).
+- **Materials tab** (`InteriorDesignPanel` + `roomInterior.js`): wall paint presets, wallpaper, wall art placement, layout-intent guidance. Persisted on `room.interior` via `updateRoomInterior` → `PUT /api/rooms/:id` (stored in `detected_objects.interior` and/or `interior` column). User edits set `source: 'user'` and `userEditedAt`.
 - **2D** (`RoomInteriorSurfaces.jsx`): renders styled walls/floor inside the Konva room.
-- **3D** (`RoomInterior3D.jsx`): **floor color only** — no 3D walls, wallpaper planes, or wall art (open room for furniture visibility). Structural shell: `RoomShell3D` = floor + translucent ceiling only.
+- **3D selected room** (`RoomInterior3D.jsx` in `RoomViewer3D`): floor, perimeter wall shells, wallpaper/paint planes, and wall art from `room.interior` (`wallpaperTexture.js`).
+- **3D all spaces** (`ProjectSpaceShell3D` + `ProjectViewer3D`): floorplan-positioned shells; shared `room.interior` for shell tint until per-space interior is modeled.
 
 ### Editor & canvas
 
 - **Starter placement**: select item in Furniture tab → click canvas (`createPlacedFurnitureFromCatalogItem`); Esc or **Clear selection** cancels. Overlap and room/zone bounds enforced with toast warnings.
 - Furniture can be rotated freely in the 2D editor via the Konva transformer handle, 15° toolbar nudges, or the in-canvas rotation slider.
-- **3D room shell + furniture** (`RoomViewer3D` + `RoomShell3D` + `roomShell3d.js` + `SmartFurnitureModel` + `furniture3d.js`): **`RoomViewer3D`** draws a rectangular floor and translucent ceiling from `room.width` / `room.depth` / `room.height` (inches, default 180×144×96), converted with `INCHES_TO_METERS` — **no perimeter walls** in 3D so furniture stays visible from outside the room. `RoomInterior3D` applies Materials floor color only (wallpaper/wall art omitted in 3D). Furniture uses the same inch→meter origin as 2D (`x_inches` / `y_inches` on the floor plane). Polygon/L-shaped wall extrusion is **not** implemented in 3D yet. **`ProjectViewer3D`** remains floorplan-only (zones/spaces, no furniture, no per-room shell). If a placement has `model_url` or `modelUrl`, load the GLB (uniform-scaled to catalog footprint/dimensions, `model_rotation_y` optional); on load error or missing URL, fall back to `ProceduralFurniture` (per-item Suspense/error boundary—do not wrap the whole `Canvas` in Suspense or GLB loading unmounts the scene). **Starter catalog** (`client/src/data/furnitureCatalog.js`) ships curated Kenney `modelUrl` values (`modelStatus: curated`, `modelSourceType: kenney`, CC0 attribution fields); GLBs are visual proxies only—**catalog inch dimensions remain the layout source of truth**. This path does **not** call Meshy/Tripo from the editor.
-- **3D room camera navigation** (`roomCamera3d.js` + `RoomSceneControls.jsx`): OrbitControls with damping, pan, and room-scaled `minDistance`/`maxDistance`; default position/target from `getDefaultRoomCameraPosition` / `getDefaultRoomCameraTarget`. UI: **Overview** (corner orbit) vs **Walkthrough** (eye-height preset in front of the room, still orbit—no WASD/pointer-lock). **Reset view** restores the active preset. **First-person WASD** is deferred. Manual QA: open room editor → place starter sofa/table/bed → 3D → orbit/zoom/pan → Reset → toggle Overview/Walkthrough → 2D↔3D → confirm shell, interior, and furniture stay visible.
-- **Room-scoped 3D** (`roomView3d.js`): When a project space/zone is active, `RoomViewer3D` uses that zone’s bbox for shell size and shifts furniture into local coordinates; label shows `3D View: {space name}`. **All spaces** uses `ProjectViewer3D` (floorplan overview, not a single giant room shell).
+- **3D selected room** (`RoomViewer3D` + `RoomInterior3D` + `roomShell3d.js` + `roomView3d.js` + `SmartFurnitureModel` + `furniture3d.js`): Shell size from active zone bbox or room dimensions (inches → meters). `RoomInterior3D` renders Materials (floor, walls, wallpaper, art). Furniture uses the same inch→meter origin as 2D (`x_inches` / `y_inches`). Polygon/L-shaped **floorplan walls** are not extruded as 3D meshes yet. GLB via `model_url` / `modelUrl`, else `ProceduralFurniture` (per-item Suspense—do not wrap the whole `Canvas`). Starter catalog Kenney GLBs are visual-only; catalog inch dimensions stay authoritative.
+- **3D all spaces** (`ProjectViewer3D` + `projectFloorplan3d.js` + `ProjectSpaceShell3D`): Floorplan overview with per-space shells, zone-scoped furniture, and shared interior tint. Not a random block layout.
+- **3D room camera navigation** (`roomCamera3d.js` + `RoomSceneControls.jsx`): OrbitControls; **Overview** vs **Walkthrough** presets; **Reset view**. No WASD pointer-lock yet.
+- **Room-scoped 3D** (`roomView3d.js`): Active space/zone → local furniture coords and shell bounds; label `3D View: {space name}`.
 - **Project finalization auth** (`ProjectSaveAuthModal`, `projectSaveAuth.js`): Guests are prompted to sign in after floorplan space review (before Project Vision Assistant) and before blank/template wizard continues to confirm; `persistFloorplanRoomToServer` saves the floorplan room to the API after auth.
 - The legacy Meshy v2 route (`/api/models/*`) and server `kenneyMapping.js` remain for seeded API catalog items but are not required for starter-catalog editor placements.
 - Floorplan upload uses a 3-stage pipeline: (1) 20×20 grid overlay drawn on image, (2) GPT-5.4 identifies rooms using grid coordinates — returns rectangular bboxes for simple rooms and polygon vertices for L-shaped/irregular rooms (only real habitable rooms — no hallways, stairs, or entries), (3) OpenCV wall-snap aligns each bbox edge to the nearest architectural wall. Results are normalized into editable `zones` stored in room-local coordinates.

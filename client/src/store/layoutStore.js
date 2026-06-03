@@ -6,6 +6,7 @@ import { getAABB, overlaps, withinRoom, validateAll } from '@/utils/collision';
 import { CATEGORY_COLORS, GRID_SNAP_INCHES, getZoneColor } from '@/utils/constants';
 import { computeRotation, getRotatedBoundingBox } from '@/utils/scale';
 import { normalizeRoomInterior, roomWithInterior } from '@/data/roomInterior';
+import { getZoneBoundsInches } from '@/utils/roomView3d';
 
 const snapToGrid = (value, gridSize) => Math.round(value / gridSize) * gridSize;
 
@@ -59,10 +60,26 @@ function getFurnitureCenter(item) {
 }
 
 function furnitureBelongsToZone(item, zone) {
-  const bounds = getZoneBounds(zone);
+  if (!zone) return true;
+  if (item.zone_id && zone.id) {
+    return item.zone_id === zone.id;
+  }
+  const bounds = getZoneBoundsInches(zone) || getZoneBounds(zone);
   if (!bounds) return true;
   const center = getFurnitureCenter(item);
-  return center.x >= bounds.left && center.x <= bounds.right && center.y >= bounds.top && center.y <= bounds.bottom;
+  return (
+    center.x >= bounds.left &&
+    center.x <= bounds.right &&
+    center.y >= bounds.top &&
+    center.y <= bounds.bottom
+  );
+}
+
+/** Exported for tests and project 3D grouping. */
+export function furnitureBelongsToZoneId(item, zoneId, zones) {
+  if (!zoneId) return false;
+  const zone = zones.find((z) => z.id === zoneId) || null;
+  return furnitureBelongsToZone(item, zone);
 }
 
 /** Pure selector for room-scoped 3D/2D furniture lists (active zone filters by center point). */

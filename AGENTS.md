@@ -168,6 +168,8 @@ vision-studio/
 │       │   ├── roomWallMath.js
 │       │   ├── projectVision.js
 │       │   ├── guidedVisionFlow.js     # guided vision chips, readiness, chat payload
+│       │   ├── visionDesignApply.js    # globalVision → interior, catalog hint, starter placements
+│       │   ├── projectFloorplan3d.js   # whole-floorplan 3D layout + overview camera
 │       │   └── visionGate.js
 │       ├── data/
 │       │   ├── furnitureCatalog.js     # STARTER_FURNITURE_CATALOG (9 items) + kenneyCuratedModel()

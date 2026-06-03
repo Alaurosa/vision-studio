@@ -16,7 +16,6 @@ export default function Upload({ embedInWizard = false }) {
   const { user } = useAuth();
   const isGuest = !user;
   const createDraftRoom = useLayoutStore((s) => s.createDraftRoom);
-  const setProjectTheme = useLayoutStore((s) => s.setProjectTheme);
 
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -28,10 +27,7 @@ export default function Upload({ embedInWizard = false }) {
   // { room, imageUrl, parseResult }
   const [editorData, setEditorData] = useState(null);
   const [spaceReview, setSpaceReview] = useState(null);
-  const [visionStep, setVisionStep] = useState(false);
-  const [visionPrompt, setVisionPrompt] = useState('');
-  const [visionStyle, setVisionStyle] = useState([]);
-  const [inspirationImageName, setInspirationImageName] = useState('');
+  const [savingSpaces, setSavingSpaces] = useState(false);
 
   const inputRef = useRef(null);
   const projectIdParam = searchParams.get('projectId');
@@ -180,8 +176,9 @@ export default function Upload({ embedInWizard = false }) {
     setEditorData(null);
   };
 
-  const finalizeProject = async () => {
-    if (!spaceReview) return;
+  /** Persist confirmed spaces/floorplan onto project (vision collected separately on /vision). */
+  const persistSpaceReviewToProject = async () => {
+    if (!spaceReview) return null;
     let project = projectIdParam ? getProjectById(projectIdParam) : null;
     const nameFromWizard =
       resolvedProjectTitle || searchParams.get('projectName') || projectName?.trim();
@@ -194,14 +191,6 @@ export default function Upload({ embedInWizard = false }) {
     } else if (nameFromWizard && (!project.name || project.name === 'Untitled Project')) {
       project = { ...project, name: nameFromWizard };
     }
-
-    const theme = {
-      styleChips: visionStyle,
-      prompt: visionPrompt,
-      inspirationImageName,
-      updatedAt: new Date().toISOString(),
-    };
-    setProjectTheme(theme);
 
     let roomId = spaceReview.sourceRoomId;
     const payload = {
@@ -236,7 +225,6 @@ export default function Upload({ embedInWizard = false }) {
       geometry: space.geometry || null,
     }));
     project.spaces = mergedSpaces;
-    project.theme = theme;
     project.floorplan = {
       imageUrl: spaceReview.imageUrl || null,
       zones: spaceReview.normalizedZones || [],
@@ -252,8 +240,25 @@ export default function Upload({ embedInWizard = false }) {
     };
     project.updatedAt = new Date().toISOString();
     upsertProject(project);
+    return project;
+  };
 
-    navigate(`/studio/project/${project.id}/confirm?mode=adjust`);
+  const continueToProjectVision = async () => {
+    if (!spaceReview || savingSpaces) return;
+    setSavingSpaces(true);
+    try {
+      const project = await persistSpaceReviewToProject();
+      if (!project?.id) {
+        toast.error('Could not save spaces. Please try again.');
+        return;
+      }
+      setSpaceReview(null);
+      navigate(`/studio/project/${project.id}/vision?setup=new`);
+    } catch {
+      toast.error('Could not save spaces. Please try again.');
+    } finally {
+      setSavingSpaces(false);
+    }
   };
 
   const onEditorCancel = () => {
@@ -360,7 +365,7 @@ export default function Upload({ embedInWizard = false }) {
               <ol className="text-sm text-[#2d2d2d] space-y-2 mb-8">
                 <li>01 Upload plan or property photo</li>
                 <li>02 Confirm detected spaces and scale</li>
-                <li>03 Set project vision and enter studio</li>
+                <li>03 Open Project Vision Assistant, then enter studio</li>
               </ol>
 
               {error && (
@@ -457,46 +462,9 @@ export default function Upload({ embedInWizard = false }) {
               </div>
               <div className="flex justify-end gap-3 mt-6">
                 <button className="btn-ghost" onClick={() => setSpaceReview(null)}>Cancel</button>
-                <button className="btn-ink" onClick={() => { setSpaceReview((s) => ({ ...s })); setVisionStep(true); }}>Continue</button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Whole-property vision onboarding */}
-      <AnimatePresence>
-        {spaceReview && visionStep && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-[#f6f3ee]/95 backdrop-blur-sm grid place-items-center p-4">
-            <div className="w-full max-w-2xl rounded-[22px] border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] p-8">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-vs-accent mb-3">Vision Step</div>
-              <h2 className="display-md mb-2">What feeling should guests have when entering?</h2>
-              <p className="text-sm text-[#5b5b5b] mb-5">Set a whole-property theme before entering the studio.</p>
-              <div className="flex flex-wrap gap-2 mb-4">
-                {['Warm', 'Modern', 'Minimal', 'Coastal', 'Industrial', 'Organic'].map((chip) => {
-                  const active = visionStyle.includes(chip);
-                  return (
-                    <button key={chip}
-                      onClick={() => setVisionStyle((prev) => (prev.includes(chip) ? prev.filter((c) => c !== chip) : [...prev, chip]))}
-                      className={`text-[10px] uppercase tracking-editorial rounded-full px-3 py-1.5 border ${active ? 'border-[#004aad]/45 text-[#004aad] bg-[#eef4f7]' : 'border-[rgba(0,0,0,0.08)] text-[#5b5b5b]'}`}>
-                      {chip}
-                    </button>
-                  );
-                })}
-              </div>
-              <textarea className="w-full min-h-[110px] rounded-xl border border-[rgba(0,0,0,0.08)] bg-[#fffdf9] p-4 text-sm"
-                value={visionPrompt}
-                onChange={(e) => setVisionPrompt(e.target.value)}
-                placeholder="Describe the whole-house mood, circulation feel, and design intent..." />
-              <label className="mt-4 block text-sm text-[#5b5b5b]">
-                Inspiration image (optional)
-                <input type="file" accept="image/*" className="mt-1 block w-full text-sm" onChange={(e) => setInspirationImageName(e.target.files?.[0]?.name || '')} />
-                {inspirationImageName && <span className="text-xs text-[#171717]">Selected: {inspirationImageName}</span>}
-              </label>
-              <div className="flex justify-end gap-3 mt-6">
-                <button className="btn-ghost" onClick={() => setVisionStep(false)}>Back</button>
-                <button className="btn-ink" onClick={finalizeProject}>Enter Studio</button>
+                <button className="btn-ink" onClick={continueToProjectVision} disabled={savingSpaces}>
+                  {savingSpaces ? 'Saving spaces…' : 'Continue to Project Vision'}
+                </button>
               </div>
             </div>
           </motion.div>

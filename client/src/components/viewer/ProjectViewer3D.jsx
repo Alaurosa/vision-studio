@@ -37,6 +37,9 @@ export default function ProjectViewer3D({ project = null, selectedSpaceId = null
 
   return (
     <div className="relative h-full w-full bg-paper-100">
+      <p className="pointer-events-none absolute left-3 top-3 z-10 text-[10px] font-medium uppercase tracking-editorial text-ink-900/70">
+        All spaces · floorplan overview
+      </p>
       {blocks.length === 0 ? (
         <div className="absolute inset-0 grid place-items-center">
           <div className="panel max-w-md p-5 text-center">

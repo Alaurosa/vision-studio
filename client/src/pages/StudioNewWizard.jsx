@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useLayoutStore } from '@/store/layoutStore';
 import { ROOM_TEMPLATES } from '@/utils/constants';
 import Upload from '@/pages/Upload';
+import ProjectSaveAuthModal from '@/components/project/ProjectSaveAuthModal';
 import {
   createProjectDraft,
   createProjectSpaceDraft,
@@ -64,6 +65,7 @@ export default function StudioNewWizard() {
   const [wizardStep, setWizardStep] = useState(1);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [showSaveAuthGate, setShowSaveAuthGate] = useState(false);
   const [projectForm, setProjectForm] = useState({
     name: '',
     propertyType: 'Apartment',
@@ -102,8 +104,12 @@ export default function StudioNewWizard() {
     return <Upload embedInWizard />;
   }
 
-  const createProject = async () => {
+  const createProject = async (authenticated = false) => {
     if (creating) return;
+    if (!user && !authenticated && projectForm.startMode !== 'upload') {
+      setShowSaveAuthGate(true);
+      return;
+    }
     setCreating(true);
     setCreateError('');
     try {
@@ -316,6 +322,16 @@ export default function StudioNewWizard() {
           </form>
         )}
       </div>
+
+      {showSaveAuthGate && (
+        <ProjectSaveAuthModal
+          onClose={() => setShowSaveAuthGate(false)}
+          onAuthed={() => {
+            setShowSaveAuthGate(false);
+            createProject(true);
+          }}
+        />
+      )}
     </>
   );
 }

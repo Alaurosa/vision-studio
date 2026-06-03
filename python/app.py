@@ -24,7 +24,7 @@ app.add_middleware(
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "vision-studio-ai"}
+    return {"status": "ok", "service": "vision-studio-python"}
 
 
 @app.post("/parse-floorplan")

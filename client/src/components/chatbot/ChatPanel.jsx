@@ -6,6 +6,25 @@ import { useLayoutStore } from '@/store/layoutStore';
 import MessageBubble from './MessageBubble';
 import StylePrompts from './StylePrompts';
 
+/** Resolve a placement by id first, then by unique name match (avoids wrong item when names collide). */
+function findFurnitureByRef(furniture, { placementId, name }) {
+  if (placementId) {
+    const byId = furniture.find((f) => f.id === placementId);
+    if (byId) return byId;
+  }
+  if (!name || typeof name !== 'string') return null;
+  const needle = name.toLowerCase().trim();
+  if (!needle) return null;
+  const matches = furniture.filter((f) => {
+    const n = f.name?.toLowerCase();
+    return n === needle || n?.includes(needle);
+  });
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0];
+  const exact = matches.filter((f) => f.name?.toLowerCase() === needle);
+  return exact.length === 1 ? exact[0] : null;
+}
+
 export default function ChatPanel({
   projectId: projectIdProp = null,
   spaceId: spaceIdProp = null,
@@ -124,26 +143,25 @@ export default function ChatPanel({
               }
               case 'move_furniture':
               case 'rotate_furniture': {
-                // Find the item by name and update it
-                const name = action.args?.furniture_name?.toLowerCase();
-                if (name) {
-                  const match = store.furniture.find(f => f.name?.toLowerCase().includes(name));
-                  if (match) {
-                    const patch = {};
-                    if (action.args.x_inches != null) patch.x_inches = action.args.x_inches;
-                    if (action.args.y_inches != null) patch.y_inches = action.args.y_inches;
-                    if (action.args.rotation != null) patch.rotation = action.args.rotation;
-                    store.updateFurniture(match.id, patch);
-                  }
+                const match = findFurnitureByRef(store.furniture, {
+                  placementId: r.placement_id,
+                  name: action.args?.furniture_name,
+                });
+                if (match) {
+                  const patch = {};
+                  if (action.args.x_inches != null) patch.x_inches = action.args.x_inches;
+                  if (action.args.y_inches != null) patch.y_inches = action.args.y_inches;
+                  if (action.args.rotation != null) patch.rotation = action.args.rotation;
+                  store.updateFurniture(match.id, patch);
                 }
                 break;
               }
               case 'remove_furniture': {
-                const name = action.args?.furniture_name?.toLowerCase();
-                if (name) {
-                  const match = store.furniture.find(f => f.name?.toLowerCase().includes(name));
-                  if (match) store.removeFurniture(match.id);
-                }
+                const match = findFurnitureByRef(store.furniture, {
+                  placementId: r.placement_id,
+                  name: action.args?.furniture_name,
+                });
+                if (match) store.removeFurniture(match.id);
                 break;
               }
               case 'clear_room':
@@ -151,11 +169,11 @@ export default function ChatPanel({
                 for (const f of [...store.furniture]) store.removeFurniture(f.id);
                 break;
               case 'swap_furniture': {
-                const removedName = r.removed_name?.toLowerCase();
-                if (removedName) {
-                  const match = store.furniture.find(f => f.name?.toLowerCase().includes(removedName));
-                  if (match) store.removeFurniture(match.id);
-                }
+                const removed = findFurnitureByRef(store.furniture, {
+                  placementId: r.removed_placement_id,
+                  name: r.removed_name,
+                });
+                if (removed) store.removeFurniture(removed.id);
                 const added = r.added_item;
                 if (added) {
                   store.addFurniture({
@@ -204,9 +222,13 @@ export default function ChatPanel({
                   })),
                 });
                 for (const u of (arranged.placements || [])) {
-                  const match = useLayoutStore.getState().furniture.find(f => f.name === u.name);
+                  const state = useLayoutStore.getState();
+                  const match = findFurnitureByRef(state.furniture, {
+                    placementId: u.id,
+                    name: u.name,
+                  });
                   if (match) {
-                    useLayoutStore.getState().updateFurniture(match.id, {
+                    state.updateFurniture(match.id, {
                       x_inches: u.x_inches, y_inches: u.y_inches, rotation: u.rotation,
                     });
                   }

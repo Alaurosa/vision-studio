@@ -10,6 +10,7 @@ import WallOutline from './WallOutline';
 import WallJointHandles from './WallJointHandles';
 import RoomBoundsHandles from './RoomBoundsHandles';
 import WallDimensionLabels from './WallDimensionLabels';
+import RoomInteriorSurfaces from './RoomInteriorSurfaces';
 import {
   isPolygonWallsFormat,
   isSegmentWallsFormat,
@@ -355,16 +356,29 @@ export default function RoomCanvas() {
           if (e.target === e.target.getStage()) clearSelection();
         }}
       >
-        {/* Room floor */}
+        {/* Room floor + interior wall bands */}
         <Layer listening={false}>
           {focusWidth > 0 && (
-            <Rect
-              x={roomOffsetX} y={roomOffsetY}
-              width={focusPxW} height={focusPxH}
-              fill="#2a2a2a"
-              stroke="#404040"
-              strokeWidth={2 / viewport.scale}
-            />
+            <>
+              <Rect
+                x={roomOffsetX}
+                y={roomOffsetY}
+                width={focusPxW}
+                height={focusPxH}
+                fill="#2a2a2a"
+                stroke="#404040"
+                strokeWidth={2 / viewport.scale}
+              />
+              <RoomInteriorSurfaces
+                interior={room?.interior}
+                originX={roomOffsetX}
+                originY={roomOffsetY}
+                widthPx={focusPxW}
+                heightPx={focusPxH}
+                pxPerInch={pxPerInch}
+                strokeScale={viewport.scale}
+              />
+            </>
           )}
         </Layer>
 

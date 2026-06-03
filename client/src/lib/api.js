@@ -7,21 +7,21 @@ const api = axios.create({
 
 // Attach auth token to every outgoing request
 api.interceptors.request.use(async (config) => {
-  // Check for fallback test session first
+  if (isSupabaseConfigured) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+        return config;
+      }
+    } catch {
+      // Supabase session unavailable — fall through to test token
+    }
+  }
   const testToken = localStorage.getItem('vs_test_session');
   if (testToken) {
     config.headers.Authorization = `Bearer ${testToken}`;
-    return config;
-  }
-  if (!isSupabaseConfigured) {
-    return config;
-  }
-  try {
-    const { data } = await supabase.auth.getSession();
-    const token = data.session?.access_token;
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-  } catch {
-    // Supabase session unavailable — proceed without auth header
   }
   return config;
 });

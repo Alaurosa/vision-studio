@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import FurnitureCatalogPanel from '@/components/catalog/FurnitureCatalogPanel';
+import InteriorDesignPanel from '@/components/studio/InteriorDesignPanel';
 import { useLayoutStore } from '@/store/layoutStore';
 import { useRoomExport } from '@/hooks/useRoomExport';
 
@@ -135,14 +136,7 @@ export default function EditorWorkspaceSidebar({ project, onNavigateToSpace }) {
               </div>
             )}
 
-            {tab === 'materials' && (
-              <div className="p-5 text-sm text-[#5b5b5b] leading-relaxed">
-                <p className="font-display text-base text-[#171717] mb-2">Materials</p>
-                <p className="text-xs">
-                  Material palettes and finishes for this space will appear here in a future update.
-                </p>
-              </div>
-            )}
+            {tab === 'materials' && <InteriorDesignPanel />}
 
             {tab === 'layers' && (
               <div className="p-4">

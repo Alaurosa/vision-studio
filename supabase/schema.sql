@@ -116,6 +116,7 @@ create table if not exists public.placements (
   rotation     integer default 0,
   color        text default '#d4a27a',
   custom       boolean default false,
+  image_url    text,
   model_url    text,
   zone_id      text,   -- optional sub-room id within the parent room (see rooms.zones)
   created_at   timestamptz default now(),
@@ -123,6 +124,8 @@ create table if not exists public.placements (
 );
 
 -- Additive migration for existing deployments
+alter table public.placements add column if not exists image_url text;
+alter table public.placements add column if not exists model_url text;
 alter table public.placements add column if not exists zone_id text;
 
 alter table public.placements enable row level security;

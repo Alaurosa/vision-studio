@@ -29,8 +29,15 @@ import {
   upsertProject,
 } from '@/utils/projectCompat';
 import { isProjectVisionComplete } from '@/utils/visionGate';
+import {
+  formatProjectVisionSummary,
+  mergeGlobalVisionSources,
+  normalizeGlobalVision,
+  prepareGlobalVisionForSave,
+} from '@/utils/projectVision';
 import ProjectVisionIntake from '@/components/project/ProjectVisionIntake';
 import RoomEditor from '@/components/upload/RoomEditor';
+import ConfirmModal from '@/components/ConfirmModal';
 
 const isConfirmationDone = (project) => Boolean(project?.confirmationCompletedAt);
 
@@ -88,10 +95,13 @@ function normalizeProjectPayload(project) {
   const gvRaw = project.globalVision ?? project.global_vision;
   const gv =
     gvRaw && typeof gvRaw === 'object'
-      ? {
-          propertyVision: gvRaw.propertyVision ?? gvRaw.property_vision ?? '',
-          ...gvRaw,
-        }
+      ? normalizeGlobalVision(
+          {
+            propertyVision: gvRaw.propertyVision ?? gvRaw.property_vision ?? '',
+            ...gvRaw,
+          },
+          project,
+        )
       : {};
   return {
     ...project,
@@ -136,10 +146,11 @@ function mergeDashboardProjects(apiProjects, localProjects) {
       if (!localProject) return apiProject;
       return normalizeProjectPayload({
         ...apiProject,
-        globalVision: {
-          ...(typeof apiProject.globalVision === 'object' ? apiProject.globalVision : {}),
-          ...(typeof localProject.globalVision === 'object' ? localProject.globalVision : {}),
-        },
+        globalVision: mergeGlobalVisionSources(
+          apiProject.globalVision,
+          localProject.globalVision,
+          apiProject,
+        ),
         confirmationCompletedAt:
           localProject.confirmationCompletedAt ?? apiProject.confirmationCompletedAt ?? null,
         visionIntakeCompletedAt:
@@ -226,6 +237,7 @@ export default function Studio() {
   const [editingProjectName, setEditingProjectName] = useState('');
   const [editorEntryIssue, setEditorEntryIssue] = useState(null);
   const [adjustConfirmIssue, setAdjustConfirmIssue] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const draftRoom = useLayoutStore((s) => (isDraftId(s.room?.id) ? s.room : null));
 
   const matchDashboard = useMatch({ path: '/studio', end: true });
@@ -250,11 +262,11 @@ export default function Studio() {
         ...fromApi,
         ...fromLocal,
         name: fromLocal.name || fromApi.name,
-        globalVision: {
-          ...(typeof fromApi.globalVision === 'object' ? fromApi.globalVision : {}),
-          ...(typeof fromApi.global_vision === 'object' ? fromApi.global_vision : {}),
-          ...(fromLocal.globalVision && typeof fromLocal.globalVision === 'object' ? fromLocal.globalVision : {}),
-        },
+        globalVision: mergeGlobalVisionSources(
+          fromApi.globalVision ?? fromApi.global_vision,
+          fromLocal.globalVision,
+          fromApi,
+        ),
         spaces:
           Array.isArray(fromApi.spaces) && fromApi.spaces.length > 0
             ? fromApi.spaces
@@ -270,8 +282,8 @@ export default function Studio() {
 
   const resolvedRoomId = useMemo(() => {
     if (roomId) return roomId;
-    if (isProjectEditorRoute && editorSpaceId && currentProject?.spaces) {
-      const sp = currentProject.spaces.find((s) => s.id === editorSpaceId);
+    if (isProjectEditorRoute && editorSpaceId && currentProject) {
+      const sp = resolveSpaceByEditorId(currentProject, editorSpaceId);
       return getSpaceRoomId(sp);
     }
     return null;
@@ -413,13 +425,20 @@ export default function Studio() {
     setEditingProjectName('');
     toast.success('Project name updated');
   };
-  const deleteProject = (project) => {
+  const requestDeleteProject = (project) => {
     if (!project?.id) return;
-    const ok = window.confirm('Remove this project from your dashboard? This does not delete backend room records.');
-    if (!ok) return;
+    setConfirmDialog({ kind: 'deleteProject', project });
+  };
+  const confirmDeleteProject = () => {
+    const project = confirmDialog?.project;
+    if (!project?.id) {
+      setConfirmDialog(null);
+      return;
+    }
     deleteProjectById(project.id);
     setProjects((prev) => prev.filter((p) => p.id !== project.id));
     toast.success('Project removed from dashboard');
+    setConfirmDialog(null);
   };
   const setProjectStatus = (project, status) => {
     const nextProject = { ...project, status, updatedAt: new Date().toISOString() };
@@ -430,17 +449,7 @@ export default function Studio() {
     if (!project?.id) return;
     const nextProject = {
       ...project,
-      globalVision: {
-        propertyVision: '',
-        styleKeywords: [],
-        moodVibe: '',
-        budgetRange: '',
-        inspirationNotes: '',
-        exteriorGoals: '',
-        interiorGoals: '',
-        ...(project.globalVision || {}),
-        ...patch,
-      },
+      globalVision: prepareGlobalVisionForSave(patch, project.globalVision || {}, project),
       updatedAt: new Date().toISOString(),
     };
     upsertProject(nextProject);
@@ -615,10 +624,11 @@ export default function Studio() {
     if (activeSpace?.zoneId) setActiveZone(activeSpace.zoneId);
   }, [room, currentProject, querySpaceId, setActiveZone]);
 
-  const discardDraft = () => {
-    if (!window.confirm('Discard your draft? This cannot be undone.')) return;
+  const requestDiscardDraft = () => setConfirmDialog({ kind: 'discardDraft' });
+  const confirmDiscardDraft = () => {
     clearDraft();
     toast.success('Draft discarded');
+    setConfirmDialog(null);
   };
 
   const syncProjectFromChild = (next) => {
@@ -949,11 +959,11 @@ export default function Studio() {
 
             <section className="panel p-6 lg:col-span-2">
               <div className="eyebrow text-vs-accent mb-3">Overall project vision</div>
-              <div className="w-full rounded-xl border border-[rgba(0,0,0,0.08)] bg-[#fffdf9] px-4 py-3 text-sm text-[#2d2d2d] min-h-[140px] leading-relaxed whitespace-pre-wrap">
-                {gv.propertyVision || 'No overall vision provided yet.'}
+              <div className="w-full rounded-xl border border-[rgba(0,0,0,0.08)] bg-[#fffdf9] px-4 py-3 text-sm text-[#2d2d2d] min-h-[80px] leading-relaxed">
+                {formatProjectVisionSummary(gv, project)}
               </div>
               <p className="mt-2 text-[11px] text-[#8b7355]">
-                This summary is read-only here. If you need to revise, use Project Vision Assistant from the project hub.
+                Update direction anytime via Open Project Vision Assistant on the project hub.
               </p>
             </section>
           </div>
@@ -1121,7 +1131,7 @@ export default function Studio() {
               <div className="flex gap-3">
                 <button className="btn-ink" onClick={() => openRoom(draftRoom.id)}>Continue space editing →</button>
                 <button
-                  onClick={discardDraft}
+                  onClick={requestDiscardDraft}
                   className="text-[11px] uppercase tracking-editorial text-ink-500 hover:text-ink-900 px-4"
                 >
                   Discard
@@ -1270,7 +1280,7 @@ export default function Studio() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => deleteProject(p)}
+                        onClick={() => requestDeleteProject(p)}
                         className="text-[10px] uppercase tracking-[0.2em] text-[#8f4d4d] hover:text-[#7a2f2f]"
                       >
                         Delete
@@ -1287,6 +1297,25 @@ export default function Studio() {
             <div className="text-ink-500 eyebrow">Loading…</div>
           )}
           {!waitingForAuth && <p className="mt-14 text-xs uppercase tracking-[0.2em] text-vs-dark/52" />}
+
+          <ConfirmModal
+            open={confirmDialog?.kind === 'deleteProject'}
+            title="Remove project?"
+            message="Remove this project from your dashboard? This does not delete backend room records."
+            confirmLabel="Remove"
+            danger
+            onConfirm={confirmDeleteProject}
+            onCancel={() => setConfirmDialog(null)}
+          />
+          <ConfirmModal
+            open={confirmDialog?.kind === 'discardDraft'}
+            title="Discard draft?"
+            message="Discard your draft? This cannot be undone."
+            confirmLabel="Discard"
+            danger
+            onConfirm={confirmDiscardDraft}
+            onCancel={() => setConfirmDialog(null)}
+          />
 
           {editingProjectId && (
             <div className="fixed inset-0 z-50 bg-black/35 grid place-items-center px-4">
@@ -1345,17 +1374,23 @@ export default function Studio() {
               </button>
               <div className="flex flex-wrap justify-end gap-2 max-w-md">
                 <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project?.id}/vision`)} disabled={!project?.id}>
-                  Edit Project Vision
+                  Open Project Vision Assistant
                 </button>
                 <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project?.id}/confirm?mode=adjust`)} disabled={!project?.id}>
                   Review Spaces
                 </button>
-                <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project?.id}/chat`)} disabled={!project?.id}>
-                  Ask Project Assistant
-                </button>
               </div>
               <p className="text-[10px] text-[#8a857d] text-right max-w-sm leading-relaxed">
-                Vision review, space checklist, and project chat are optional once guided setup is finished — use anytime.
+                Room-level editing uses Space Assistant in the editor. Project-wide Q&amp;A chat remains at{' '}
+                <button
+                  type="button"
+                  className="underline hover:text-[#171717]"
+                  onClick={() => navigate(`/studio/project/${project?.id}/chat`)}
+                  disabled={!project?.id}
+                >
+                  /chat
+                </button>{' '}
+                if you need it.
               </p>
             </div>
           </div>
@@ -1411,12 +1446,20 @@ export default function Studio() {
           <section className="panel p-6 mb-10">
             <div className="eyebrow text-vs-accent mb-2">Project vision summary</div>
             <p className="text-sm text-[#2d2d2d] leading-relaxed">
-              {[
-                gv.propertyVision,
-                gv.moodVibe,
-                gv.styleKeywords?.join(', '),
-              ].filter(Boolean).join(' · ') || 'Your whole-property vision appears here.'}
+              {formatProjectVisionSummary(gv, project)}
             </p>
+            {(gv.styleKeywords?.length > 0 || gv.moodVibe) && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(gv.styleKeywords || []).map((k) => (
+                  <span
+                    key={k}
+                    className="text-[10px] uppercase tracking-editorial px-2.5 py-1 rounded-full border border-[rgba(0,0,0,0.1)] bg-[#fffdf9]"
+                  >
+                    {k}
+                  </span>
+                ))}
+              </div>
+            )}
           </section>
 
           <p className="mt-4 text-sm text-[#5b5b5b] mb-10">

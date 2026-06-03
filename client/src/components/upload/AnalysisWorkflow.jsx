@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import api from '@/lib/api';
+import { getApiBaseUrl } from '@/utils/apiBase';
 
 const STEPS = [
   { key: 'upload',     label: 'Uploading image',        eyebrow: '01' },
@@ -53,10 +54,10 @@ export default function AnalysisWorkflow({ file, roomName, isGuest = false, onCo
 
     await advance(5);
 
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+    const baseUrl = getApiBaseUrl();
     let imageUrl = data?.floor_plan_url || '';
     if (imageUrl.startsWith('/uploads/')) {
-      imageUrl = `${baseUrl}${imageUrl}`;
+      imageUrl = baseUrl ? `${baseUrl}${imageUrl}` : imageUrl;
     }
     if (!imageUrl) {
       imageUrl = URL.createObjectURL(file);

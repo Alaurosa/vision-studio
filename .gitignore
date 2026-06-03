@@ -2,6 +2,8 @@
 node_modules/
 client/node_modules/
 server/node_modules/
+marketing/node_modules/
+e2e/node_modules/
 
 # Environment files
 .env
@@ -39,6 +41,28 @@ unity/Temp/
 unity/Logs/
 unity/Builds/
 
+
+# Dev-only tooling (not required to run client + server + python)
+/e2e/
+
+# Demo video outputs (keep docs/demo/README.md if present)
+docs/demo/*
+!docs/demo/README.md
+
+# Playwright / Vitest / coverage artifacts (any package)
+test-results/
+playwright-report/
+.playwright/
+blob-report/
+coverage/
+.vitest/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local IDE / experiment folders
+.kiro/
 
 # User specified ignores
 projectstuff/

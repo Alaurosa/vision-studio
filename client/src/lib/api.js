@@ -1,8 +1,9 @@
 import axios from 'axios';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { getApiBaseUrl } from '@/utils/apiBase';
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001',
+  baseURL: getApiBaseUrl(),
 });
 
 // Attach auth token to every outgoing request

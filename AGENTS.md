@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-**Vision Studio** is a full-stack AI-powered spatial layout design application. Users can upload floor plans or room photos, get AI-detected room geometry and furniture, browse real IKEA/Ashley catalogs, drag-and-drop furniture in a 2D Konva editor, chat with an AI assistant for layout suggestions, and export to JSON/SVG/DXF. Built for CSE 115A Spring 2026 Capstone at UCSC by William Liu, Ethan Cao, Sriya Katreddi, and Ashley Kim.
+**Vision Studio** is a full-stack AI-powered spatial layout design application. Users can upload floor plans or room photos, get AI-detected room geometry, place furniture in a 2D Konva editor (starter Kenney catalog + API IKEA/Ashley via chat), style interiors (Materials tab), preview in open-wall 3D, chat with AI assistants for layout and project vision, and export to JSON/SVG/DXF. Built for CSE 115A Spring 2026 Capstone at UCSC by William Liu, Ethan Cao, Sriya Katreddi, and Ashley Kim.
 
 ### Current Phase
 
@@ -45,8 +45,12 @@ cd marketing && npm run lint                # ESLint
 # Server (Express)
 cd server && npm install && npm run dev     # Dev on :3001 (nodemon)
 cd server && npm start                      # Production start
-cd server && npm test                       # Vitest smoke tests (save/load against live Supabase)
+cd server && npm test                       # Vitest: corsOrigins, placementPersistence, e2e.smoke, saveLoad (skipped without real Supabase)
+cd server && npm run test:e2e               # Same as e2e.smoke.test.js only (12 in-process API tests)
 cd server && npm run test:watch             # Watch mode
+
+# Browser E2E + demo recorder (optional local dev — `/e2e/` is gitignored)
+# cd e2e && npm install && npm run install:browsers && npm test && npm run demo
 
 # Setup verification (checks env, DB, seeds catalog)
 cd server && node scripts/setup.js
@@ -63,9 +67,13 @@ cd server && node scripts/seedFurniture.js  # Seed IKEA + Ashley data
 cd server && node scripts/applySchema.js    # Apply schema.sql to Supabase
 ```
 
-## Client testing — starter furniture catalog
+## Client testing
 
-Automated coverage lives under `client/src/**/__tests__/` (catalog data, filters, `FurnitureCatalogPanel`, `FurnitureCard`, `furniturePlacement`, `layoutStore` catalog selection, sidebar hint/clear).
+Vitest config: `client/vitest.config.js` + `client/src/test/setup.js` (`@testing-library/jest-dom` only). **Note:** `layoutStore` uses `zustand/persist`; tests that call `useLayoutStore.setState` need a `localStorage` mock in setup or they fail with `storage.setItem is not a function`.
+
+Automated coverage under `client/src/**/__tests__/` includes: `furnitureCatalog`, `furnitureStyleTags`, `roomInterior`, `furnitureCatalogFilters`, `furniturePlacement`, `furniture3d`, `roomShell3d`, `roomCamera3d`, `wallpaperTexture`, `recommendationRules`, `layoutGuidance`, `projectVision`, `FurnitureCatalogPanel`, `FurnitureCard`, `catalogFlow`, `layoutStore` (catalog + visible furniture), `EditorWorkspaceSidebar`, `InteriorDesignPanel`, `ProjectVisionIntake`, `uploadWizardVision`.
+
+### Starter furniture catalog — manual QA
 
 **Manual QA checklist (Furniture tab → RoomCanvas placement):**
 
@@ -110,6 +118,9 @@ vision-studio/
 ├── .prettierrc                   # Prettier config: single quotes, semi, trailing comma es5
 ├── supabase/
 │   └── schema.sql                # Full database schema (run in Supabase SQL Editor)
+├── e2e/                          # (gitignored) Playwright smoke + demo recorder — local dev only
+├── docs/
+│   └── demo/                     # (gitignored *.webm) optional README for re-recording demos
 │
 ├── client/                       # React + Vite frontend
 │   ├── package.json
@@ -118,11 +129,13 @@ vision-studio/
 │   ├── postcss.config.js
 │   ├── index.html                # Google Fonts (Fraunces + Inter), entry point
 │   ├── .env.local                # Client env vars (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, VITE_* aliases, VITE_API_URL)
+│   ├── vitest.config.js          # @ alias, jsdom, setupFiles: src/test/setup.js
 │   ├── public/
-│   │   ├── images/                 # Static image assets (logo, portfolio photos)
-│   │   └── models/                 # CC0 3D assets bundled with the client
-│   │       └── kenney/             # Kenney Furniture Kit (140 low-poly GLBs, CC0 / public domain)
+│   │   ├── images/               # Static assets (logo, portfolio photos)
+│   │   ├── furniture/placeholders/ # 2D catalog card previews (referenced by furnitureCatalog.js)
+│   │   └── models/kenney/        # Kenney Furniture Kit GLBs (CC0; LICENSE-kenney.txt)
 │   └── src/
+│       ├── test/setup.js         # Vitest + jest-dom
 │       ├── main.jsx              # ReactDOM.createRoot + StrictMode + BrowserRouter
 │       ├── App.jsx               # Route shell with lazy-loaded pages, ErrorBoundary, HelmetProvider, Toaster
 │       ├── index.css             # Tailwind directives + editorial theme + component classes + a11y focus-visible + reduced-motion
@@ -136,22 +149,29 @@ vision-studio/
 │       ├── store/
 │       │   └── layoutStore.js    # Zustand: room, furniture, zones, detections, chat, view state, undo/redo, draft mode
 │       ├── utils/
-│       │   ├── constants.js      # Grid snap, clearance, category colors/labels, room templates, zone colors (16 presets + random generator)
-│       │   ├── scale.js          # px↔inches conversion, snap-to-grid, rotation helpers, inchesToFeet formatter
-│       │   ├── furnitureDisplay.js # formatFurnitureDimensions, provider/model status labels for catalog cards
-│       │   ├── furnitureCatalogFilters.js # filterStarterFurnitureCatalog for FurnitureCatalogPanel search/category
-│       │   ├── furniturePlacement.js   # createPlacedFurnitureFromCatalogItem, getFurnitureFootprintSize (catalog → placement)
-│       │   ├── furniture3d.js          # 3D render helpers: modelUrl resolution, starter category→procedural map, inches→meters dimensions
-│       │   ├── roomCamera3d.js         # Room-level camera helpers: default position/target, orbit distance limits (meters)
-│       │   ├── collision.js      # AABB detection (arbitrary rotation), overlap check, room bounds validation
-│       │   ├── floorplanGeometry.js # Shared floorplan geometry normalization for project-level 2D/3D overlays (rect + polygon)
-│       │   ├── projectCompat.js  # Frontend-only project compatibility layer (localStorage `vs-projects-v1`) + helper metadata for Phase 2 schema planning
-│       │   ├── chatRouting.js    # Global `/chat` intent routing helper (project/space name matching → Studio routes or suggestion options)
-│       │   ├── roomWallMath.js   # Wall geometry helpers (snap/clamp/move wall joints, rectangle perimeter, segment scaling, polygon vs segment detection)
-│       │   ├── projectVision.js # Dedupe/normalize `globalVision` summary + tags; hub display via `formatProjectVisionSummary`
-│       │   └── visionGate.js    # Client-side check that whole-property vision (`globalVision.propertyVision` + style/mood rules) is complete
+│       │   ├── constants.js      # Grid snap, clearance, category colors/labels, room templates, zone colors
+│       │   ├── scale.js          # px↔inches, snap-to-grid, rotation, inchesToFeet
+│       │   ├── apiBase.js        # API base URL helper
+│       │   ├── furnitureDisplay.js
+│       │   ├── furnitureCatalogFilters.js
+│       │   ├── furniturePlacement.js   # catalog item → placement draft
+│       │   ├── furniture3d.js          # modelUrl, procedural category map, inches→meters
+│       │   ├── roomShell3d.js          # shell dimensions, wall thickness constant, ceiling opacity
+│       │   ├── roomCamera3d.js         # Overview / Walkthrough camera presets
+│       │   ├── wallpaperTexture.js     # Canvas textures for 2D wallpaper presets
+│       │   ├── recommendationRules.js  # recommendForRoom() for FurnitureCatalogPanel
+│       │   ├── layoutGuidance.js       # copy for Materials layout-intent panel
+│       │   ├── collision.js
+│       │   ├── floorplanGeometry.js
+│       │   ├── projectCompat.js        # localStorage `vs-projects-v1`
+│       │   ├── chatRouting.js
+│       │   ├── roomWallMath.js
+│       │   ├── projectVision.js
+│       │   └── visionGate.js
 │       ├── data/
-│       │   └── furnitureCatalog.js # Starter catalog + `kenneyCuratedModel()` Kenney GLB metadata
+│       │   ├── furnitureCatalog.js     # STARTER_FURNITURE_CATALOG (9 items) + kenneyCuratedModel()
+│       │   ├── furnitureStyleTags.js   # style chips for catalog filter + recommendations
+│       │   └── roomInterior.js         # wall/floor/wallpaper/wall-art/layout-intent presets
 │       ├── components/
 │       │   ├── project/
 │       │   │   └── ProjectVisionIntake.jsx   # Project Vision Assistant (`/studio/project/:id/vision`); `whole_project` chat → `globalVision`
@@ -163,35 +183,38 @@ vision-studio/
 │       │   │   ├── Navbar.jsx         # Top nav (Home/New project/Studio/Chat), scroll-aware blur, mobile hamburger, skip-to-content
 │       │   │   └── Footer.jsx         # Editorial 4-column footer with semantic HTML (hidden on /studio routes)
 │       │   ├── canvas/
-│       │   │   ├── RoomCanvas.jsx     # Konva Stage with zoom/pan, room-zone overlays, snap guides, draggable wall joints and resize-floor handles when toggled
-│       │   │   ├── ProjectCanvas.jsx  # Full-floorplan SVG preview for project mode (interior/exterior overlays, Color Overlay toggle, click-to-select)
-│       │   │   ├── FurnitureItem.jsx  # Draggable/rotatable Konva Group with Transformer, hover states, staggered fade-in animation (_animDelay)
-│       │   │   ├── WallOutline.jsx    # Wall polygon/segment renderer
-│       │   │   ├── WallJointHandles.jsx # Drag wall-joint circles when the Wall points tool is on (segment-walls only)
-│       │   │   ├── WallDimensionLabels.jsx # Per-segment feet/inches labels rendered along each wall midpoint
-│       │   │   ├── RoomBoundsHandles.jsx # East / south / SE corner handles that resize the floor rectangle (origin fixed) with grid-snap previews
-│       │   │   └── GridOverlay.jsx    # 6" snap grid (memoized)
+│       │   │   ├── RoomCanvas.jsx     # Konva: pan/zoom, zones, starter click-to-place, wall tools, furniture transform
+│       │   │   ├── ProjectCanvas.jsx  # Project floorplan SVG overlays
+│       │   │   ├── FurnitureItem.jsx
+│       │   │   ├── RoomInteriorSurfaces.jsx # 2D wall/floor styling from room.interior (Materials tab)
+│       │   │   ├── WallOutline.jsx
+│       │   │   ├── WallJointHandles.jsx
+│       │   │   ├── WallDimensionLabels.jsx
+│       │   │   ├── RoomBoundsHandles.jsx
+│       │   │   └── GridOverlay.jsx
 │       │   ├── upload/
 │       │   │   ├── AnalysisWorkflow.jsx # 6-step animated floor-plan pipeline overlay (guest + authed paths)
 │       │   │   └── RoomEditor.jsx     # Full-screen SVG zone editor: drag/resize/draw rooms (rectangle + polygon), edit names/dimensions/colors, native color picker, decoupled dimensions
 │       │   ├── studio/
-│       │   │   ├── StudioToolbar.jsx  # Save / Undo / Redo / Grid / Resize floor / Wall points / Validate / Auto-Arrange / 2D-3D / Space Assistant; keyboard shortcuts (? → portal); back link to project hub when scoped
-│       │   │   ├── KeyboardShortcutsPopover.jsx  # Body portal for shortcuts (high z-index, avoids editor clipping)
-│       │   │   ├── EditorWorkspaceSidebar.jsx  # IDE-style two-part sidebar: far-left activity bar (icon navigation) + collapsible content panel for Spaces/Furniture/Materials/Layers/Export (useRoomExport)
-│       │   │   ├── ProjectSpaceBottomBar.jsx # Project-editor bottom bar: All Spaces + interior/exterior chips + add-interior/exterior shortcuts
-│       │   │   ├── RoomSetupModal.jsx # Template + dimensions picker
-│       │   │   └── ZoneBottomBar.jsx  # Bottom room switcher + room box inspector/add-remove actions
+│       │   │   ├── StudioToolbar.jsx
+│       │   │   ├── KeyboardShortcutsPopover.jsx
+│       │   │   ├── EditorWorkspaceSidebar.jsx  # Tabs: Spaces | Furniture | Materials | Layers | Export
+│       │   │   ├── InteriorDesignPanel.jsx     # Materials tab: walls, wallpaper, wall art, layout guidance
+│       │   │   ├── ProjectSpaceBottomBar.jsx
+│       │   │   ├── RoomSetupModal.jsx
+│       │   │   └── ZoneBottomBar.jsx
 │       │   ├── catalog/
 │       │   │   ├── CatalogPanel.jsx   # Legacy API-backed catalog + Recommended tab (unused in editor sidebar)
 │       │   │   ├── FurnitureCatalogPanel.jsx # Starter catalog browse/search/filter in editor Furniture tab
 │       │   │   └── FurnitureCard.jsx  # Reusable starter-catalog card (name, category, dimensions, preview)
 │       │   ├── viewer/
-│       │   │   ├── RoomViewer3D.jsx   # Room-level R3F viewer: shell + interior + furniture; OrbitControls via RoomSceneControls; Overview/Walkthrough presets + Reset view
-│       │   │   ├── RoomSceneControls.jsx # OrbitControls + camera reset (used inside RoomViewer3D Canvas)
-│       │   │   ├── RoomShell3D.jsx    # Floor/walls/ceiling box shell from room.width/depth/height (inches→m via roomShell3d.js)
-│       │   │   ├── ProjectViewer3D.jsx # Project-level 3D fallback preview: places linked rooms in relative bounding boxes (no furniture; no room shell)
-│       │   │   ├── SmartFurnitureModel.jsx # GLB when model_url/modelUrl set; else ProceduralFurniture via furniture3d category map
-│       │   │   └── ProceduralFurniture.jsx # Category-specific Three.js primitives (legacy API + starter: seating→sofa, tables, beds, storage, lamp, decor)
+│       │   │   ├── RoomViewer3D.jsx
+│       │   │   ├── RoomSceneControls.jsx
+│       │   │   ├── RoomShell3D.jsx       # Floor + translucent ceiling only (no 3D walls)
+│       │   │   ├── RoomInterior3D.jsx    # Materials floor color overlay only in 3D
+│       │   │   ├── ProjectViewer3D.jsx
+│       │   │   ├── SmartFurnitureModel.jsx
+│       │   │   └── ProceduralFurniture.jsx
 │       │   └── chatbot/
 │       │       ├── ChatPanel.jsx      # Enhanced agentic chat sidebar — rich messages, style prompts, textarea input, auto-refresh
 │       │       ├── MessageBubble.jsx  # Rich message renderer — inline markdown, action result cards, assistant avatar
@@ -219,10 +242,10 @@ vision-studio/
 │       │   ├── page.tsx          # Renders landing page
 │       │   ├── globals.css
 │       │   └── todos/page.tsx    # Supabase SSR example query page
-│       ├── components/landing/   # Landing-page sections
+│       ├── components/landing/   # LandingPage, Hero, FeatureSplit, GalleryGrid, CTASection, etc.
 │       ├── lib/images.ts
-│       ├── middleware.ts         # Next middleware entrypoint
-│       └── utils/supabase/       # Supabase SSR/browser/middleware clients
+│       ├── middleware.ts
+│       └── utils/supabase/       # server.ts, client.ts, middleware.ts
 │
 ├── server/                       # Node.js + Express backend
 │   ├── package.json
@@ -230,11 +253,14 @@ vision-studio/
 │   ├── app.js                    # Express app factory (Helmet, CORS, rate-limit, image proxy, /health, /api/status, route mounting). Exported for tests.
 │   ├── vitest.config.js          # Vitest config (node env, in-band, 30s timeouts)
 │   ├── __tests__/
-│   │   └── saveLoad.test.js      # S2-5 save/load smoke tests — creates a real Supabase test user, exercises the full save→load→delete flow, cleans up
-│   ├── .env.example              # Template for server env vars
+│   │   ├── e2e.smoke.test.js     # 12 in-process API smokes (supertest + app)
+│   │   ├── corsOrigins.test.js
+│   │   ├── placementPersistence.test.js
+│   │   └── saveLoad.test.js       # Live Supabase save/load (skipped on placeholder env)
 │   ├── config/
-│   │   ├── env.js                # dotenv loader (root .env; must be imported first)
-│   │   └── defaults.js           # Export schema version, LLM config (gpt-5.4)
+│   │   ├── env.js
+│   │   ├── defaults.js
+│   │   └── corsOrigins.js         # CORS origin validator (localhost, CLIENT_ORIGIN, Vercel previews)
 │   ├── middleware/
 │   │   ├── auth.js               # requireAuth + optionalAuth (Supabase JWT + fallback test account: test@visionstudio.dev / test1234)
 │   │   └── errorHandler.js       # Centralized error handling with structured logger (5xx = error, 4xx = warn)
@@ -258,9 +284,11 @@ vision-studio/
 │   │   ├── overlapResolver.js    # Shared overlap resolver (greedy spiral + linear scan) + layout validator
 │   │   ├── normalizeZones.js    # Shared zone normalization (boundary-relative coordinates)
 │   │   ├── chatFunctions.js      # 15 chat tool definitions + executeFunction() dispatch
-│   │   ├── llmRouter.js          # OpenAI chat completions wrapper (hardcoded gpt-5.4)
-│   │   ├── exportFormats.js      # Build JSON, SVG, DXF export payloads (rotation-aware, wall-format agnostic)
-│   │   └── logger.js             # Structured logger with timestamps and configurable log levels
+│   │   ├── llmRouter.js
+│   │   ├── exportFormats.js
+│   │   ├── placementEnrichment.js # Enrich GET room placements from catalog (image_url, model_url)
+│   │   ├── placementPersistence.js # Retry writes without optional placement columns
+│   │   └── logger.js
 │   ├── scripts/
 │   │   ├── setup.js              # Setup verification (env vars, Supabase connection, DB tables, catalog seed)
 │   │   ├── seedFurniture.js      # Seed 22 IKEA + 5 Ashley catalog items (upsert on provider+provider_id)
@@ -277,7 +305,7 @@ vision-studio/
 │       ├── floorplan_parser.py   # OpenAI Vision (gpt-5.4) room zoning + OpenCV wall-snap + OpenCV fallback + PDF support
 │       └── object_recognition.py # Grounding DINO + SAM 2 via Replicate (constant currently named SAM3_MODEL)
 │
-└── docs/                         # Sprint documentation (PDFs)
+└── docs/                         # demo/ (recorded walkthrough); sprint PDFs may live here
 ```
 
 ## Environment Variables
@@ -322,7 +350,7 @@ Store in `client/src/store/layoutStore.js` (wrapped with `zustand/persist` for d
 
 | Field                   | Type              | Purpose                                     |
 | ----------------------- | ----------------- | ------------------------------------------- |
-| `room`                  | `object \| null`  | Current room (id, name, walls, dimensions)  |
+| `room`                  | `object \| null`  | Current room (id, name, walls, dimensions, `interior` for Materials)  |
 | `furniture`             | `array`           | Placed furniture items with positions, free-angle rotation, and optional model/image URLs |
 | `selectedId`            | `string \| null`  | Currently selected furniture ID              |
 | `detections`            | `array`           | AI-detected objects (pending/confirmed)      |
@@ -342,11 +370,35 @@ Store in `client/src/store/layoutStore.js` (wrapped with `zustand/persist` for d
 | `loadRoomFailed`        | `boolean`         | Last `loadRoom` failed (invalid id, API error, or missing draft); Studio redirects to `/studio` |
 | `selectedCatalogItem`   | `object \| null`  | Starter catalog template queued for click-to-place on `RoomCanvas` (session-only, not persisted) |
 
-Actions: `loadRoom`, `createRoom`, `createDraftRoom`, `clearDraft`, `saveDraftToAccount`, `saveProject`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setProjectTheme`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleRoomWallsTool`, `clearRoomWallsTool`, `toggleRoomResizeTool`, `clearRoomResizeTool`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `getActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`, `findOpenSlot`, `validate`.
+Actions: `loadRoom`, `createRoom`, `createDraftRoom`, `clearDraft`, `saveDraftToAccount`, `saveProject`, `updateRoom`, `updateRoomInterior`, `addFurniture`, `addCatalogFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setSelectedCatalogItem`, `clearSelectedCatalogItem`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setProjectTheme`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleRoomWallsTool`, `clearRoomWallsTool`, `toggleRoomResizeTool`, `clearRoomResizeTool`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `getActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`, `findOpenSlot`, `validate`.
 
-Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furnitureBelongsToZone`, `normalizeDetectedObjects`, `normalizeZoneObjects` — handle various zone/detection data shapes from the server.
+Exported selector: `selectVisibleFurniture(state)` — filters `furniture` by `activeZoneId` (center-in-zone).
+
+Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furnitureBelongsToZone`, `normalizeDetectedObjects`, `normalizeZoneObjects`, `roomWithInterior` (from `data/roomInterior.js`).
 
 `saveProject` is an explicit-save action: it flushes pending debounced edits, then `PUT /api/rooms/:id` + `PUT /api/furniture/placements/:id` for every placement. Drafts delegate to `saveDraftToAccount` (caller is responsible for auth).
+
+## Client routes (`App.jsx`)
+
+| Path | Page / behavior |
+| --- | --- |
+| `/` | `Home` |
+| `/login` | `Login` |
+| `/upload` | Redirect → `/studio/new?startMode=upload` |
+| `/studio/new` | `StudioNewWizard` (upload branch embeds `Upload` when `?projectId=&step=upload`) |
+| `/studio` | `Studio` dashboard |
+| `/studio/:roomId` | Legacy single-room editor |
+| `/studio/project/:projectId` | Project hub |
+| `/studio/project/:id/vision` | `ProjectVisionIntake` |
+| `/studio/project/:id/confirm` | Confirm / adjust spaces |
+| `/studio/project/:id/editor` | Project-wide editor |
+| `/studio/project/:id/editor/:spaceId` | Space-scoped editor |
+| `/studio/project/:id/chat` | `Chat` (project assistant) |
+| `/studio/project/:id/:legacySpaceId` | Redirect → `.../editor/:legacySpaceId` (except reserved segments) |
+| `/chat` | `Chat` (global inspiration) |
+| `*` | `NotFound` |
+
+Lazy-loaded pages; `ErrorBoundary` + `HelmetProvider` + `Toaster` at root. Navbar/footer hidden on editor, vision, and project chat paths.
 
 ## API Routes
 
@@ -371,7 +423,7 @@ Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furn
 | POST | `/api/rooms` | Create room |
 | GET | `/api/rooms` | List user rooms (with placements) |
 | GET | `/api/rooms/:id` | Get room + placements |
-| PUT | `/api/rooms/:id` | Update room (name, dimensions, walls, zones, scale) |
+| PUT | `/api/rooms/:id` | Update room (name, dimensions, walls, zones, scale, `interior` → `detected_objects.interior` and/or `interior` column when present) |
 | DELETE | `/api/rooms/:id` | Delete room and associated placements |
 | POST | `/api/rooms/:id/upload-floorplan` | Upload floor plan → Python AI parse → zone extraction + dimension detection |
 | POST | `/api/rooms/:id/calibrate` | Two-point scale calibration (p1, p2, real_world_inches) |
@@ -459,10 +511,10 @@ Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furn
 
 - **`providers`** — IKEA, Ashley, Wayfair, Custom (seeded via schema.sql)
 - **`furniture_catalog`** — 27 seeded items (22 IKEA + 5 Ashley) with dimensions, prices, provider links, model_url; public read via RLS; unique index on `(provider, provider_id)` for upsert
-- **`rooms`** — User rooms with walls (jsonb), dimensions, floor plan/photo URLs, detected_objects (jsonb), zones (jsonb array of sub-rooms); RLS: own rooms only
+- **`rooms`** — User rooms with walls (jsonb), dimensions, floor plan/photo URLs, `detected_objects` (jsonb; may include `interior` for Materials), optional `interior` jsonb, `zones` (jsonb sub-rooms); RLS: own rooms only
 - **`projects`** — User projects/floorplans with `property_type`, `scope`, `global_vision`, `status`; RLS: own projects only
 - **`spaces`** — Project-level interior/exterior space structure linked to existing `rooms` via nullable `room_id`; includes `category`, `space_vision`, `placeholder_mode`; RLS: via owning project
-- **`placements`** — Furniture placed in rooms with position, rotation, color, optional zone_id for sub-room assignment; RLS: via room ownership join
+- **`placements`** — Furniture in rooms: position, rotation, color, optional `zone_id`, `image_url`, `model_url`; RLS: via room ownership join
 - **`layout_exports`** — Archived JSON exports with schema_version; RLS: via room ownership join
 - **`chat_messages`** — Chat history per room with role, content, tool_calls (jsonb), model_used; RLS: via room ownership join
 
@@ -487,8 +539,25 @@ All tables use Row Level Security — users can only access their own data. The 
 
 ## Notable Behaviors
 
+### Dual furniture catalogs
+
+| Catalog | Source | Editor UI | Persistence |
+| -------- | ------ | --------- | ------------ |
+| **Starter** | `client/src/data/furnitureCatalog.js` (9 items: sofa, armchair, coffee/dining table, bookshelf, dresser, queen bed, floor lamp, area rug) | `FurnitureCatalogPanel` → select card → click `RoomCanvas` | Draft/local + `POST/PUT /api/furniture/placements` with `modelUrl` / dimensions from template |
+| **API (IKEA/Ashley)** | `GET /api/furniture/catalog` (27 seeded items) | **Space Assistant** / **Project Assistant** tool calls (`add_furniture`, `suggest_furniture`, etc.) | Server placements linked to `furniture_catalog` ids |
+| **Legacy** | Same API | `CatalogPanel.jsx` (drag/add + Recommended tab) | Not mounted in `EditorWorkspaceSidebar`; kept for reference/tests |
+
+### Materials (2D vs 3D)
+
+- **Materials tab** (`InteriorDesignPanel` + `roomInterior.js`): wall paint presets, wallpaper, wall art placement, layout-intent guidance. Persisted on `room.interior` via `updateRoomInterior` → `PUT /api/rooms/:id` (stored in `detected_objects.interior` and/or `interior` column).
+- **2D** (`RoomInteriorSurfaces.jsx`): renders styled walls/floor inside the Konva room.
+- **3D** (`RoomInterior3D.jsx`): **floor color only** — no 3D walls, wallpaper planes, or wall art (open room for furniture visibility). Structural shell: `RoomShell3D` = floor + translucent ceiling only.
+
+### Editor & canvas
+
+- **Starter placement**: select item in Furniture tab → click canvas (`createPlacedFurnitureFromCatalogItem`); Esc or **Clear selection** cancels. Overlap and room/zone bounds enforced with toast warnings.
 - Furniture can be rotated freely in the 2D editor via the Konva transformer handle, 15° toolbar nudges, or the in-canvas rotation slider.
-- **3D room shell + furniture** (`RoomViewer3D` + `RoomShell3D` + `roomShell3d.js` + `SmartFurnitureModel` + `furniture3d.js`): **`RoomViewer3D`** draws a rectangular floor, four walls (`ROOM_SHELL_WALL_THICKNESS_M` = 0.06 m), and a translucent ceiling from `room.width` / `room.depth` / `room.height` (inches, default 180×144×96), converted with `INCHES_TO_METERS`. Furniture uses the same inch→meter origin as 2D (`x_inches` / `y_inches` on the floor plane). Polygon/L-shaped wall extrusion is **not** implemented in 3D yet. **`ProjectViewer3D`** remains floorplan-only (zones/spaces, no furniture, no per-room shell). If a placement has `model_url` or `modelUrl`, load the GLB (uniform-scaled to catalog footprint/dimensions, `model_rotation_y` optional); on load error or missing URL, fall back to `ProceduralFurniture` (per-item Suspense/error boundary—do not wrap the whole `Canvas` in Suspense or GLB loading unmounts the scene). **Starter catalog** (`client/src/data/furnitureCatalog.js`) ships curated Kenney `modelUrl` values (`modelStatus: curated`, `modelSourceType: kenney`, CC0 attribution fields); GLBs are visual proxies only—**catalog inch dimensions remain the layout source of truth**. This path does **not** call Meshy/Tripo from the editor.
+- **3D room shell + furniture** (`RoomViewer3D` + `RoomShell3D` + `roomShell3d.js` + `SmartFurnitureModel` + `furniture3d.js`): **`RoomViewer3D`** draws a rectangular floor and translucent ceiling from `room.width` / `room.depth` / `room.height` (inches, default 180×144×96), converted with `INCHES_TO_METERS` — **no perimeter walls** in 3D so furniture stays visible from outside the room. `RoomInterior3D` applies Materials floor color only (wallpaper/wall art omitted in 3D). Furniture uses the same inch→meter origin as 2D (`x_inches` / `y_inches` on the floor plane). Polygon/L-shaped wall extrusion is **not** implemented in 3D yet. **`ProjectViewer3D`** remains floorplan-only (zones/spaces, no furniture, no per-room shell). If a placement has `model_url` or `modelUrl`, load the GLB (uniform-scaled to catalog footprint/dimensions, `model_rotation_y` optional); on load error or missing URL, fall back to `ProceduralFurniture` (per-item Suspense/error boundary—do not wrap the whole `Canvas` in Suspense or GLB loading unmounts the scene). **Starter catalog** (`client/src/data/furnitureCatalog.js`) ships curated Kenney `modelUrl` values (`modelStatus: curated`, `modelSourceType: kenney`, CC0 attribution fields); GLBs are visual proxies only—**catalog inch dimensions remain the layout source of truth**. This path does **not** call Meshy/Tripo from the editor.
 - **3D room camera navigation** (`roomCamera3d.js` + `RoomSceneControls.jsx`): OrbitControls with damping, pan, and room-scaled `minDistance`/`maxDistance`; default position/target from `getDefaultRoomCameraPosition` / `getDefaultRoomCameraTarget`. UI: **Overview** (corner orbit) vs **Walkthrough** (eye-height preset in front of the room, still orbit—no WASD/pointer-lock). **Reset view** restores the active preset. **First-person WASD** is deferred. Manual QA: open room editor → place starter sofa/table/bed → 3D → orbit/zoom/pan → Reset → toggle Overview/Walkthrough → 2D↔3D → confirm shell, interior, and furniture stay visible.
 - The legacy Meshy v2 route (`/api/models/*`) and server `kenneyMapping.js` remain for seeded API catalog items but are not required for starter-catalog editor placements.
 - Floorplan upload uses a 3-stage pipeline: (1) 20×20 grid overlay drawn on image, (2) GPT-5.4 identifies rooms using grid coordinates — returns rectangular bboxes for simple rooms and polygon vertices for L-shaped/irregular rooms (only real habitable rooms — no hallways, stairs, or entries), (3) OpenCV wall-snap aligns each bbox edge to the nearest architectural wall. Results are normalized into editable `zones` stored in room-local coordinates.
@@ -510,10 +579,11 @@ All tables use Row Level Security — users can only access their own data. The 
 - A skip-to-content link is rendered before the header for keyboard/screen-reader accessibility.
 - The server includes an image proxy endpoint (`/api/proxy-image`) that serves external product images with proper CORS headers for WebGL textures, restricted to whitelisted domains (IKEA, Ashley, Storyblok, Living Spaces image hosts).
 - Both Supabase clients (server admin + client anon) gracefully handle missing/placeholder credentials — they create a client pointing at a placeholder URL so the app boots without crashing, and operations fail at request time with clear warnings.
+- **Auth**: Invalid `Authorization: Bearer …` (not the test token) returns **401** — not treated as guest. Demo/fallback user: `Bearer vs-test-token-001` → `test@visionstudio.dev` (`server/middleware/auth.js`).
 - The `zone_id`, `image_url`, and `model_url` columns on placements (and `zones` on rooms) use additive migrations (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`) for backward compatibility. `placementPersistence.js` retries inserts/updates without optional columns when PostgREST reports a missing column in the schema cache (including when values are `null`).
 - `projects`/`spaces` endpoints use a narrow fallback guard: when Supabase returns relation-missing errors for those two tables, routes fall back to the in-memory compatibility store instead of failing authenticated flows.
 - **`loadRoom` recovery**: Failed server fetch or missing draft after rehydration sets `loadRoomFailed`; `Studio.jsx` toasts and replaces the route to `/studio` so the editor never spins forever. Switching to another server room clears stale `room`/placements until the new fetch completes.
-- **Guest / Draft Mode**: Upload and Studio pages are accessible without authentication. Guests create local "draft" rooms stored in localStorage via Zustand `persist`. The `StudioToolbar` shows a "Save to account" button that opens a `LoginModal` inline. On save, `saveDraftToAccount()` pushes the room, zones, and placements to the server. The guest upload path uses `/api/public/parse-floorplan` to avoid auth. 401 responses from the API are silently handled (no redirect).
+- **Guest / Draft Mode**: Upload and Studio pages are accessible without authentication. Guests create local "draft" rooms stored in localStorage via Zustand `persist` (`vs-draft-v1`; only draft room payload persisted, not `selectedCatalogItem`). The `StudioToolbar` shows a "Save to account" button that opens a `LoginModal` inline. On save, `saveDraftToAccount()` pushes the room, zones, and placements to the server. The guest upload path uses `/api/public/parse-floorplan` to avoid auth. Chat for draft rooms skips DB writes on the server.
 - When Supabase **public** URL/key are missing in the client (`client` env / `VITE_` + `NEXT_PUBLIC_` aliases), the app skips Supabase Auth network calls and uses the guest/test-token path only — avoiding failed session requests to placeholder hosts. `fetchRoomsListOnce()` dedupes concurrent `GET /api/rooms` during React StrictMode double-mount.
 - Project space rows from the API normalize `type` to `interior` \| `exterior` (string casing + optional `placeholder_mode` fallback) so exterior spaces stay in the Exterior section after refresh.
 - The chat endpoint runs a multi-turn tool execution loop (up to 5 rounds). After each round of tool calls, it re-fetches placements from the DB before executing the next tool, ensuring tools always operate on current state.
@@ -574,4 +644,5 @@ The chat endpoint supports 15 layout manipulation functions via LLM tool use:
   - `marketing/src/utils/supabase/middleware.ts`
   - `marketing/src/middleware.ts`
   - Example query page: `marketing/src/app/todos/page.tsx`
+- **Testing**: API smokes in `server/__tests__/e2e.smoke.test.js` (`npm run test:e2e`). Browser Playwright + demo video tooling under `e2e/` is **gitignored** (not required to run the app). No GitHub Actions workflow in repo yet.
 - **Update this AGENTS.md file whenever changes are made**

@@ -3,7 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 const rawUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const rawKey =
   process.env.SUPABASE_PUBLIC_ANON_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  process.env.SUPABASE_ANON_KEY;
 
 // Treat placeholder values (the <paste-...> scaffolding) as "not configured"
 // so we can still boot the server and let public/guest endpoints work.

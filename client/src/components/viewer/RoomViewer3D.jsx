@@ -93,7 +93,7 @@ export default function RoomViewer3D() {
         </Suspense>
 
         <RoomShell3D widthM={w} depthM={d} heightM={h} />
-        <RoomInterior3D interior={room?.interior} roomW={w} roomD={d} roomH={h} />
+        <RoomInterior3D interior={room?.interior} roomW={w} roomD={d} />
 
         {/* Furniture — each SmartFurnitureModel suspends locally; do not wrap Canvas in Suspense */}
         {furniture.map((it) => {

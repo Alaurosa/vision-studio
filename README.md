@@ -99,12 +99,14 @@ Navbar/footer are hidden on editor, vision, and project chat (see `client/src/Ap
 ```bash
 cd client && npx vite build              # production build check
 cd server && npm install                 # Vitest + Supertest
-cd server && npm run test:e2e            # API E2E smoke (works in demo/fallback mode)
-cd server && npm test                    # E2E + save/load (save/load skips without real Supabase)
+cd server && npm run test:e2e            # API smoke (12 in-process tests; works in fallback mode)
+cd server && npm test                    # All server Vitest (save/load skips without real Supabase)
 cd server && npm run test:watch
 cd marketing && npm run build && npm run lint
 node server/services/kenneyMapping.js    # verify catalog → Kenney GLB paths
 ```
+
+Browser Playwright smoke and demo video tooling live under `e2e/` and are **gitignored** (not needed to run the app). Demo outputs: `docs/demo/*.webm` (README may be kept).
 
 There is **no** `npm run generate-models` in this repo; optional 3D generation is the Meshy route under `/api/models` (see AGENTS.md).
 

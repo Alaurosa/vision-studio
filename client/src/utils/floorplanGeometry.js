@@ -1,3 +1,5 @@
+import { getApiBaseUrl } from '@/utils/apiBase';
+
 function toNumber(value, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
@@ -7,8 +9,8 @@ export function normalizeImageUrl(url) {
   if (!url || typeof url !== 'string') return null;
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:')) return url;
   if (url.startsWith('/uploads/')) {
-    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-    return `${apiBase}${url}`;
+    const apiBase = getApiBaseUrl();
+    return apiBase ? `${apiBase}${url}` : url;
   }
   return url;
 }

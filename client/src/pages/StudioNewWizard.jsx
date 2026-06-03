@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Helmet } from 'react-helmet-async';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
@@ -89,6 +89,14 @@ export default function StudioNewWizard() {
       setProjectForm((s) => ({ ...s, startMode: 'upload' }));
     }
   }, [searchParams]);
+
+  if (urlProjectId && urlStep === 'vision') {
+    return <Navigate to={`/studio/project/${urlProjectId}/vision?setup=new`} replace />;
+  }
+
+  if (urlProjectId && urlStep !== 'upload') {
+    return <Navigate to={`/studio/project/${urlProjectId}/vision?setup=new`} replace />;
+  }
 
   if (urlStep === 'upload' && urlProjectId) {
     return <Upload embedInWizard />;

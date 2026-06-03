@@ -6,36 +6,19 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import MessageBubble from '@/components/chatbot/MessageBubble';
 import { getProjectById, upsertProject } from '@/utils/projectCompat';
+import {
+  buildSpacesContextFromProject,
+  normalizeGlobalVision,
+  PROJECT_VISION_MOOD_CHIPS,
+  PROJECT_VISION_PRIORITY_KEYWORDS,
+  tagsFromChips,
+} from '@/utils/projectVision';
 import { isProjectVisionComplete } from '@/utils/visionGate';
-
-const EXAMPLE_PROMPTS = [
-  'Create a warm family home with calm natural materials',
-  'Design a modern coastal house with indoor-outdoor flow',
-  'Make the interiors cozy, minimal, and good for hosting',
-  'Plan a backyard, entryway, and living room around a relaxed Japandi style',
-  'I have a small apartment and want storage-focused spaces',
-  'Use my floorplan and help define the whole-house concept',
-];
-
-const STYLE_CHIPS = [
-  'Modern',
-  'Warm minimal',
-  'Japandi',
-  'Coastal',
-  'Industrial',
-  'Rustic',
-  'Family-friendly',
-  'Hosting-focused',
-  'Budget-conscious',
-  'Natural materials',
-];
 
 const GUIDED_QUESTIONS = [
   'What feeling should guests have when they enter?',
   'Which spaces matter most day to day?',
   'Should the exterior match the interior direction?',
-  'Who uses this property most often, and how?',
-  'Are there budget, furniture, or layout constraints to honor?',
 ];
 
 function buildDeterministicVisionSuggestions(globalVision) {
@@ -44,7 +27,7 @@ function buildDeterministicVisionSuggestions(globalVision) {
   const styleLine =
     styles.length > 0
       ? `Use this style direction consistently: ${styles.slice(0, 3).join(', ')}.`
-      : 'Pick 2-3 style keywords (for example: warm minimal, coastal, Japandi).';
+      : 'Pick a few style chips above (Warm, Coastal, Minimal, etc.).';
   const budget =
     globalVision?.budgetRange
       ? `Keep selections aligned to budget: ${globalVision.budgetRange}.`
@@ -53,8 +36,8 @@ function buildDeterministicVisionSuggestions(globalVision) {
 }
 
 function getVisionReadiness(globalVision, scope = 'interior_exterior') {
-  const text = (globalVision?.propertyVision || '').trim();
-  const hasVisionText = text.length >= 60;
+  const text = (globalVision?.summary || globalVision?.propertyVision || '').trim();
+  const hasVisionText = text.length >= 40;
   const hasStyleMood =
     (Array.isArray(globalVision?.styleKeywords) && globalVision.styleKeywords.length > 0) ||
     Boolean((globalVision?.moodVibe || '').trim());
@@ -70,11 +53,16 @@ function getVisionReadiness(globalVision, scope = 'interior_exterior') {
   const wantsExterior = scope === 'exterior_only' || scope === 'interior_exterior';
 
   const missing = [];
-  if (!hasVisionText) missing.push('Add more detail about the overall property concept.');
-  if (!hasStyleMood) missing.push('Add style or mood direction (chips or text).');
-  if (!hasPurposeSignal) missing.push('Describe who uses the property and its purpose.');
-  if (wantsInterior && !hasInteriorGoal) missing.push('Mention at least one interior goal.');
-  if (wantsExterior && !hasExteriorGoal) missing.push('Mention at least one exterior goal.');
+  if (!hasVisionText && !hasStyleMood) {
+    missing.push('Choose a few style chips or tell the assistant your overall direction.');
+  }
+  if (!hasPurposeSignal && !hasStyleMood) missing.push('Mention who uses the property or pick family/hosting chips.');
+  if (wantsInterior && !hasInteriorGoal && !hasStyleMood) {
+    missing.push('Mention an interior priority or a room type you care about.');
+  }
+  if (wantsExterior && !hasExteriorGoal && scope === 'interior_exterior' && !hasStyleMood) {
+    missing.push('Mention an exterior goal if outdoor areas matter.');
+  }
 
   return { ready: missing.length === 0, missing };
 }
@@ -112,6 +100,16 @@ function normalizeThread(raw) {
     }));
 }
 
+function buildWelcomeMessage(spaces) {
+  const base =
+    "I found your project spaces. Let's define the overall feeling, priorities, and constraints before editing individual rooms.";
+  if (!spaces?.length) {
+    return `${base}\n\nNo spaces are listed yet — you can still set direction here, then review spaces on the next step.`;
+  }
+  const names = spaces.map((s) => s.name).join(', ');
+  return `${base}\n\nSpaces in this project: ${names}.`;
+}
+
 export default function ProjectVisionIntake({ project, onPersist }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -122,12 +120,20 @@ export default function ProjectVisionIntake({ project, onPersist }) {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
 
-  const gv = project?.globalVision || {};
+  const spacesContext = useMemo(
+    () => buildSpacesContextFromProject(project),
+    [project?.id, project?.spaces],
+  );
+
+  const gv = useMemo(
+    () => normalizeGlobalVision(project?.globalVision || {}, project),
+    [project?.globalVision, project],
+  );
 
   const [selectedChips, setSelectedChips] = useState(() => {
-    const fromKeywords = new Set((gv.styleKeywords || []).map((k) => String(k).toLowerCase()));
+    const fromKeywords = new Set((gv.moodTags || []).map((k) => String(k).toLowerCase()));
     const picked = new Set();
-    STYLE_CHIPS.forEach((c) => {
+    PROJECT_VISION_MOOD_CHIPS.forEach((c) => {
       if (fromKeywords.has(c.toLowerCase())) picked.add(c);
     });
     return picked;
@@ -140,8 +146,7 @@ export default function ProjectVisionIntake({ project, onPersist }) {
       {
         id: 'welcome',
         role: 'assistant',
-        content:
-          "I'm your Project Vision Assistant. Before you edit individual rooms, tell me the overall direction: mood, style, budget, who lives here, interior and exterior goals, and any inspiration. When you are ready, use Review project and spaces at the bottom — that summary page is required before opening the editor.",
+        content: buildWelcomeMessage(spacesContext),
       },
     ];
   });
@@ -152,11 +157,14 @@ export default function ProjectVisionIntake({ project, onPersist }) {
     const chips = project.theme?.styleChips || [];
     if (!themePrompt && chips.length === 0) return;
     themeMergedRef.current = true;
-    const nextGv = {
-      ...gv,
-      propertyVision: [gv.propertyVision?.trim(), themePrompt].filter(Boolean).join('\n\n').trim(),
-      styleKeywords: [...new Set([...(gv.styleKeywords || []), ...chips])],
-    };
+    const nextGv = normalizeGlobalVision(
+      {
+        ...gv,
+        summary: gv.summary || themePrompt,
+        styleKeywords: [...(gv.styleKeywords || []), ...chips],
+      },
+      project,
+    );
     const next = {
       ...project,
       globalVision: nextGv,
@@ -168,31 +176,58 @@ export default function ProjectVisionIntake({ project, onPersist }) {
   }, [project?.id]);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      requestAnimationFrame(() =>
-        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }),
-      );
-    }
+    const el = scrollRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      if (typeof el.scrollTo === 'function') {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      } else {
+        el.scrollTop = el.scrollHeight;
+      }
+    });
   }, [messages, sending]);
 
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 140)}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
     }
   }, [input]);
 
   const persistFull = (nextMessages, nextGv) => {
     const p = getProjectById(project.id) || project;
     if (!p?.id) return;
-    const thread = nextMessages.filter((m) => m.id !== 'welcome').map(({ id, role, content }) => ({ id, role, content }));
+    const thread = nextMessages
+      .filter((m) => m.id !== 'welcome')
+      .map(({ id, role, content }) => ({ id, role, content }));
+    const normalized = normalizeGlobalVision(
+      { ...nextGv, visionIntakeThread: thread, spacesContext },
+      p,
+    );
     const next = {
       ...p,
-      globalVision: { ...nextGv, visionIntakeThread: thread },
+      globalVision: normalized,
       updatedAt: new Date().toISOString(),
     };
     upsertProject(next);
     onPersist?.(next);
+  };
+
+  const applyChipSelection = (chipSet) => {
+    const { moodTags, priorities } = tagsFromChips(chipSet, PROJECT_VISION_PRIORITY_KEYWORDS);
+    const p0 = getProjectById(project.id) || project;
+    const g0 = normalizeGlobalVision(p0.globalVision || {}, p0);
+    let summary = g0.summary || '';
+    if (!summary && moodTags.length > 0) {
+      summary = `Whole-property direction: ${moodTags.slice(0, 5).join(', ')}.`;
+    }
+    persistFull(messages, {
+      ...g0,
+      summary,
+      moodTags,
+      priorities,
+      styleKeywords: moodTags,
+    });
   };
 
   const toggleChip = (chip) => {
@@ -200,10 +235,7 @@ export default function ProjectVisionIntake({ project, onPersist }) {
       const n = new Set(prev);
       if (n.has(chip)) n.delete(chip);
       else n.add(chip);
-      const p0 = getProjectById(project.id) || project;
-      const g0 = p0.globalVision || {};
-      const mergedKeywords = [...new Set([...(g0.styleKeywords || []), ...Array.from(n)])];
-      persistFull(messages, { ...g0, styleKeywords: mergedKeywords });
+      applyChipSelection(n);
       return n;
     });
   };
@@ -213,15 +245,33 @@ export default function ProjectVisionIntake({ project, onPersist }) {
     if (!trimmed || !project) return;
 
     const p0 = getProjectById(project.id) || project;
-    const g0 = p0.globalVision || {};
+    const g0 = normalizeGlobalVision(p0.globalVision || {}, p0);
 
     const userMsg = { id: `u-${Date.now()}`, role: 'user', content: trimmed };
     const nextMessages = [...messages, userMsg];
     setMessages(nextMessages);
 
-    const mergedKeywords = [...new Set([...(g0.styleKeywords || []), ...Array.from(selectedChips)])];
-    const mergedVision = [g0.propertyVision?.trim(), trimmed].filter(Boolean).join('\n\n');
-    const nextGv = { ...g0, propertyVision: mergedVision, styleKeywords: mergedKeywords };
+    const { moodTags, priorities } = tagsFromChips(
+      new Set(Array.from(selectedChips)),
+      PROJECT_VISION_PRIORITY_KEYWORDS,
+    );
+    let summary = g0.summary || '';
+    if (trimmed.length >= 48 && !summary) {
+      summary = trimmed;
+    } else if (!summary && moodTags.length > 0) {
+      summary = `Whole-property direction: ${moodTags.slice(0, 5).join(', ')}.`;
+    }
+    const nextGv = normalizeGlobalVision(
+      {
+        ...g0,
+        summary,
+        notes: trimmed,
+        moodTags,
+        priorities,
+        styleKeywords: moodTags,
+      },
+      p0,
+    );
     persistFull(nextMessages, nextGv);
 
     const binding = getVisionChatRoomBinding(p0);
@@ -246,12 +296,12 @@ export default function ProjectVisionIntake({ project, onPersist }) {
         visionIntakeAssistantSummary: assistantText.slice(0, 2000),
       });
     } catch {
-      toast('Vision saved. Using quick planning suggestions while AI is unavailable.', { duration: 4500 });
+      toast.error('Could not reach the assistant. Your choices are saved — try again in a moment.');
       const bullets = buildDeterministicVisionSuggestions(nextGv);
       const fallbackMsg = {
         id: `a-${Date.now()}`,
         role: 'assistant',
-        content: `Your direction is saved. Here are quick suggestions to keep moving:\n\n- ${bullets.join('\n- ')}\n\nContinue adding detail, or go to Review project and spaces when you are ready.`,
+        content: `Your direction is saved. Quick suggestions:\n\n- ${bullets.join('\n- ')}\n\nAdd chips or a short note, then review project & spaces when ready.`,
       };
       const withFb = [...nextMessages, fallbackMsg];
       setMessages(withFb);
@@ -261,12 +311,18 @@ export default function ProjectVisionIntake({ project, onPersist }) {
     }
   };
 
-  const effectiveGv = useMemo(() => {
-    const userTexts = messages.filter((m) => m.role === 'user').map((m) => m.content);
-    const pv = [gv.propertyVision, ...userTexts].filter(Boolean).join('\n\n').trim();
-    const kw = [...new Set([...(gv.styleKeywords || []), ...Array.from(selectedChips)])];
-    return { ...gv, propertyVision: pv, styleKeywords: kw };
-  }, [gv, messages, selectedChips]);
+  const effectiveGv = useMemo(
+    () =>
+      normalizeGlobalVision(
+        {
+          ...gv,
+          styleKeywords: [...Array.from(selectedChips)],
+          moodTags: [...Array.from(selectedChips)],
+        },
+        project,
+      ),
+    [gv, selectedChips, project],
+  );
 
   const visionReady = isProjectVisionComplete(effectiveGv);
   const readiness = useMemo(
@@ -277,28 +333,30 @@ export default function ProjectVisionIntake({ project, onPersist }) {
   const handleReviewContinue = () => {
     if (!project) return;
     if (!visionReady || !readiness.ready) {
-      toast.error('Add a bit more project context before review so the plan is actionable.');
+      toast.error('Choose a few style directions or share a short note with the assistant first.');
       return;
     }
-    const next = {
-      ...project,
-      globalVision: {
-        ...effectiveGv,
-        visionIntakeThread: messages.filter((m) => m.id !== 'welcome').map(({ id, role, content }) => ({
-          id,
-          role,
-          content,
-        })),
-      },
-      visionIntakeCompletedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    upsertProject(next);
-    onPersist?.(next);
-    if (setupNewFlow) {
-      navigate(`/studio/project/${project.id}/confirm`);
-    } else {
-      navigate(`/studio/project/${project.id}`);
+    try {
+      const next = {
+        ...project,
+        globalVision: {
+          ...effectiveGv,
+          visionIntakeThread: messages
+            .filter((m) => m.id !== 'welcome')
+            .map(({ id, role, content }) => ({ id, role, content })),
+        },
+        visionIntakeCompletedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      upsertProject(next);
+      onPersist?.(next);
+      if (setupNewFlow) {
+        navigate(`/studio/project/${project.id}/confirm`);
+      } else {
+        navigate(`/studio/project/${project.id}`);
+      }
+    } catch {
+      toast.error('Could not save project vision. Please try again.');
     }
   };
 
@@ -332,31 +390,36 @@ export default function ProjectVisionIntake({ project, onPersist }) {
                 All projects
               </Link>
             </div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.34em] text-vs-accent mb-3">Whole-property planning</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.34em] text-vs-accent mb-3">
+              Whole-property planning
+            </p>
             <h1 className="font-display text-[clamp(1.75rem,4vw,2.35rem)] font-medium leading-tight tracking-[-0.02em]">
               Project Vision Assistant
             </h1>
             <p className="mt-4 text-sm text-[#5b5b5b] max-w-2xl leading-relaxed">
-              Define the overall direction for the home before editing individual spaces.
+              I&apos;ll use your rooms as context and help shape the whole-property direction.
             </p>
           </div>
         </div>
 
         <div className="flex-1 flex flex-col min-h-0 mx-auto w-full max-w-3xl px-6 md:px-8 pb-6">
-          <div className="h-14 border-b border-[rgba(0,0,0,0.08)] flex items-center justify-between px-1 shrink-0 bg-[#f8f8f6]/90">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#004aad] to-[#003580] grid place-items-center shadow-sm">
-                <span className="text-sm text-paper-50 font-display font-semibold">V</span>
-              </div>
-              <div>
-                <div className="text-[10px] font-semibold uppercase tracking-[0.28em] text-vs-accent">Vision Studio</div>
-                <div className="font-display text-base text-[#171717]">Project Vision Assistant</div>
-                <div className="text-[10px] uppercase tracking-editorial text-[#5b5b5b]">Before individual room edits</div>
+          {spacesContext.length > 0 && (
+            <div className="mt-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-[#fffdf9] px-4 py-3 shrink-0">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-2">Project spaces</p>
+              <div className="flex flex-wrap gap-2">
+                {spacesContext.map((space) => (
+                  <span
+                    key={space.id}
+                    className="text-[10px] uppercase tracking-editorial px-2.5 py-1 rounded-full border border-[#004aad]/20 bg-[#eef4f7] text-[#004aad]"
+                  >
+                    {space.name}
+                  </span>
+                ))}
               </div>
             </div>
-          </div>
+          )}
 
-          <div ref={scrollRef} className="flex-1 overflow-y-auto py-6 space-y-4">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto py-6 space-y-4 min-h-0">
             <AnimatePresence initial={false}>
               {messages.map((m, i) => (
                 <MessageBubble key={m.id} message={m} isLast={i === messages.length - 1} />
@@ -372,9 +435,9 @@ export default function ProjectVisionIntake({ project, onPersist }) {
 
           <div className="border-t border-[rgba(0,0,0,0.06)] pt-5 shrink-0 space-y-4">
             <div>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-2">Style direction</p>
+              <p className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-2">Quick direction</p>
               <div className="flex flex-wrap gap-2">
-                {STYLE_CHIPS.map((chip) => (
+                {PROJECT_VISION_MOOD_CHIPS.map((chip) => (
                   <button
                     key={chip}
                     type="button"
@@ -391,29 +454,12 @@ export default function ProjectVisionIntake({ project, onPersist }) {
               </div>
             </div>
 
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-2">Example prompts</p>
-              <div className="flex flex-wrap gap-2">
-                {EXAMPLE_PROMPTS.map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => sendUserMessage(p)}
-                    disabled={sending}
-                    className="text-left text-xs text-[#2d2d2d] rounded-xl border border-[rgba(0,0,0,0.08)] bg-[#fffdf9] px-3 py-2 max-w-full hover:border-[#004aad]/35 transition disabled:opacity-50"
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             <div className="flex items-end gap-3">
               <textarea
                 ref={textareaRef}
-                className="flex-1 bg-[#fffdf9] border border-[rgba(0,0,0,0.1)] rounded-2xl px-4 py-3 text-sm text-[#171717] placeholder:text-[#9a9a9a] resize-none focus:outline-none focus:border-[#004aad]/45 focus:ring-2 focus:ring-[#004aad]/10 min-h-[52px] max-h-[140px]"
-                placeholder="Describe the overall vibe, lifestyle, rooms, exterior areas, materials, budget, or inspiration for this project..."
-                rows={2}
+                className="flex-1 bg-[#fffdf9] border border-[rgba(0,0,0,0.1)] rounded-2xl px-4 py-3 text-sm text-[#171717] placeholder:text-[#9a9a9a] resize-none focus:outline-none focus:border-[#004aad]/45 focus:ring-2 focus:ring-[#004aad]/10 min-h-[44px] max-h-[120px]"
+                placeholder="Tell me anything specific, or choose options above."
+                rows={1}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -447,26 +493,19 @@ export default function ProjectVisionIntake({ project, onPersist }) {
                 type="button"
                 onClick={handleReviewContinue}
                 className="btn-ink px-6 py-3 text-[11px] uppercase tracking-[0.15em] disabled:opacity-40"
-                disabled={!visionReady || !readiness.ready}
+                disabled={!visionReady || !readiness.ready || sending}
               >
                 Review project & spaces
               </button>
               {!visionReady && (
                 <span className="text-xs text-[#8b7355]">
-                  Share enough detail for your whole-property vision (or combine a shorter note with style chips above).
-                </span>
-              )}
-              {visionReady && (
-                <span className="text-xs text-[#8b7355]">
-                  {setupNewFlow
-                    ? 'Next: review spaces and vision on the confirmation page (guided new projects).'
-                    : 'Returns to your project hub — open the editor when you are ready; Space Assistant handles room edits.'}
+                  Pick a few chips or send a short note — no long form required.
                 </span>
               )}
             </div>
             {!readiness.ready && (
               <div className="rounded-xl border border-sienna-500/35 bg-paper-100/90 px-4 py-3">
-                <p className="text-xs uppercase tracking-[0.18em] text-sienna-700 mb-2">More context needed before confirmation</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-sienna-700 mb-2">A little more context helps</p>
                 <ul className="text-sm text-ink-700 space-y-1">
                   {readiness.missing.map((item) => (
                     <li key={item}>- {item}</li>

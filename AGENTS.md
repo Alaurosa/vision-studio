@@ -71,7 +71,7 @@ cd server && node scripts/applySchema.js    # Apply schema.sql to Supabase
 
 Vitest config: `client/vitest.config.js` + `client/src/test/setup.js` (`@testing-library/jest-dom` only). **Note:** `layoutStore` uses `zustand/persist`; tests that call `useLayoutStore.setState` need a `localStorage` mock in setup or they fail with `storage.setItem is not a function`.
 
-Automated coverage under `client/src/**/__tests__/` includes: `furnitureCatalog`, `furnitureStyleTags`, `roomInterior`, `furnitureCatalogFilters`, `furniturePlacement`, `furniture3d`, `roomShell3d`, `roomCamera3d`, `wallpaperTexture`, `recommendationRules`, `layoutGuidance`, `projectVision`, `FurnitureCatalogPanel`, `FurnitureCard`, `catalogFlow`, `layoutStore` (catalog + visible furniture), `EditorWorkspaceSidebar`, `InteriorDesignPanel`, `ProjectVisionIntake`, `uploadWizardVision`.
+Automated coverage under `client/src/**/__tests__/` includes: `furnitureCatalog`, `furnitureStyleTags`, `roomInterior`, `furnitureCatalogFilters`, `furniturePlacement`, `furniture3d`, `roomShell3d`, `roomCamera3d`, `wallpaperTexture`, `recommendationRules`, `layoutGuidance`, `projectVision`, `guidedVisionFlow`, `FurnitureCatalogPanel`, `FurnitureCard`, `catalogFlow`, `layoutStore` (catalog + visible furniture), `EditorWorkspaceSidebar`, `InteriorDesignPanel`, `ProjectVisionIntake`, `uploadWizardVision`.
 
 ### Starter furniture catalog — manual QA
 
@@ -167,6 +167,7 @@ vision-studio/
 │       │   ├── chatRouting.js
 │       │   ├── roomWallMath.js
 │       │   ├── projectVision.js
+│       │   ├── guidedVisionFlow.js     # guided vision chips, readiness, chat payload
 │       │   └── visionGate.js
 │       ├── data/
 │       │   ├── furnitureCatalog.js     # STARTER_FURNITURE_CATALOG (9 items) + kenneyCuratedModel()
@@ -598,7 +599,7 @@ All tables use Row Level Security — users can only access their own data. The 
 - **Color overlay toggle**: Both pre-editor (`RoomEditor`) and project editor (`ProjectCanvas`) include a visual-only `Color Overlay` toggle to switch between filled overlays and outline-only overlays over the floorplan image; geometry data is unchanged.
 - **Canonical review path**: Project hub **Review Spaces** now routes to `/studio/project/:id/confirm?mode=adjust`, which opens the `RoomEditor`-based adjust workflow for move/resize/rename/type/overlay edits and persists updates back into the local project compatibility overlay (`project.floorplan.zones` + `project.spaces[].geometry`) while room-level zones remain in `rooms.zones`.
 - **Editor entry hardening**: Hub **Open Editor** now chooses the first editable linked space (interior-first) and navigates to `/studio/project/:id/editor/:spaceId`. If no space has a valid linked room, the hub shows an inline guidance state (Review Spaces / Add Interior / Add Exterior) instead of bouncing with a toast.
-- **Project vision** in **`ProjectVisionIntake.jsx`**: chatbot-first intake at `/vision` (quick mood chips + optional chat input, project spaces as context). Persists structured `globalVision` via `prepareGlobalVisionForSave` / `normalizeGlobalVision` in `projectVision.js` (overwrite fields, never append duplicate sentences). **`upsertProject`** normalizes vision before localStorage write. Hub display uses `formatProjectVisionSummary` as a read-only safety net. **Confirmation** sets `confirmationCompletedAt` and opens the editor when appropriate. AI unavailable → toast + deterministic fallback in-thread.
+- **Project vision** in **`ProjectVisionIntake.jsx`** + **`guidedVisionFlow.js`**: guided chip flow (one question at a time: mood ≥2, priorities ≥2, constraints ≥1 or “No major constraints”, room focus from project spaces or “Use all rooms evenly”, room-specific needs by inferred room type). Compact readiness checklist + continue label (`Review Project & Spaces` when `?setup=new`, else `Continue to Studio`). Chip picks update `globalVision` immediately; live chat still calls `/api/chat/message` with `buildChatGlobalVisionPayload` (`moodTags`, `priorities`, `constraints`, `prioritizedRooms`, `roomSpecificNeeds`, `spacesContext`, `notes`, `readiness`). Step summaries upsert via `vision-guided-step-summary` (no duplicate cards). **`visionGate.isProjectVisionComplete`** uses guided readiness. Persists via `prepareGlobalVisionForSave` / `normalizeGlobalVision` in `projectVision.js` (overwrite, dedupe). AI unavailable → toast + deterministic fallback in-thread.
 - Editor route also resolves legacy upload-derived ids like `space-zone-*` via `zoneId`, then rewrites to canonical `/editor/:spaceId` when a match exists.
 - **`App.jsx`** hides **Navbar**/**Footer** on **editor**, **vision**, and **`/studio/project/:id/chat`**.
 - The project detail page (`/studio/project/:projectId`) acts as a floorplan hub with Interior/Exterior sections, empty-state add actions, and type pickers for creating interior/exterior spaces while still creating backend-compatible room records under the hood.

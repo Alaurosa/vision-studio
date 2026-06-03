@@ -81,6 +81,12 @@ export function normalizeGlobalVision(gv = {}, project = null) {
       ? gv.spacesContext
       : buildSpacesContextFromProject(project);
 
+  const prioritizedRooms = dedupeTags(gv.prioritizedRooms || []);
+  const roomSpecificNeeds =
+    gv.roomSpecificNeeds && typeof gv.roomSpecificNeeds === 'object' && !Array.isArray(gv.roomSpecificNeeds)
+      ? gv.roomSpecificNeeds
+      : {};
+
   return {
     ...gv,
     summary,
@@ -90,6 +96,9 @@ export function normalizeGlobalVision(gv = {}, project = null) {
     moodVibe: (gv.moodVibe || '').trim() || moodTags[0] || '',
     priorities,
     constraints,
+    prioritizedRooms,
+    roomSpecificNeeds,
+    useAllRoomsEvenly: gv.useAllRoomsEvenly === true,
     notes,
     spacesContext,
     inspirationNotes: notes,
@@ -108,7 +117,7 @@ export function prepareGlobalVisionForSave(patch = {}, existingGv = {}, project 
   const base = normalizeGlobalVision(existingGv, project);
   const next = { ...base };
 
-  if (typeof patch.summary === 'string') {
+  if (typeof patch.summary === 'string' && patch.summary.trim()) {
     next.summary = patch.summary;
   } else if (typeof patch.propertyVision === 'string' && patch.propertyVision.trim()) {
     next.summary = patch.propertyVision;
@@ -129,6 +138,15 @@ export function prepareGlobalVisionForSave(patch = {}, existingGv = {}, project 
   if (patch.constraints !== undefined) {
     next.constraints = dedupeTags(patch.constraints);
   }
+  if (patch.prioritizedRooms !== undefined) {
+    next.prioritizedRooms = dedupeTags(patch.prioritizedRooms);
+  }
+  if (patch.roomSpecificNeeds !== undefined) {
+    next.roomSpecificNeeds = patch.roomSpecificNeeds;
+  }
+  if (patch.useAllRoomsEvenly !== undefined) {
+    next.useAllRoomsEvenly = patch.useAllRoomsEvenly === true;
+  }
 
   if (patch.moodVibe !== undefined) next.moodVibe = patch.moodVibe;
   if (patch.budgetRange !== undefined) next.budgetRange = patch.budgetRange;
@@ -138,6 +156,20 @@ export function prepareGlobalVisionForSave(patch = {}, existingGv = {}, project 
   if (patch.visionIntakeThread !== undefined) next.visionIntakeThread = patch.visionIntakeThread;
   if (patch.visionIntakeAssistantSummary !== undefined) {
     next.visionIntakeAssistantSummary = patch.visionIntakeAssistantSummary;
+  }
+
+  if (!next.summary?.trim()) {
+    const parts = [];
+    if (next.moodTags?.length) parts.push(`Style: ${next.moodTags.join(', ')}.`);
+    if (next.priorities?.length) parts.push(`Priorities: ${next.priorities.join(', ')}.`);
+    if (next.constraints?.length) parts.push(`Constraints: ${next.constraints.join(', ')}.`);
+    if (next.useAllRoomsEvenly) {
+      parts.push('Room focus: all rooms evenly.');
+    } else if (next.prioritizedRooms?.length) {
+      parts.push(`Room focus: ${next.prioritizedRooms.join(', ')}.`);
+    }
+    const compact = dedupeSummaryText(parts.join(' '));
+    if (compact) next.summary = compact;
   }
 
   return normalizeGlobalVision(next, project);
@@ -187,9 +219,6 @@ export function formatProjectVisionSummary(gv, project = null) {
   }
   if (n.constraints.length > 0) {
     segments.push(`Constraints: ${n.constraints.join(', ')}.`);
-  }
-  if (n.moodTags.length > 0) {
-    segments.push(`Style direction: ${n.moodTags.join(', ')}.`);
   }
   if (n.notes && n.notes.toLowerCase() !== (n.summary || '').toLowerCase()) {
     segments.push(n.notes.endsWith('.') ? n.notes : `${n.notes}.`);

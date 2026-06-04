@@ -1,7 +1,56 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { getApiBaseUrl } from '@/utils/apiBase';
+
+/** Keep raw GPT `rooms` (image pixels) alongside server-normalized `zones`. */
+function buildParseResult(apiData, parseResult = {}) {
+  const zones = apiData?.zones || parseResult.zones || [];
+  const rooms = Array.isArray(parseResult.rooms) && parseResult.rooms.length > 0
+    ? parseResult.rooms
+    : zones;
+  return {
+    ...parseResult,
+    zones,
+    rooms,
+    method: apiData?.parse_method || parseResult.method,
+    scale_px_per_inch:
+      parseResult.scale_px_per_inch ?? apiData?.parse_result?.scale_px_per_inch ?? 1,
+  };
+}
+
+function notifyParsePipeline(apiData, parseResult) {
+  const method = apiData?.parse_method || parseResult?.method || 'unknown';
+  const usedOpenAi =
+    apiData?.openai_vision === true ||
+    (method === 'openai_vision_grid_snap' && !parseResult?.fallback);
+  const count = parseResult?.rooms?.length || 0;
+
+  if (method === 'unavailable') {
+    toast.error(
+      'Floorplan AI is offline. Start Python: cd python && uvicorn app:app --host 0.0.0.0 --port 5001 --reload',
+      { duration: 8000 },
+    );
+    return;
+  }
+
+  if (usedOpenAi) {
+    toast.success(`AI vision detected ${count} room${count === 1 ? '' : 's'}`, { id: 'parse-method' });
+    return;
+  }
+
+  if (method === 'opencv' || parseResult?.fallback) {
+    const reason = parseResult?.fallback_reason;
+    const hint =
+      reason === 'missing_openai_api_key'
+        ? 'OPENAI_API_KEY missing in root .env (restart Python after adding it).'
+        : reason === 'openai_vision_failed_or_empty'
+          ? 'OpenAI vision failed — check API key/billing; using rough OpenCV boxes.'
+          : 'Using basic OpenCV detection — not the AI grid workflow.';
+    toast.error(hint, { duration: 9000, id: 'parse-method' });
+  }
+}
 
 const STEPS = [
   { key: 'upload',     label: 'Uploading image',        eyebrow: '01' },
@@ -63,7 +112,8 @@ export default function AnalysisWorkflow({ file, roomName, isGuest = false, onCo
       imageUrl = URL.createObjectURL(file);
     }
 
-    const parseResult = data?.parse_result || {};
+    const parseResult = buildParseResult(data, data?.parse_result || {});
+    notifyParsePipeline(data, parseResult);
     await new Promise((r) => setTimeout(r, 400));
     onComplete?.(room, parseResult, imageUrl);
   };
@@ -84,7 +134,8 @@ export default function AnalysisWorkflow({ file, roomName, isGuest = false, onCo
 
     await advance(5);
 
-    const parseResult = data?.parse_result || {};
+    const parseResult = buildParseResult(data, data?.parse_result || {});
+    notifyParsePipeline(data, parseResult);
 
     // Guests don't have a server-side room; fabricate a minimal one the caller
     // can turn into a draft after the user edits the zones.
@@ -108,8 +159,20 @@ export default function AnalysisWorkflow({ file, roomName, isGuest = false, onCo
     try {
       if (isGuest) {
         await runGuest();
-      } else {
+        return;
+      }
+      try {
         await runAuthed();
+      } catch (authedErr) {
+        const status = authedErr?.response?.status;
+        if (status === 401 || status === 403) {
+          toast.error('Session expired — analyzing as guest. Sign in again to save to your account.', {
+            duration: 7000,
+          });
+          await runGuest();
+          return;
+        }
+        throw authedErr;
       }
     } catch (e) {
       console.error(e);

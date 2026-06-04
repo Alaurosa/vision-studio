@@ -588,7 +588,7 @@ def _opencv_fallback(image_bytes: bytes) -> dict:
         "image_height": img_h,
         "boundary": {"x": int(bx), "y": int(by), "w": int(bw), "h": int(bh)},
         "method": "opencv",
-        "fallback": False,
+        "fallback": True,
         "line_count": len(lines) if lines is not None else 0,
     }
 
@@ -613,15 +613,22 @@ async def parse_floorplan(image_bytes: bytes, content_type: str) -> dict:
         return {"error": f"Could not decode image: {e}", "rooms": [], "walls": [], "fallback": True}
 
     # --- Method 1: OpenAI Vision Grid + Wall-Snap (preferred) ---
-    if _get_openai_api_key():
+    api_key = _get_openai_api_key()
+    if api_key:
         print("Trying OpenAI Vision grid + wall-snap for floor plan analysis...")
         llm_result = await _openai_vision_analyze(image_bytes)
-        
-        if llm_result and llm_result.get("rooms"):
-            # Wall-snapping is already done inside _openai_vision_analyze
-            return llm_result
-            
-        print("OpenAI Vision failed or returned no rooms, falling back to OpenCV...")
 
-    # --- Method 2: OpenCV fallback — works offline ---
-    return _opencv_fallback(image_bytes)
+        if llm_result and llm_result.get("rooms"):
+            return llm_result
+
+        print("OpenAI Vision failed or returned no rooms, falling back to OpenCV...")
+    else:
+        print("OPENAI_API_KEY not set — using OpenCV fallback (generic room boxes, not AI vision)")
+
+    # --- Method 2: OpenCV fallback — works offline, least accurate ---
+    result = _opencv_fallback(image_bytes)
+    if not api_key:
+        result["fallback_reason"] = "missing_openai_api_key"
+    else:
+        result["fallback_reason"] = "openai_vision_failed_or_empty"
+    return result

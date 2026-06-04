@@ -38,6 +38,7 @@ import {
 import ProjectVisionIntake from '@/components/project/ProjectVisionIntake';
 import RoomEditor from '@/components/upload/RoomEditor';
 import ConfirmModal from '@/components/ConfirmModal';
+import { ensureFloorplanZonesInImageSpace } from '@/utils/floorplanGeometry';
 
 const isConfirmationDone = (project) => Boolean(project?.confirmationCompletedAt);
 
@@ -168,7 +169,10 @@ function mergeDashboardProjects(apiProjects, localProjects) {
 
 function buildAdjustZones(project) {
   const floorplan = project?.floorplan || {};
-  const zones = Array.isArray(floorplan?.zones) ? floorplan.zones : [];
+  const zones = ensureFloorplanZonesInImageSpace(
+    Array.isArray(floorplan?.zones) ? floorplan.zones : [],
+    floorplan,
+  );
   const spaces = Array.isArray(project?.spaces) ? project.spaces : [];
   const spaceByZoneId = new Map(
     spaces
@@ -665,12 +669,19 @@ export default function Studio() {
 
     if (confirmMode === 'adjust') {
       const hasGeometry = adjustZones.length > 0;
-      const imageW = hasGeometry
-        ? Math.max(...adjustZones.map((z) => z.bbox?.[2] || 0), 1)
-        : 0;
-      const imageH = hasGeometry
-        ? Math.max(...adjustZones.map((z) => z.bbox?.[3] || 0), 1)
-        : 0;
+      const fp = project?.floorplan || {};
+      const imageW =
+        Number(fp.imageWidth) > 0
+          ? Number(fp.imageWidth)
+          : hasGeometry
+            ? Math.max(...adjustZones.map((z) => z.bbox?.[2] || 0), 1)
+            : 800;
+      const imageH =
+        Number(fp.imageHeight) > 0
+          ? Number(fp.imageHeight)
+          : hasGeometry
+            ? Math.max(...adjustZones.map((z) => z.bbox?.[3] || 0), 1)
+            : 600;
 
       const persistAdjustedSpaces = async (finalZones) => {
         setAdjustConfirmIssue(null);
@@ -697,6 +708,9 @@ export default function Studio() {
         nextProject.floorplan = {
           ...(project.floorplan || {}),
           imageUrl: floorplanImageUrl,
+          imageWidth: imageW,
+          imageHeight: imageH,
+          coordinateSpace: 'imagePixels',
           zones: finalZones,
           scalePxPerInch,
           updatedAt: new Date().toISOString(),
@@ -846,10 +860,10 @@ export default function Studio() {
       return (
         <RoomEditor
           imageUrl={floorplanImageUrl}
-          imageWidth={Math.max(800, imageW + 80)}
-          imageHeight={Math.max(600, imageH + 80)}
+          imageWidth={imageW}
+          imageHeight={imageH}
           initialZones={adjustZones}
-          boundary={null}
+          boundary={fp.boundary || null}
           scalePxPerInch={scalePxPerInch}
           onConfirm={persistAdjustedSpaces}
           onCancel={() => navigate('/studio')}

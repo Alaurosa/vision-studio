@@ -24,7 +24,14 @@ app.add_middleware(
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "vision-studio-python"}
+    key = os.getenv("OPENAI_API_KEY") or ""
+    configured = bool(key.strip()) and "your-" not in key.lower() and "placeholder" not in key.lower()
+    return {
+        "status": "ok",
+        "service": "vision-studio-python",
+        "openai_configured": configured,
+        "preferred_parse_method": "openai_vision_grid_snap",
+    }
 
 
 @app.post("/parse-floorplan")

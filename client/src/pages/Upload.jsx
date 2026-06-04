@@ -9,6 +9,12 @@ import { useLayoutStore } from '@/store/layoutStore';
 import AnalysisWorkflow from '@/components/upload/AnalysisWorkflow';
 import RoomEditor from '@/components/upload/RoomEditor';
 import { createProjectDraft, getProjectById, upsertProject } from '@/utils/projectCompat';
+import {
+  getFloorplanImageMeta,
+  resolveEditorZonesFromParse,
+  roomDimensionsFromParse,
+  zonesToBoundaryRelative,
+} from '@/utils/floorplanGeometry';
 
 export default function Upload({ embedInWizard = false }) {
   const navigate = useNavigate();
@@ -103,54 +109,34 @@ export default function Upload({ embedInWizard = false }) {
     });
   };
 
+  const editorLayout = useMemo(() => {
+    if (!editorData?.parseResult) return null;
+    const parseResult = editorData.parseResult;
+    const zones = resolveEditorZonesFromParse(parseResult);
+    const { imageWidth, imageHeight, boundary } = getFloorplanImageMeta(parseResult, zones);
+    return { zones, imageWidth, imageHeight, boundary };
+  }, [editorData]);
+
   const onEditorConfirm = async (finalZones) => {
     if (!editorData?.room) return;
 
-    const scale = editorData.parseResult?.scale_px_per_inch || 1;
-    let roomWidth = 240;
-    let roomDepth = 180;
-    let normalizedZones = finalZones;
+    const parseResult = editorData.parseResult || {};
+    const imagePixelZones = finalZones;
+    const { imageWidth, imageHeight, boundary } = getFloorplanImageMeta(parseResult, imagePixelZones);
+    const dims = roomDimensionsFromParse(
+      parseResult,
+      imagePixelZones,
+      parseResult.scale_px_per_inch || 1,
+    );
+    const scale = dims.scalePxPerInch;
+    const roomWidth = dims.roomWidth;
+    const roomDepth = dims.roomDepth;
+    const boundaryForRoom = boundary || parseResult.boundary || null;
+    const roomZones = boundaryForRoom
+      ? zonesToBoundaryRelative(imagePixelZones, boundaryForRoom)
+      : imagePixelZones;
 
-    if (finalZones.length > 0) {
-      const minX = Math.min(...finalZones.map(z => z.bbox[0]));
-      const minY = Math.min(...finalZones.map(z => z.bbox[1]));
-      const maxX = Math.max(...finalZones.map(z => z.bbox[2]));
-      const maxY = Math.max(...finalZones.map(z => z.bbox[3]));
-
-      normalizedZones = finalZones.map((z) => {
-        const relBbox = [z.bbox[0] - minX, z.bbox[1] - minY, z.bbox[2] - minX, z.bbox[3] - minY];
-        const relPolygon = z.polygon.map(([x, y]) => [x - minX, y - minY]);
-        const relGeometry = z.geometry
-          ? {
-              ...z.geometry,
-              bbox: {
-                x: Math.max(0, z.geometry.bbox.x - minX),
-                y: Math.max(0, z.geometry.bbox.y - minY),
-                width: z.geometry.bbox.width,
-                height: z.geometry.bbox.height,
-              },
-              points: (z.geometry.points || []).map((pt) => ({
-                x: pt.x - minX,
-                y: pt.y - minY,
-              })),
-            }
-          : null;
-        return {
-          ...z,
-          bbox: relBbox,
-          polygon: relPolygon,
-          geometry: relGeometry,
-        };
-      });
-
-      roomWidth = (maxX - minX) / scale;
-      roomDepth = (maxY - minY) / scale;
-    } else if (editorData.parseResult?.boundary) {
-      roomWidth = editorData.parseResult.boundary.w / scale;
-      roomDepth = editorData.parseResult.boundary.h / scale;
-    }
-
-    const spaces = normalizedZones.map((zone) => ({
+    const spaces = imagePixelZones.map((zone) => ({
       id: `space-${zone.id}`,
       name: zone.name,
       type: zone.type === 'exterior' ? 'exterior' : 'interior',
@@ -166,7 +152,11 @@ export default function Upload({ embedInWizard = false }) {
     setSpaceReview({
       sourceRoomId: editorData.room.id,
       imageUrl: previewImageUrl,
-      normalizedZones,
+      imagePixelZones,
+      roomZones,
+      imageWidth,
+      imageHeight,
+      boundary: boundaryForRoom,
       roomWidth: Math.round(roomWidth),
       roomDepth: Math.round(roomDepth),
       scale,
@@ -194,9 +184,10 @@ export default function Upload({ embedInWizard = false }) {
 
     let roomId = spaceReview.sourceRoomId;
     const payload = {
-      zones: spaceReview.normalizedZones,
+      zones: spaceReview.roomZones,
       width: spaceReview.roomWidth,
       depth: spaceReview.roomDepth,
+      scale_px_per_inch: spaceReview.scale,
     };
 
     const displayProjectName = resolvedProjectTitle || projectName?.trim();
@@ -207,7 +198,7 @@ export default function Upload({ embedInWizard = false }) {
         width: spaceReview.roomWidth,
         depth: spaceReview.roomDepth,
         scale_px_per_inch: spaceReview.scale,
-        zones: spaceReview.normalizedZones,
+        zones: spaceReview.roomZones,
       });
       roomId = draft.id;
     } else {
@@ -227,7 +218,11 @@ export default function Upload({ embedInWizard = false }) {
     project.spaces = mergedSpaces;
     project.floorplan = {
       imageUrl: spaceReview.imageUrl || null,
-      zones: spaceReview.normalizedZones || [],
+      zones: spaceReview.imagePixelZones || [],
+      imageWidth: spaceReview.imageWidth || null,
+      imageHeight: spaceReview.imageHeight || null,
+      boundary: spaceReview.boundary || null,
+      coordinateSpace: 'imagePixels',
       scalePxPerInch: spaceReview.scale || null,
       sourceRoomId: roomId || null,
       updatedAt: new Date().toISOString(),
@@ -424,10 +419,10 @@ export default function Upload({ embedInWizard = false }) {
         {editorData && (
           <RoomEditor
             imageUrl={editorData.imageUrl}
-            imageWidth={editorData.parseResult?.image_width || 800}
-            imageHeight={editorData.parseResult?.image_height || 600}
-            initialZones={editorData.parseResult?.rooms || []}
-            boundary={editorData.parseResult?.boundary || null}
+            imageWidth={editorLayout?.imageWidth || 800}
+            imageHeight={editorLayout?.imageHeight || 600}
+            initialZones={editorLayout?.zones || []}
+            boundary={editorLayout?.boundary || null}
             scalePxPerInch={editorData.parseResult?.scale_px_per_inch || 1}
             onConfirm={onEditorConfirm}
             onCancel={onEditorCancel}

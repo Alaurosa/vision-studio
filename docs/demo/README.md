@@ -12,15 +12,14 @@ After recording, the demo is saved as:
 
 ## What the demo covers
 
-1. **Landing** — editorial homepage and workflow scroll
-2. **Studio** — project dashboard
-3. **New project** — template-based living room setup
-4. **2D editor** — starter catalog placement (sofa + coffee table)
-5. **Materials** — wall color presets
-6. **3D** — Overview / Walkthrough camera presets
-7. **Export** — JSON layout download
-8. **Chat** — Design Inspiration Assistant
-9. **Home** — closing frame
+1. **Landing** → **Studio** — product intro
+2. **Upload floorplan** — AI analysis pipeline + room zone editor (mocked parse for reliable recording)
+3. **Project vision** — style chips + assistant direction
+4. **Space Assistant** — furnish living room, then move furniture via chat
+5. **3D** — orbit / zoom / Walkthrough & Overview presets (Screen Studio–style smooth camera moves)
+6. **Confirmation** — project summary before editor
+
+Recording uses deterministic API mocks (`e2e/helpers/demo-mocks.js`) so no OpenAI/Python is required.
 
 ## Automated tests
 
@@ -40,7 +39,7 @@ Server API smoke: `cd server && npm run test:e2e`
 
 ## Record again
 
-Prerequisites: Node 18+, client + server dev deps installed.
+Prerequisites: Node 18+, client + server dev deps installed. The demo uploads **`floorplan2.jpg`** from the repo root (also copied to `e2e/fixtures/floorplan2.jpg`).
 
 ```bash
 # Terminal A (if not using Playwright webServer auto-start)

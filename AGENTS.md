@@ -58,9 +58,12 @@ cd server && node scripts/setup.js
 # Apply database schema (auto or manual)
 node server/scripts/applySchema.js [DB_PASSWORD]
 
-# Python AI Service
+# Python AI Service (required for real floorplan GPT analysis)
 cd python && pip install -r requirements.txt
 uvicorn app:app --host 0.0.0.0 --port 5001 --reload
+
+# Verify floorplan AI (OpenAI key + Python + sample parse)
+node server/scripts/checkFloorplanAi.js floorplan2.jpg
 
 # Scripts
 cd server && node scripts/seedFurniture.js  # Seed IKEA + Ashley data
@@ -162,7 +165,7 @@ vision-studio/
 │       │   ├── recommendationRules.js  # recommendForRoom() for FurnitureCatalogPanel
 │       │   ├── layoutGuidance.js       # copy for Materials layout-intent panel
 │       │   ├── collision.js
-│       │   ├── floorplanGeometry.js
+│       │   ├── floorplanGeometry.js # Floorplan overlay coords: `resolveEditorZonesFromParse`, `zonesToImagePixels`, `ensureFloorplanZonesInImageSpace`, `projectFloorplanOverlays`; `project.floorplan.coordinateSpace: 'imagePixels'`
 │       │   ├── projectCompat.js        # localStorage `vs-projects-v1`
 │       │   ├── chatRouting.js
 │       │   ├── roomWallMath.js
@@ -283,6 +286,7 @@ vision-studio/
 │   │   ├── kenneyMapping.js      # Category defaults + per-item overrides → /models/kenney/*.glb (used by seedFurniture + fallbackStore)
 │   │   ├── overlapResolver.js    # Shared overlap resolver (greedy spiral + linear scan) + layout validator
 │   │   ├── normalizeZones.js    # Shared zone normalization (boundary-relative coordinates)
+│   │   ├── floorplanParse.js    # Python /parse-floorplan client + shared guest/authed response (zones, parse_method, openai_vision)
 │   │   ├── chatFunctions.js      # 15 chat tool definitions + executeFunction() dispatch
 │   │   ├── llmRouter.js
 │   │   ├── exportFormats.js
@@ -425,7 +429,7 @@ Lazy-loaded pages; `ErrorBoundary` + `HelmetProvider` + `Toaster` at root. Navba
 | GET | `/api/rooms/:id` | Get room + placements |
 | PUT | `/api/rooms/:id` | Update room (name, dimensions, walls, zones, scale, `interior` → `detected_objects.interior` and/or `interior` column when present) |
 | DELETE | `/api/rooms/:id` | Delete room and associated placements |
-| POST | `/api/rooms/:id/upload-floorplan` | Upload floor plan → Python AI parse → zone extraction + dimension detection |
+| POST | `/api/rooms/:id/upload-floorplan` | Upload floor plan → Python GPT parse → returns `zones`, `parse_method`, `openai_vision`, `parse_result` (same shape as public parse) + persists to room |
 | POST | `/api/rooms/:id/calibrate` | Two-point scale calibration (p1, p2, real_world_inches) |
 
 ### Project Routes (Phase 2 additive alignment)
@@ -469,7 +473,7 @@ Lazy-loaded pages; `ErrorBoundary` + `HelmetProvider` + `Toaster` at root. Navba
 
 | Method | Route | Description |
 | --- | --- | --- |
-| POST | `/api/public/parse-floorplan` | Stateless guest floorplan parse (no auth, no DB writes) |
+| POST | `/api/public/parse-floorplan` | Stateless guest floorplan parse (no auth, no DB writes); GPT via Python when service is up |
 
 ### 3D Model Routes
 
@@ -560,7 +564,7 @@ All tables use Row Level Security — users can only access their own data. The 
 - **3D room shell + furniture** (`RoomViewer3D` + `RoomShell3D` + `roomShell3d.js` + `SmartFurnitureModel` + `furniture3d.js`): **`RoomViewer3D`** draws a rectangular floor and translucent ceiling from `room.width` / `room.depth` / `room.height` (inches, default 180×144×96), converted with `INCHES_TO_METERS` — **no perimeter walls** in 3D so furniture stays visible from outside the room. `RoomInterior3D` applies Materials floor color only (wallpaper/wall art omitted in 3D). Furniture uses the same inch→meter origin as 2D (`x_inches` / `y_inches` on the floor plane). Polygon/L-shaped wall extrusion is **not** implemented in 3D yet. **`ProjectViewer3D`** remains floorplan-only (zones/spaces, no furniture, no per-room shell). If a placement has `model_url` or `modelUrl`, load the GLB (uniform-scaled to catalog footprint/dimensions, `model_rotation_y` optional); on load error or missing URL, fall back to `ProceduralFurniture` (per-item Suspense/error boundary—do not wrap the whole `Canvas` in Suspense or GLB loading unmounts the scene). **Starter catalog** (`client/src/data/furnitureCatalog.js`) ships curated Kenney `modelUrl` values (`modelStatus: curated`, `modelSourceType: kenney`, CC0 attribution fields); GLBs are visual proxies only—**catalog inch dimensions remain the layout source of truth**. This path does **not** call Meshy/Tripo from the editor.
 - **3D room camera navigation** (`roomCamera3d.js` + `RoomSceneControls.jsx`): OrbitControls with damping, pan, and room-scaled `minDistance`/`maxDistance`; default position/target from `getDefaultRoomCameraPosition` / `getDefaultRoomCameraTarget`. UI: **Overview** (corner orbit) vs **Walkthrough** (eye-height preset in front of the room, still orbit—no WASD/pointer-lock). **Reset view** restores the active preset. **First-person WASD** is deferred. Manual QA: open room editor → place starter sofa/table/bed → 3D → orbit/zoom/pan → Reset → toggle Overview/Walkthrough → 2D↔3D → confirm shell, interior, and furniture stay visible.
 - The legacy Meshy v2 route (`/api/models/*`) and server `kenneyMapping.js` remain for seeded API catalog items but are not required for starter-catalog editor placements.
-- Floorplan upload uses a 3-stage pipeline: (1) 20×20 grid overlay drawn on image, (2) GPT-5.4 identifies rooms using grid coordinates — returns rectangular bboxes for simple rooms and polygon vertices for L-shaped/irregular rooms (only real habitable rooms — no hallways, stairs, or entries), (3) OpenCV wall-snap aligns each bbox edge to the nearest architectural wall. Results are normalized into editable `zones` stored in room-local coordinates.
+- **Floorplan upload (requires Python on :5001 + `OPENAI_API_KEY` in root `.env`)**: Client `AnalysisWorkflow` → `POST /api/public/parse-floorplan` (guest) or `POST /api/rooms/:id/upload-floorplan` (after room create). Both routes call `server/services/floorplanParse.js` → Python `POST /parse-floorplan` → `python/services/floorplan_parser.py`: (1) 20×20 grid overlay on image, (2) **GPT-5.4 vision** identifies rooms in grid coordinates (rect bboxes or polygons for L-shaped rooms; habitable rooms only), (3) OpenCV wall-snap on bbox edges. OpenCV-only fallback runs if Python is down or the key is missing (`method: opencv` / `unavailable`). API responses include normalized `zones`, `parse_method`, `openai_vision`, and `parse_result` (with `zones` inside) so `RoomEditor` and `Upload` behave the same for guest and authed paths. Toasts in `AnalysisWorkflow` warn when AI is offline or fell back. Verify with `node server/scripts/checkFloorplanAi.js [image]`. **Playwright demo** (`e2e/helpers/demo-mocks.js`) mocks parse/chat for video only — not used in normal dev.
 - The RoomEditor (`upload/RoomEditor.jsx`) supports both rectangular and polygon room shapes. Users can draw rectangles (click-drag) or polygons (click vertices, close by clicking first vertex or "Close Shape" button). AI-detected polygons are rendered as SVG polygons with vertex handles. Room dimensions are decoupled from the visual shape.
 - The pre-editor adjust/confirm step is the geometry source of truth for the frontend project overlay: confirmed spaces persist normalized geometry on the localStorage-backed compatibility object (`project.floorplan.zones[]` and `project.spaces[].geometry` with `type`, `bbox`, optional polygon `points`, `source`) before entering the editor. The Supabase `projects`/`spaces` schema currently stores project/space metadata and room links; durable geometric room data still lives on `rooms.zones`.
 - The studio canvas (`RoomCanvas.jsx`) renders polygon zones using Konva `Line` with the actual polygon points, not just bounding boxes. This allows non-rectangular rooms to display correctly in the editor.
@@ -593,6 +597,7 @@ All tables use Row Level Security — users can only access their own data. The 
 - **Hub** (`/studio/project/:id`): primary **Open Editor**; **Open Project Vision Assistant** (`/vision`); **Review Spaces** (`/confirm?from=hub`). Optional project Q&amp;A at `/chat`. Hub vision summary uses `formatProjectVisionSummary` (deduped text, tags shown once). **Continue guided setup** appears only while vision or confirmation is incomplete.
 - **Project editor scope**: `/studio/project/:id/editor` now opens **full-floorplan project mode** by default (not auto-routed into one room). `/studio/project/:id/editor/:spaceId` keeps the same project editor shell and sets the selected space context. In project mode, 2D/3D have project-wide fallback previews (`ProjectCanvas` / `ProjectViewer3D`) and the bottom bar lists **All Spaces + interior/exterior spaces** from project metadata; spaces without linked rooms remain selectable and show a placeholder notice instead of hard-failing.
 - **Project editor title + 3D fallback**: In project mode, toolbar metadata resolves the project name from current loaded project data (with query fallback) instead of a static label. `ProjectViewer3D` no longer lays out spaces in a generic strip; it uses linked room-zone bounding boxes for relative placement and shows a clean "3D preview needs confirmed floorplan geometry" fallback when usable geometry is missing.
+- **Floorplan overlay coordinates** (`floorplanGeometry.js` + `RoomEditor` + `Upload` + `ProjectCanvas`): AI/server `zones` are boundary-relative; editor and `project.floorplan.zones` use **full image pixel space** (`coordinateSpace: 'imagePixels'`, plus `imageWidth`/`imageHeight`/`boundary`). `RoomEditor` aligns SVG and image with `object-fill` (1:1 viewBox). Room DB rows still get boundary-relative zones via `zonesToBoundaryRelative` on save.
 - **Color overlay toggle**: Both pre-editor (`RoomEditor`) and project editor (`ProjectCanvas`) include a visual-only `Color Overlay` toggle to switch between filled overlays and outline-only overlays over the floorplan image; geometry data is unchanged.
 - **Canonical review path**: Project hub **Review Spaces** now routes to `/studio/project/:id/confirm?mode=adjust`, which opens the `RoomEditor`-based adjust workflow for move/resize/rename/type/overlay edits and persists updates back into the local project compatibility overlay (`project.floorplan.zones` + `project.spaces[].geometry`) while room-level zones remain in `rooms.zones`.
 - **Editor entry hardening**: Hub **Open Editor** now chooses the first editable linked space (interior-first) and navigates to `/studio/project/:id/editor/:spaceId`. If no space has a valid linked room, the hub shows an inline guidance state (Review Spaces / Add Interior / Add Exterior) instead of bouncing with a toast.

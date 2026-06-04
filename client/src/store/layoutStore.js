@@ -43,7 +43,7 @@ function normalizeZonesArray(zones) {
   return (Array.isArray(zones) ? zones : []).map((zone, index) => normalizeZone(zone, index));
 }
 
-function getZoneBounds(zone) {
+export function getZoneBounds(zone) {
   if (!zone) return null;
   const bbox = Array.isArray(zone.bbox) && zone.bbox.length === 4 ? zone.bbox : null;
   if (bbox) return { left: bbox[0], top: bbox[1], right: bbox[2], bottom: bbox[3] };

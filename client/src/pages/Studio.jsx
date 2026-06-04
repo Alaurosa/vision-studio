@@ -156,6 +156,32 @@ function mergeDashboardProjects(apiProjects, localProjects) {
   });
 }
 
+// Shift a zone list's bbox / polygon / geometry by (dx, dy). Used to realign
+// origin-shifted saved zones with the full floor-plan image in Adjust Spaces.
+function shiftZones(zones, dx, dy) {
+  if (!dx && !dy) return zones || [];
+  return (zones || []).map((z) => ({
+    ...z,
+    bbox: Array.isArray(z.bbox) && z.bbox.length === 4
+      ? [z.bbox[0] + dx, z.bbox[1] + dy, z.bbox[2] + dx, z.bbox[3] + dy]
+      : z.bbox,
+    polygon: Array.isArray(z.polygon)
+      ? z.polygon.map(([x, y]) => [x + dx, y + dy])
+      : z.polygon,
+    geometry: z.geometry
+      ? {
+          ...z.geometry,
+          bbox: z.geometry.bbox
+            ? { ...z.geometry.bbox, x: z.geometry.bbox.x + dx, y: z.geometry.bbox.y + dy }
+            : z.geometry.bbox,
+          points: Array.isArray(z.geometry.points)
+            ? z.geometry.points.map((pt) => ({ ...pt, x: pt.x + dx, y: pt.y + dy }))
+            : z.geometry.points,
+        }
+      : z.geometry,
+  }));
+}
+
 function buildAdjustZones(project) {
   const floorplan = project?.floorplan || {};
   const zones = Array.isArray(floorplan?.zones) ? floorplan.zones : [];
@@ -658,6 +684,17 @@ export default function Studio() {
     const adjustZones = buildAdjustZones(project);
     const floorplanImageUrl = project?.floorplan?.imageUrl || null;
     const scalePxPerInch = project?.floorplan?.scalePxPerInch || 1;
+    // When the saved floorplan carries the boundary offset + image size (new
+    // projects), render Adjust Spaces in full-image space so zones line up with
+    // the image — exactly like the setup screen. Older projects fall back to the
+    // legacy zone-extent sizing.
+    const fpBoundary = project?.floorplan?.boundary || null;
+    const fpImageW = project?.floorplan?.imageWidth || null;
+    const fpImageH = project?.floorplan?.imageHeight || null;
+    const canAlignToImage = Boolean(fpBoundary && fpImageW && fpImageH);
+    const displayZones = canAlignToImage
+      ? shiftZones(adjustZones, fpBoundary.x, fpBoundary.y)
+      : adjustZones;
 
     if (confirmPhase === 'spaces') {
       return <Navigate replace to={`/studio/project/${projectId}/confirm?mode=adjust`} />;
@@ -665,19 +702,28 @@ export default function Studio() {
 
     if (confirmMode === 'adjust') {
       const hasGeometry = adjustZones.length > 0;
-      const imageW = hasGeometry
-        ? Math.max(...adjustZones.map((z) => z.bbox?.[2] || 0), 1)
-        : 0;
-      const imageH = hasGeometry
-        ? Math.max(...adjustZones.map((z) => z.bbox?.[3] || 0), 1)
-        : 0;
+      const imageW = canAlignToImage
+        ? fpImageW
+        : hasGeometry
+          ? Math.max(...adjustZones.map((z) => z.bbox?.[2] || 0), 1)
+          : 0;
+      const imageH = canAlignToImage
+        ? fpImageH
+        : hasGeometry
+          ? Math.max(...adjustZones.map((z) => z.bbox?.[3] || 0), 1)
+          : 0;
 
       const persistAdjustedSpaces = async (finalZones) => {
         setAdjustConfirmIssue(null);
+        // RoomEditor edited in full-image space when aligned; shift back to the
+        // stored origin-relative space so downstream consumers stay consistent.
+        const savedZones = canAlignToImage
+          ? shiftZones(finalZones, -fpBoundary.x, -fpBoundary.y)
+          : finalZones;
         const nextProject = { ...project };
-        const finalById = new Map(finalZones.map((z) => [z.id, z]));
+        const finalById = new Map(savedZones.map((z) => [z.id, z]));
         const existingSpaces = Array.isArray(project?.spaces) ? project.spaces : [];
-        const zoneSpaces = finalZones.map((zone, idx) => {
+        const zoneSpaces = savedZones.map((zone, idx) => {
           const existing = existingSpaces.find((s) => (s.zoneId || s.zone_id) === zone.id);
           return {
             ...(existing || {}),
@@ -697,7 +743,7 @@ export default function Studio() {
         nextProject.floorplan = {
           ...(project.floorplan || {}),
           imageUrl: floorplanImageUrl,
-          zones: finalZones,
+          zones: savedZones,
           scalePxPerInch,
           updatedAt: new Date().toISOString(),
         };
@@ -846,10 +892,10 @@ export default function Studio() {
       return (
         <RoomEditor
           imageUrl={floorplanImageUrl}
-          imageWidth={Math.max(800, imageW + 80)}
-          imageHeight={Math.max(600, imageH + 80)}
-          initialZones={adjustZones}
-          boundary={null}
+          imageWidth={canAlignToImage ? imageW : Math.max(800, imageW + 80)}
+          imageHeight={canAlignToImage ? imageH : Math.max(600, imageH + 80)}
+          initialZones={displayZones}
+          boundary={fpBoundary}
           scalePxPerInch={scalePxPerInch}
           onConfirm={persistAdjustedSpaces}
           onCancel={() => navigate('/studio')}

@@ -114,12 +114,16 @@ export default function Upload({ embedInWizard = false }) {
     let roomWidth = 240;
     let roomDepth = 180;
     let normalizedZones = finalZones;
+    let boundaryOffset = { x: 0, y: 0 };
 
     if (finalZones.length > 0) {
       const minX = Math.min(...finalZones.map(z => z.bbox[0]));
       const minY = Math.min(...finalZones.map(z => z.bbox[1]));
       const maxX = Math.max(...finalZones.map(z => z.bbox[2]));
       const maxY = Math.max(...finalZones.map(z => z.bbox[3]));
+      // Image-space origin of the detected region. Persisted so the Adjust
+      // Spaces editor can realign the (origin-shifted) zones with the full image.
+      boundaryOffset = { x: minX, y: minY };
 
       normalizedZones = finalZones.map((z) => {
         const relBbox = [z.bbox[0] - minX, z.bbox[1] - minY, z.bbox[2] - minX, z.bbox[3] - minY];
@@ -176,6 +180,9 @@ export default function Upload({ embedInWizard = false }) {
       scale,
       spaces,
       previewImageUrl,
+      boundary: boundaryOffset,
+      imageWidth: editorData.parseResult?.image_width || null,
+      imageHeight: editorData.parseResult?.image_height || null,
     });
     setEditorData(null);
   };
@@ -242,6 +249,11 @@ export default function Upload({ embedInWizard = false }) {
       zones: spaceReview.normalizedZones || [],
       scalePxPerInch: spaceReview.scale || null,
       sourceRoomId: roomId || null,
+      // Persisted so Adjust Spaces can realign origin-shifted zones with the
+      // full floor-plan image (see Studio adjust-spaces render).
+      boundary: spaceReview.boundary || null,
+      imageWidth: spaceReview.imageWidth || null,
+      imageHeight: spaceReview.imageHeight || null,
       updatedAt: new Date().toISOString(),
     };
     project.previewImageUrl =

@@ -1,10 +1,12 @@
-import { Suspense, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid, Environment } from '@react-three/drei';
-import { useLayoutStore, selectVisibleFurniture } from '@/store/layoutStore';
+import { useShallow } from 'zustand/react/shallow';
+import { useLayoutStore, selectVisibleFurniture, getZoneBounds } from '@/store/layoutStore';
 import { CATEGORY_COLORS } from '@/utils/constants';
 import { getRotatedBoundingBox } from '@/utils/scale';
 import { cameraDistanceBounds, defaultCameraPose } from '@/utils/cameraNav';
+import { zoneScopedDimensions, scopeFurnitureToOrigin } from '@/utils/roomScope';
 import SmartFurnitureModel from './SmartFurnitureModel';
 import RoomInterior3D from './RoomInterior3D';
 import CameraCollider from './CameraCollider';
@@ -18,17 +20,44 @@ const IN_TO_M = INCHES_TO_METERS;
 
 export default function RoomViewer3D() {
   const room = useLayoutStore((s) => s.room);
-  const furniture = useLayoutStore(selectVisibleFurniture);
-  const w = (room?.width || 180) * IN_TO_M;
-  const d = (room?.depth || 144) * IN_TO_M;
-  const h = (room?.height || 96) * IN_TO_M;
+  const zones = useLayoutStore((s) => s.zones);
+  const activeZoneId = useLayoutStore((s) => s.activeZoneId);
+  // useShallow keeps the furniture array reference stable when its contents are
+  // unchanged (selectVisibleFurniture .filter()s a fresh array each call), so the
+  // collider/minimap memos don't recompute on unrelated store updates.
+  const visibleFurniture = useLayoutStore(useShallow(selectVisibleFurniture));
+
+  // Scope the 3D scene to the selected room (zone), so it shows only that room —
+  // mirroring how the 2D editor crops to the active zone. With no zone active
+  // ("All Rooms") this falls back to the whole floor plan, unchanged.
+  const activeZone = useMemo(
+    () => (zones || []).find((z) => z.id === activeZoneId) || null,
+    [zones, activeZoneId],
+  );
+  const bounds = getZoneBounds(activeZone);
+  const { widthIn, depthIn, heightIn, originX, originY } = zoneScopedDimensions(room, bounds);
+  const furniture = useMemo(
+    () => scopeFurnitureToOrigin(visibleFurniture, originX, originY),
+    [visibleFurniture, originX, originY],
+  );
+
+  const w = widthIn * IN_TO_M;
+  const d = depthIn * IN_TO_M;
+  const h = heightIn * IN_TO_M;
+
+  // Camera / collision / minimap frame the scoped room, not the whole floor.
+  // Spread keeps room.interior so wallpaper + floor styling still resolve.
+  const scopedRoom = useMemo(
+    () => ({ ...room, width: widthIn, depth: depthIn, height: heightIn }),
+    [room, widthIn, depthIn, heightIn],
+  );
 
   const controlsRef = useRef(null);
   const minimapCanvasRef = useRef(null);
   const [showMinimap, setShowMinimap] = useState(true);
 
-  const distance = useMemo(() => cameraDistanceBounds(room), [room]);
-  const home = useMemo(() => defaultCameraPose(room), [room]);
+  const distance = useMemo(() => cameraDistanceBounds(scopedRoom), [scopedRoom]);
+  const home = useMemo(() => defaultCameraPose(scopedRoom), [scopedRoom]);
 
   const handleResetView = () => {
     const controls = controlsRef.current;
@@ -37,6 +66,13 @@ export default function RoomViewer3D() {
     controls.target.set(home.target.x, home.target.y, home.target.z);
     controls.update();
   };
+
+  // Re-frame the camera when the active room (zone) or its size changes, so
+  // switching rooms in the 2D bar lands on a framed view of the new room.
+  useEffect(() => {
+    handleResetView();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeZoneId, widthIn, depthIn, heightIn]);
 
   return (
     <div className="w-full h-full bg-paper-100 relative">
@@ -67,7 +103,9 @@ export default function RoomViewer3D() {
           const color = it.color || CATEGORY_COLORS[it.category] || CATEGORY_COLORS.default;
           const rotY = -(it.rotation || 0) * Math.PI / 180;
           return (
-            <group key={it.id} position={[x, fh / 2, z]} rotation={[0, rotY, 0]}>
+            // Group sits at floor level; SmartFurnitureModel (GLB + procedural)
+            // builds upward from Y=0, so pieces rest on the floor, not mid-air.
+            <group key={it.id} position={[x, 0, z]} rotation={[0, rotY, 0]}>
               <SmartFurnitureModel item={it} w={fw} d={fd} h={fh} color={color} />
             </group>
           );
@@ -103,11 +141,11 @@ export default function RoomViewer3D() {
         />
 
         {/* Collision: keep the camera above the floor and out of furniture (3.2). */}
-        <CameraCollider room={room} furniture={furniture} />
+        <CameraCollider room={scopedRoom} furniture={furniture} />
 
         {/* Minimap driver — reads the live camera pose and paints the 2D overlay (3.3). */}
         <MinimapTracker
-          room={room}
+          room={scopedRoom}
           furniture={furniture}
           canvasRef={minimapCanvasRef}
           enabled={showMinimap}

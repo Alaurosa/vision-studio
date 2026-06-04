@@ -59,4 +59,14 @@ describe('selectVisibleFurniture', () => {
     useLayoutStore.setState({ activeZoneId: 'missing-zone' });
     expect(selectVisibleFurniture(useLayoutStore.getState())).toEqual([sofa, table]);
   });
+
+  it('prefers zone_id when set on placement', () => {
+    const taggedSofa = { ...sofa, zone_id: 'zone-a' };
+    const taggedTable = { ...table, zone_id: 'zone-b' };
+    useLayoutStore.setState({
+      furniture: [taggedSofa, taggedTable],
+      activeZoneId: 'zone-a',
+    });
+    expect(selectVisibleFurniture(useLayoutStore.getState())).toEqual([taggedSofa]);
+  });
 });

@@ -45,8 +45,20 @@ cd ../python && python3 -m venv venv && source venv/bin/activate && pip install 
 ### 2. Environment
 
 - **Server + Python** load the **root** `.env` (copy from `.env.example`). Real `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` are required for persisted data; placeholder values (e.g. `your-project.supabase.co`) skip remote DB and run **in-memory demo mode** with fast `/api/status`.
-- **Client**: `client/.env.local` — `NEXT_PUBLIC_SUPABASE_*` (or `VITE_*` aliases), `VITE_API_URL=http://localhost:3001`.
+- **Client** (`client/.env.local`, see `client/.env.example`): `VITE_API_URL` and public Supabase keys only (`NEXT_PUBLIC_SUPABASE_*` or `VITE_*`). **Do not** put `OPENAI_API_KEY`, `REPLICATE_API_TOKEN`, or service-role keys in Vite env vars.
 - **Marketing**: `marketing/.env.local` if you run the Next app.
+
+**Deployed (typical):**
+
+| Service | Host | Env |
+| -------- | ------ | ----- |
+| Frontend | Vercel | `VITE_API_URL`, `VITE_SUPABASE_*` / `NEXT_PUBLIC_SUPABASE_*` |
+| API | Render `vision-studio-server` | `OPENAI_API_KEY`, Supabase, `PYTHON_SERVICE_URL`, CORS (`CLIENT_ORIGIN`, `ALLOW_VERCEL_PREVIEWS`, etc.) |
+| AI | Render `vision-studio-python` | `OPENAI_API_KEY`; `REPLICATE_API_TOKEN` only if room-photo endpoints are used |
+
+### Editor pipeline (no silent vision apply)
+
+Project Vision (guided chips) → **Apply Vision to Layout** (explicit) → Materials (manual edits protected) → furniture placement → 2D Konva / 3D preview. See **AGENTS.md** for full behavior.
 
 ### 3. Database (optional for full persistence)
 

@@ -8,13 +8,12 @@ import { useAuth } from '@/hooks/useAuth';
 import { useLayoutStore } from '@/store/layoutStore';
 import AnalysisWorkflow from '@/components/upload/AnalysisWorkflow';
 import RoomEditor from '@/components/upload/RoomEditor';
+import ProjectSaveAuthModal from '@/components/project/ProjectSaveAuthModal';
 import { createProjectDraft, getProjectById, upsertProject } from '@/utils/projectCompat';
 import {
-  getFloorplanImageMeta,
-  resolveEditorZonesFromParse,
-  roomDimensionsFromParse,
-  zonesToBoundaryRelative,
-} from '@/utils/floorplanGeometry';
+  persistFloorplanRoomToServer,
+  syncProjectToServerIfPossible,
+} from '@/utils/projectSaveAuth';
 
 export default function Upload({ embedInWizard = false }) {
   const navigate = useNavigate();
@@ -34,6 +33,7 @@ export default function Upload({ embedInWizard = false }) {
   const [editorData, setEditorData] = useState(null);
   const [spaceReview, setSpaceReview] = useState(null);
   const [savingSpaces, setSavingSpaces] = useState(false);
+  const [showSaveAuthGate, setShowSaveAuthGate] = useState(false);
 
   const inputRef = useRef(null);
   const projectIdParam = searchParams.get('projectId');
@@ -109,34 +109,54 @@ export default function Upload({ embedInWizard = false }) {
     });
   };
 
-  const editorLayout = useMemo(() => {
-    if (!editorData?.parseResult) return null;
-    const parseResult = editorData.parseResult;
-    const zones = resolveEditorZonesFromParse(parseResult);
-    const { imageWidth, imageHeight, boundary } = getFloorplanImageMeta(parseResult, zones);
-    return { zones, imageWidth, imageHeight, boundary };
-  }, [editorData]);
-
   const onEditorConfirm = async (finalZones) => {
     if (!editorData?.room) return;
 
-    const parseResult = editorData.parseResult || {};
-    const imagePixelZones = finalZones;
-    const { imageWidth, imageHeight, boundary } = getFloorplanImageMeta(parseResult, imagePixelZones);
-    const dims = roomDimensionsFromParse(
-      parseResult,
-      imagePixelZones,
-      parseResult.scale_px_per_inch || 1,
-    );
-    const scale = dims.scalePxPerInch;
-    const roomWidth = dims.roomWidth;
-    const roomDepth = dims.roomDepth;
-    const boundaryForRoom = boundary || parseResult.boundary || null;
-    const roomZones = boundaryForRoom
-      ? zonesToBoundaryRelative(imagePixelZones, boundaryForRoom)
-      : imagePixelZones;
+    const scale = editorData.parseResult?.scale_px_per_inch || 1;
+    let roomWidth = 240;
+    let roomDepth = 180;
+    let normalizedZones = finalZones;
 
-    const spaces = imagePixelZones.map((zone) => ({
+    if (finalZones.length > 0) {
+      const minX = Math.min(...finalZones.map(z => z.bbox[0]));
+      const minY = Math.min(...finalZones.map(z => z.bbox[1]));
+      const maxX = Math.max(...finalZones.map(z => z.bbox[2]));
+      const maxY = Math.max(...finalZones.map(z => z.bbox[3]));
+
+      normalizedZones = finalZones.map((z) => {
+        const relBbox = [z.bbox[0] - minX, z.bbox[1] - minY, z.bbox[2] - minX, z.bbox[3] - minY];
+        const relPolygon = z.polygon.map(([x, y]) => [x - minX, y - minY]);
+        const relGeometry = z.geometry
+          ? {
+              ...z.geometry,
+              bbox: {
+                x: Math.max(0, z.geometry.bbox.x - minX),
+                y: Math.max(0, z.geometry.bbox.y - minY),
+                width: z.geometry.bbox.width,
+                height: z.geometry.bbox.height,
+              },
+              points: (z.geometry.points || []).map((pt) => ({
+                x: pt.x - minX,
+                y: pt.y - minY,
+              })),
+            }
+          : null;
+        return {
+          ...z,
+          bbox: relBbox,
+          polygon: relPolygon,
+          geometry: relGeometry,
+        };
+      });
+
+      roomWidth = (maxX - minX) / scale;
+      roomDepth = (maxY - minY) / scale;
+    } else if (editorData.parseResult?.boundary) {
+      roomWidth = editorData.parseResult.boundary.w / scale;
+      roomDepth = editorData.parseResult.boundary.h / scale;
+    }
+
+    const spaces = normalizedZones.map((zone) => ({
       id: `space-${zone.id}`,
       name: zone.name,
       type: zone.type === 'exterior' ? 'exterior' : 'interior',
@@ -152,11 +172,7 @@ export default function Upload({ embedInWizard = false }) {
     setSpaceReview({
       sourceRoomId: editorData.room.id,
       imageUrl: previewImageUrl,
-      imagePixelZones,
-      roomZones,
-      imageWidth,
-      imageHeight,
-      boundary: boundaryForRoom,
+      normalizedZones,
       roomWidth: Math.round(roomWidth),
       roomDepth: Math.round(roomDepth),
       scale,
@@ -167,7 +183,7 @@ export default function Upload({ embedInWizard = false }) {
   };
 
   /** Persist confirmed spaces/floorplan onto project (vision collected separately on /vision). */
-  const persistSpaceReviewToProject = async () => {
+  const persistSpaceReviewToProject = async (authenticated = false) => {
     if (!spaceReview) return null;
     let project = projectIdParam ? getProjectById(projectIdParam) : null;
     const nameFromWizard =
@@ -182,31 +198,41 @@ export default function Upload({ embedInWizard = false }) {
       project = { ...project, name: nameFromWizard };
     }
 
-    let roomId = spaceReview.sourceRoomId;
-    const payload = {
-      zones: spaceReview.roomZones,
-      width: spaceReview.roomWidth,
-      depth: spaceReview.roomDepth,
-      scale_px_per_inch: spaceReview.scale,
-    };
-
     const displayProjectName = resolvedProjectTitle || projectName?.trim();
+    let roomId = spaceReview.sourceRoomId;
 
-    if (isGuest) {
+    const isAuthed = authenticated || Boolean(user);
+    if (isAuthed) {
+      try {
+        roomId = await persistFloorplanRoomToServer(
+          spaceReview,
+          displayProjectName || `${project.name} - Floorplan`,
+        );
+      } catch (err) {
+        console.error('Failed to save room updates:', err);
+        const draft = createDraftRoom({
+          name: displayProjectName || `${project.name} - Floorplan`,
+          width: spaceReview.roomWidth,
+          depth: spaceReview.roomDepth,
+          scale_px_per_inch: spaceReview.scale,
+          zones: spaceReview.normalizedZones,
+        });
+        roomId = draft.id;
+      }
+      try {
+        project = await syncProjectToServerIfPossible(project);
+      } catch {
+        // local project remains valid
+      }
+    } else {
       const draft = createDraftRoom({
         name: displayProjectName || `${project.name} - Floorplan`,
         width: spaceReview.roomWidth,
         depth: spaceReview.roomDepth,
         scale_px_per_inch: spaceReview.scale,
-        zones: spaceReview.roomZones,
+        zones: spaceReview.normalizedZones,
       });
       roomId = draft.id;
-    } else {
-      try {
-        await api.put(`/api/rooms/${spaceReview.sourceRoomId}`, payload);
-      } catch (err) {
-        console.error('Failed to save room updates:', err);
-      }
     }
 
     const mergedSpaces = spaceReview.spaces.map((space) => ({
@@ -218,11 +244,7 @@ export default function Upload({ embedInWizard = false }) {
     project.spaces = mergedSpaces;
     project.floorplan = {
       imageUrl: spaceReview.imageUrl || null,
-      zones: spaceReview.imagePixelZones || [],
-      imageWidth: spaceReview.imageWidth || null,
-      imageHeight: spaceReview.imageHeight || null,
-      boundary: spaceReview.boundary || null,
-      coordinateSpace: 'imagePixels',
+      zones: spaceReview.normalizedZones || [],
       scalePxPerInch: spaceReview.scale || null,
       sourceRoomId: roomId || null,
       updatedAt: new Date().toISOString(),
@@ -238,11 +260,11 @@ export default function Upload({ embedInWizard = false }) {
     return project;
   };
 
-  const continueToProjectVision = async () => {
+  const finalizeAndGoToVision = async (authenticated = false) => {
     if (!spaceReview || savingSpaces) return;
     setSavingSpaces(true);
     try {
-      const project = await persistSpaceReviewToProject();
+      const project = await persistSpaceReviewToProject(authenticated);
       if (!project?.id) {
         toast.error('Could not save spaces. Please try again.');
         return;
@@ -254,6 +276,20 @@ export default function Upload({ embedInWizard = false }) {
     } finally {
       setSavingSpaces(false);
     }
+  };
+
+  const continueToProjectVision = () => {
+    if (!spaceReview || savingSpaces) return;
+    if (!user) {
+      setShowSaveAuthGate(true);
+      return;
+    }
+    finalizeAndGoToVision();
+  };
+
+  const onSaveAuthComplete = () => {
+    setShowSaveAuthGate(false);
+    finalizeAndGoToVision(true);
   };
 
   const onEditorCancel = () => {
@@ -419,10 +455,10 @@ export default function Upload({ embedInWizard = false }) {
         {editorData && (
           <RoomEditor
             imageUrl={editorData.imageUrl}
-            imageWidth={editorLayout?.imageWidth || 800}
-            imageHeight={editorLayout?.imageHeight || 600}
-            initialZones={editorLayout?.zones || []}
-            boundary={editorLayout?.boundary || null}
+            imageWidth={editorData.parseResult?.image_width || 800}
+            imageHeight={editorData.parseResult?.image_height || 600}
+            initialZones={editorData.parseResult?.rooms || []}
+            boundary={editorData.parseResult?.boundary || null}
             scalePxPerInch={editorData.parseResult?.scale_px_per_inch || 1}
             onConfirm={onEditorConfirm}
             onCancel={onEditorCancel}
@@ -465,6 +501,13 @@ export default function Upload({ embedInWizard = false }) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {showSaveAuthGate && (
+        <ProjectSaveAuthModal
+          onClose={() => setShowSaveAuthGate(false)}
+          onAuthed={onSaveAuthComplete}
+        />
+      )}
     </div>
   );
 }

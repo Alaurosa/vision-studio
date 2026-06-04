@@ -5,7 +5,6 @@ import { useLayoutStore, selectVisibleFurniture } from '@/store/layoutStore';
 import { CATEGORY_COLORS } from '@/utils/constants';
 import { getRotatedBoundingBox } from '@/utils/scale';
 import SmartFurnitureModel from './SmartFurnitureModel';
-import RoomShell3D from './RoomShell3D';
 import RoomInterior3D from './RoomInterior3D';
 import RoomSceneControls from './RoomSceneControls';
 import {
@@ -14,15 +13,44 @@ import {
 } from '@/utils/furniture3d';
 import { getRoomShellDimensionsMeters } from '@/utils/roomShell3d';
 import { getDefaultRoomCameraPosition } from '@/utils/roomCamera3d';
+import {
+  getRoomViewContext,
+  getRoomViewShellRoom,
+  toLocalFurnitureInches,
+} from '@/utils/roomView3d';
 
 const IN_TO_M = INCHES_TO_METERS;
 
-export default function RoomViewer3D() {
+/**
+ * @param {{ spaceGeometry?: object | null, viewLabel?: string | null }} [props]
+ */
+export default function RoomViewer3D({ spaceGeometry = null, viewLabel = null }) {
   const room = useLayoutStore((s) => s.room);
+  const zones = useLayoutStore((s) => s.zones);
+  const activeZoneId = useLayoutStore((s) => s.activeZoneId);
   const furniture = useLayoutStore(selectVisibleFurniture);
-  const shellDims = getRoomShellDimensionsMeters(room);
+
+  const activeZone = useMemo(
+    () => (activeZoneId ? zones.find((z) => z.id === activeZoneId) : null) || null,
+    [zones, activeZoneId],
+  );
+
+  const viewContext = useMemo(
+    () => getRoomViewContext(room, activeZone, spaceGeometry),
+    [room, activeZone, spaceGeometry],
+  );
+
+  const shellRoom = useMemo(
+    () => getRoomViewShellRoom(room, viewContext),
+    [room, viewContext],
+  );
+
+  const shellDims = getRoomShellDimensionsMeters(shellRoom);
   const { widthM: w, depthM: d, heightM: h } = shellDims;
   const cameraDims = useMemo(() => ({ widthM: w, depthM: d, heightM: h }), [w, d, h]);
+  const { originX, originY } = viewContext;
+
+  const displayLabel = viewLabel || viewContext.label || room?.name || 'Room';
 
   const [navigationMode, setNavigationMode] = useState('overview');
   const [resetSignal, setResetSignal] = useState(0);
@@ -39,6 +67,11 @@ export default function RoomViewer3D() {
 
   return (
     <div className="w-full h-full bg-paper-100 relative">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col gap-1 p-3 sm:p-4">
+        <p className="text-[10px] font-medium uppercase tracking-editorial text-ink-900/70">
+          3D View: {displayLabel}
+        </p>
+      </div>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col gap-2 p-3 sm:p-4">
         <p className="text-[10px] uppercase tracking-editorial text-ink-900/50">{hintText}</p>
         <div className="pointer-events-auto flex flex-wrap items-center gap-2">
@@ -92,18 +125,17 @@ export default function RoomViewer3D() {
           <Environment preset="apartment" />
         </Suspense>
 
-        <RoomShell3D widthM={w} depthM={d} heightM={h} />
-        <RoomInterior3D interior={room?.interior} roomW={w} roomD={d} />
+        <RoomInterior3D interior={room?.interior} roomW={w} roomD={d} roomH={h} />
 
-        {/* Furniture — each SmartFurnitureModel suspends locally; do not wrap Canvas in Suspense */}
         {furniture.map((it) => {
           const dimsIn = getFurnitureRenderDimensionsInches(it);
           const fw = dimsIn.width * IN_TO_M;
           const fd = dimsIn.depth * IN_TO_M;
           const fh = dimsIn.height * IN_TO_M;
           const bbox = getRotatedBoundingBox(dimsIn.width, dimsIn.depth, it.rotation || 0);
-          const x = (it.x_inches + bbox.width / 2) * IN_TO_M;
-          const z = (it.y_inches + bbox.depth / 2) * IN_TO_M;
+          const local = toLocalFurnitureInches(it, originX, originY);
+          const x = (local.x + bbox.width / 2) * IN_TO_M;
+          const z = (local.y + bbox.depth / 2) * IN_TO_M;
           const color = it.color || CATEGORY_COLORS[it.category] || CATEGORY_COLORS.default;
           const rotY = -(it.rotation || 0) * Math.PI / 180;
           return (

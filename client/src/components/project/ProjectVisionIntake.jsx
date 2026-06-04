@@ -10,62 +10,44 @@ import {
   buildSpacesContextFromProject,
   normalizeGlobalVision,
   prepareGlobalVisionForSave,
-  PROJECT_VISION_MOOD_CHIPS,
-  PROJECT_VISION_PRIORITY_KEYWORDS,
-  tagsFromChips,
 } from '@/utils/projectVision';
+import {
+  applyRoomFocusSelection,
+  buildChatGlobalVisionPayload,
+  buildGuidedStepSummaryText,
+  evaluateGuidedVisionReadiness,
+  getActiveGuidedVisionStep,
+  getFocusedSpaceForVision,
+  getOptionsForGuidedStep,
+  GUIDED_VISION_STEP_PROMPTS,
+  NO_MAJOR_CONSTRAINTS,
+  normalizeGuidedVisionFields,
+  toggleGuidedListSelection,
+  toggleRoomSpecificNeed,
+  USE_ALL_ROOMS_EVENLY,
+} from '@/utils/guidedVisionFlow';
 import { isProjectVisionComplete } from '@/utils/visionGate';
-
-const GUIDED_QUESTIONS = [
-  'What feeling should guests have when they enter?',
-  'Which spaces matter most day to day?',
-  'Should the exterior match the interior direction?',
-];
+import {
+  buildVisionSaveStatusMessage,
+  dedupeAssistantFallbackMessages,
+  normalizeVisionIntakeThread,
+  upsertAssistantStatusMessage,
+  upsertGuidedStepSummaryMessage,
+} from '@/utils/projectVisionIntakeChat';
 
 function buildDeterministicVisionSuggestions(globalVision) {
-  const styles = Array.isArray(globalVision?.styleKeywords) ? globalVision.styleKeywords : [];
-  const vibe = globalVision?.moodVibe ? `Focus on a ${globalVision.moodVibe} mood` : 'Define one clear mood';
+  const styles = Array.isArray(globalVision?.moodTags) ? globalVision.moodTags : [];
+  const vibe = styles[0] ? `Lean into a ${styles[0]} feeling` : 'Pick at least two style directions';
   const styleLine =
     styles.length > 0
-      ? `Use this style direction consistently: ${styles.slice(0, 3).join(', ')}.`
-      : 'Pick a few style chips above (Warm, Coastal, Minimal, etc.).';
-  const budget =
-    globalVision?.budgetRange
-      ? `Keep selections aligned to budget: ${globalVision.budgetRange}.`
-      : 'Set a budget range to guide furniture and material tradeoffs.';
-  return [vibe, styleLine, budget];
-}
-
-function getVisionReadiness(globalVision, scope = 'interior_exterior') {
-  const text = (globalVision?.summary || globalVision?.propertyVision || '').trim();
-  const hasVisionText = text.length >= 40;
-  const hasStyleMood =
-    (Array.isArray(globalVision?.styleKeywords) && globalVision.styleKeywords.length > 0) ||
-    Boolean((globalVision?.moodVibe || '').trim());
-  const hasPurposeSignal = /(family|guest|kids|host|rental|work|live|lifestyle|daily)/i.test(text);
-  const hasInteriorGoal =
-    Boolean((globalVision?.interiorGoals || '').trim()) ||
-    /(living|kitchen|bedroom|bathroom|office|interior|room)/i.test(text);
-  const hasExteriorGoal =
-    Boolean((globalVision?.exteriorGoals || '').trim()) ||
-    /(yard|patio|balcony|garden|entry|curb|facade|exterior|outdoor)/i.test(text);
-
-  const wantsInterior = scope !== 'exterior_only';
-  const wantsExterior = scope === 'exterior_only' || scope === 'interior_exterior';
-
-  const missing = [];
-  if (!hasVisionText && !hasStyleMood) {
-    missing.push('Choose a few style chips or tell the assistant your overall direction.');
-  }
-  if (!hasPurposeSignal && !hasStyleMood) missing.push('Mention who uses the property or pick family/hosting chips.');
-  if (wantsInterior && !hasInteriorGoal && !hasStyleMood) {
-    missing.push('Mention an interior priority or a room type you care about.');
-  }
-  if (wantsExterior && !hasExteriorGoal && scope === 'interior_exterior' && !hasStyleMood) {
-    missing.push('Mention an exterior goal if outdoor areas matter.');
-  }
-
-  return { ready: missing.length === 0, missing };
+      ? `Carry these through the layout: ${styles.slice(0, 3).join(', ')}.`
+      : 'Use the style chips to set the overall mood.';
+  const priorities = Array.isArray(globalVision?.priorities) ? globalVision.priorities : [];
+  const priorityLine =
+    priorities.length > 0
+      ? `Prioritize: ${priorities.slice(0, 3).join(', ')}.`
+      : 'Choose two layout priorities that matter most.';
+  return [vibe, styleLine, priorityLine];
 }
 
 /** Draft room binding so chat API accepts vision-only projects with no space yet. */
@@ -90,26 +72,23 @@ export function getVisionChatRoomBinding(project) {
   };
 }
 
-function normalizeThread(raw) {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((m) => m && typeof m.content === 'string')
-    .map((m, i) => ({
-      id: m.id || `m-${i}-${m.role}`,
-      role: m.role,
-      content: m.content,
-    }));
-}
-
 function buildWelcomeMessage(spaces) {
   const base =
-    "I found your project spaces. Let's define the overall feeling, priorities, and constraints before editing individual rooms.";
+    "Let's shape your whole-property direction — tap the options below one step at a time. You can add a short note anytime.";
   if (!spaces?.length) {
     return `${base}\n\nNo spaces are listed yet — you can still set direction here, then review spaces on the next step.`;
   }
   const names = spaces.map((s) => s.name).join(', ');
   return `${base}\n\nSpaces in this project: ${names}.`;
 }
+
+const CHECKLIST_LABELS = {
+  style: 'Style direction',
+  priorities: 'Layout priorities',
+  constraints: 'Constraints',
+  roomFocus: 'Room focus',
+  roomNeeds: 'Room-specific needs',
+};
 
 export default function ProjectVisionIntake({ project, onPersist }) {
   const navigate = useNavigate();
@@ -120,6 +99,8 @@ export default function ProjectVisionIntake({ project, onPersist }) {
   const themeMergedRef = useRef(false);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [optionalNote, setOptionalNote] = useState('');
+  const [persistTick, setPersistTick] = useState(0);
 
   const spacesContext = useMemo(
     () => buildSpacesContextFromProject(project),
@@ -131,17 +112,8 @@ export default function ProjectVisionIntake({ project, onPersist }) {
     [project?.globalVision, project],
   );
 
-  const [selectedChips, setSelectedChips] = useState(() => {
-    const fromKeywords = new Set((gv.moodTags || []).map((k) => String(k).toLowerCase()));
-    const picked = new Set();
-    PROJECT_VISION_MOOD_CHIPS.forEach((c) => {
-      if (fromKeywords.has(c.toLowerCase())) picked.add(c);
-    });
-    return picked;
-  });
-
   const [messages, setMessages] = useState(() => {
-    const saved = normalizeThread(gv.visionIntakeThread);
+    const saved = normalizeVisionIntakeThread(gv.visionIntakeThread);
     if (saved.length > 0) return saved;
     return [
       {
@@ -151,6 +123,10 @@ export default function ProjectVisionIntake({ project, onPersist }) {
       },
     ];
   });
+
+  useEffect(() => {
+    setOptionalNote(gv.notes || '');
+  }, [project?.id, gv.notes]);
 
   useEffect(() => {
     if (!project || themeMergedRef.current) return;
@@ -195,14 +171,14 @@ export default function ProjectVisionIntake({ project, onPersist }) {
     }
   }, [input]);
 
-  const persistFull = (nextMessages, nextGv) => {
+  const persistFull = (nextMessages, patch) => {
     const p = getProjectById(project.id) || project;
     if (!p?.id) return;
     const thread = nextMessages
       .filter((m) => m.id !== 'welcome')
-      .map(({ id, role, content }) => ({ id, role, content }));
+      .map(({ id, role, content, type }) => ({ id, role, content, ...(type ? { type } : {}) }));
     const normalized = prepareGlobalVisionForSave(
-      { ...nextGv, visionIntakeThread: thread, spacesContext },
+      { ...patch, visionIntakeThread: thread, spacesContext },
       p.globalVision || {},
       p,
     );
@@ -213,30 +189,105 @@ export default function ProjectVisionIntake({ project, onPersist }) {
     };
     upsertProject(next);
     onPersist?.(next);
+    setPersistTick((t) => t + 1);
+    return normalized;
   };
 
-  const applyChipSelection = (chipSet) => {
-    const { moodTags, priorities } = tagsFromChips(chipSet, PROJECT_VISION_PRIORITY_KEYWORDS);
+  const liveGv = useMemo(
+    () =>
+      normalizeGlobalVision(
+        getProjectById(project?.id)?.globalVision || project?.globalVision || gv,
+        project,
+      ),
+    [gv, project, project?.globalVision, persistTick],
+  );
+
+  const fields = useMemo(() => normalizeGuidedVisionFields(liveGv), [liveGv]);
+  const activeStep = useMemo(
+    () => getActiveGuidedVisionStep(liveGv, project),
+    [liveGv, project],
+  );
+  const readiness = useMemo(
+    () => evaluateGuidedVisionReadiness(liveGv, project),
+    [liveGv, project],
+  );
+  const stepOptions = useMemo(
+    () => getOptionsForGuidedStep(activeStep, project, liveGv),
+    [activeStep, project, liveGv],
+  );
+  const focusedSpace = useMemo(
+    () => getFocusedSpaceForVision(project, fields),
+    [project, fields],
+  );
+
+  const isChipSelected = (label) => {
+    const key = label.toLowerCase();
+    switch (activeStep) {
+      case 'mood':
+        return fields.moodTags.some((t) => t.toLowerCase() === key);
+      case 'priorities':
+        return fields.priorities.some((t) => t.toLowerCase() === key);
+      case 'constraints':
+        return fields.constraints.some((t) => t.toLowerCase() === key);
+      case 'room_focus':
+        if (label === USE_ALL_ROOMS_EVENLY) return fields.useAllRoomsEvenly;
+        return fields.prioritizedRooms.some((t) => t.toLowerCase() === key);
+      case 'room_needs': {
+        if (!focusedSpace) return false;
+        return (fields.roomSpecificNeeds[focusedSpace.id] || []).some(
+          (t) => t.toLowerCase() === key,
+        );
+      }
+      default:
+        return false;
+    }
+  };
+
+  const applyGuidedSelection = (label) => {
+    if (!project || activeStep === 'complete') return;
     const p0 = getProjectById(project.id) || project;
     const g0 = normalizeGlobalVision(p0.globalVision || {}, p0);
-    let summary = g0.summary || '';
-    if (!summary && moodTags.length > 0) {
-      summary = `Whole-property direction: ${moodTags.slice(0, 5).join(', ')}.`;
+
+    let patchFields;
+    if (activeStep === 'mood') {
+      patchFields = toggleGuidedListSelection(g0, label, 'mood');
+    } else if (activeStep === 'priorities') {
+      patchFields = toggleGuidedListSelection(g0, label, 'priorities');
+    } else if (activeStep === 'constraints') {
+      patchFields = toggleGuidedListSelection(g0, label, 'constraints');
+    } else if (activeStep === 'room_focus') {
+      patchFields = applyRoomFocusSelection(g0, label);
+    } else if (activeStep === 'room_needs' && focusedSpace) {
+      patchFields = toggleRoomSpecificNeed(g0, focusedSpace, label);
+    } else {
+      return;
     }
-    persistFull(
-      messages,
-      prepareGlobalVisionForSave({ summary, moodTags, priorities, styleKeywords: moodTags }, g0, p0),
+
+    const nextGv = prepareGlobalVisionForSave(
+      {
+        moodTags: patchFields.moodTags,
+        priorities: patchFields.priorities,
+        constraints: patchFields.constraints,
+        prioritizedRooms: patchFields.prioritizedRooms,
+        roomSpecificNeeds: patchFields.roomSpecificNeeds,
+        useAllRoomsEvenly: patchFields.useAllRoomsEvenly,
+        styleKeywords: patchFields.moodTags,
+        notes: optionalNote.trim(),
+      },
+      g0,
+      p0,
     );
+
+    const summaryText = buildGuidedStepSummaryText(activeStep, nextGv, p0);
+    const withSummary = upsertGuidedStepSummaryMessage(messages, summaryText);
+    setMessages(withSummary);
+    persistFull(withSummary, nextGv);
   };
 
-  const toggleChip = (chip) => {
-    setSelectedChips((prev) => {
-      const n = new Set(prev);
-      if (n.has(chip)) n.delete(chip);
-      else n.add(chip);
-      applyChipSelection(n);
-      return n;
-    });
+  const handleOptionalNoteBlur = () => {
+    const trimmed = optionalNote.trim();
+    if (trimmed === (liveGv.notes || '').trim()) return;
+    persistFull(messages, { notes: trimmed });
   };
 
   const sendUserMessage = async (text) => {
@@ -245,33 +296,16 @@ export default function ProjectVisionIntake({ project, onPersist }) {
 
     const p0 = getProjectById(project.id) || project;
     const g0 = normalizeGlobalVision(p0.globalVision || {}, p0);
+    const nextGv = prepareGlobalVisionForSave({ notes: optionalNote.trim() || trimmed }, g0, p0);
+    const globalVisionPayload = buildChatGlobalVisionPayload(
+      { ...nextGv, notes: trimmed },
+      p0,
+    );
 
     const userMsg = { id: `u-${Date.now()}`, role: 'user', content: trimmed };
     const nextMessages = [...messages, userMsg];
     setMessages(nextMessages);
-
-    const { moodTags, priorities } = tagsFromChips(
-      new Set(Array.from(selectedChips)),
-      PROJECT_VISION_PRIORITY_KEYWORDS,
-    );
-    let summary = g0.summary || '';
-    if (trimmed.length >= 48 && !summary) {
-      summary = trimmed;
-    } else if (!summary && moodTags.length > 0) {
-      summary = `Whole-property direction: ${moodTags.slice(0, 5).join(', ')}.`;
-    }
-    const nextGv = prepareGlobalVisionForSave(
-      {
-        summary: summary || g0.summary,
-        notes: trimmed,
-        moodTags,
-        priorities,
-        styleKeywords: moodTags,
-      },
-      g0,
-      p0,
-    );
-    persistFull(nextMessages, nextGv);
+    persistFull(nextMessages, { ...nextGv, notes: trimmed });
 
     const binding = getVisionChatRoomBinding(p0);
     setSending(true);
@@ -283,7 +317,7 @@ export default function ProjectVisionIntake({ project, onPersist }) {
         project_id: p0.id,
         space_id: null,
         context_type: 'whole_project',
-        global_vision: nextGv,
+        global_vision: globalVisionPayload,
         space_vision: null,
       });
       const assistantText = data.message || '(no response)';
@@ -294,49 +328,29 @@ export default function ProjectVisionIntake({ project, onPersist }) {
         withAssistant,
         prepareGlobalVisionForSave(
           { visionIntakeAssistantSummary: assistantText.slice(0, 2000) },
-          nextGv,
+          { ...nextGv, notes: trimmed },
           p0,
         ),
       );
     } catch {
       toast.error('Could not reach the assistant. Your choices are saved — try again in a moment.');
-      const bullets = buildDeterministicVisionSuggestions(nextGv);
-      const fallbackMsg = {
-        id: `a-${Date.now()}`,
-        role: 'assistant',
-        content: `Your direction is saved. Quick suggestions:\n\n- ${bullets.join('\n- ')}\n\nAdd chips or a short note, then review project & spaces when ready.`,
-      };
-      const withFb = [...nextMessages, fallbackMsg];
-      setMessages(withFb);
-      persistFull(withFb, nextGv);
+      const bullets = buildDeterministicVisionSuggestions(globalVisionPayload);
+      const statusMsg = buildVisionSaveStatusMessage(bullets);
+      const withStatus = upsertAssistantStatusMessage(nextMessages, statusMsg);
+      setMessages(withStatus);
+      persistFull(withStatus, { ...nextGv, notes: trimmed });
     } finally {
       setSending(false);
     }
   };
 
-  const effectiveGv = useMemo(
-    () =>
-      normalizeGlobalVision(
-        {
-          ...gv,
-          styleKeywords: [...Array.from(selectedChips)],
-          moodTags: [...Array.from(selectedChips)],
-        },
-        project,
-      ),
-    [gv, selectedChips, project],
-  );
-
-  const visionReady = isProjectVisionComplete(effectiveGv);
-  const readiness = useMemo(
-    () => getVisionReadiness(effectiveGv, project?.scope || 'interior_exterior'),
-    [effectiveGv, project?.scope],
-  );
+  const visionReady = isProjectVisionComplete(liveGv, project);
+  const continueLabel = setupNewFlow ? 'Review Project & Spaces' : 'Continue to Studio';
 
   const handleReviewContinue = () => {
     if (!project) return;
-    if (!visionReady || !readiness.ready) {
-      toast.error('Choose a few style directions or share a short note with the assistant first.');
+    if (!visionReady) {
+      toast.error(readiness.helperText || 'Complete the checklist above to continue.');
       return;
     }
     try {
@@ -344,11 +358,17 @@ export default function ProjectVisionIntake({ project, onPersist }) {
         ...project,
         globalVision: prepareGlobalVisionForSave(
           {
-            visionIntakeThread: messages
-              .filter((m) => m.id !== 'welcome')
-              .map(({ id, role, content }) => ({ id, role, content })),
+            visionIntakeThread: dedupeAssistantFallbackMessages(
+              messages.filter((m) => m.id !== 'welcome'),
+            ).map(({ id, role, content, type }) => ({
+              id,
+              role,
+              content,
+              ...(type ? { type } : {}),
+            })),
+            notes: optionalNote.trim(),
           },
-          effectiveGv,
+          liveGv,
           project,
         ),
         visionIntakeCompletedAt: new Date().toISOString(),
@@ -403,7 +423,7 @@ export default function ProjectVisionIntake({ project, onPersist }) {
               Project Vision Assistant
             </h1>
             <p className="mt-4 text-sm text-[#5b5b5b] max-w-2xl leading-relaxed">
-              I&apos;ll use your rooms as context and help shape the whole-property direction.
+              Tap options to set style, priorities, and room focus — no long form required.
             </p>
           </div>
         </div>
@@ -440,31 +460,52 @@ export default function ProjectVisionIntake({ project, onPersist }) {
           </div>
 
           <div className="border-t border-[rgba(0,0,0,0.06)] pt-5 shrink-0 space-y-4">
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-2">Quick direction</p>
-              <div className="flex flex-wrap gap-2">
-                {PROJECT_VISION_MOOD_CHIPS.map((chip) => (
-                  <button
-                    key={chip}
-                    type="button"
-                    onClick={() => toggleChip(chip)}
-                    className={`text-[10px] uppercase tracking-editorial px-3 py-1.5 rounded-full border transition ${
-                      selectedChips.has(chip)
-                        ? 'border-[#004aad] bg-[#eef4f7] text-[#004aad]'
-                        : 'border-[rgba(0,0,0,0.1)] text-[#5b5b5b] hover:border-[#004aad]/40'
-                    }`}
-                  >
-                    {chip}
-                  </button>
-                ))}
+            {activeStep !== 'complete' && (
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-2">
+                  {GUIDED_VISION_STEP_PROMPTS[activeStep]}
+                </p>
+                {activeStep === 'room_needs' && focusedSpace && (
+                  <p className="text-xs text-[#5b5b5b] mb-2">
+                    For <span className="font-medium text-[#171717]">{focusedSpace.name}</span>
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {stepOptions.map((chip) => (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => applyGuidedSelection(chip)}
+                      className={`text-[10px] uppercase tracking-editorial px-3 py-1.5 rounded-full border transition ${
+                        isChipSelected(chip)
+                          ? 'border-[#004aad] bg-[#eef4f7] text-[#004aad]'
+                          : 'border-[rgba(0,0,0,0.1)] text-[#5b5b5b] hover:border-[#004aad]/40'
+                      }`}
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
               </div>
+            )}
+
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-2">Optional note</p>
+              <textarea
+                className="w-full bg-[#fffdf9] border border-[rgba(0,0,0,0.1)] rounded-2xl px-4 py-3 text-sm text-[#171717] placeholder:text-[#9a9a9a] resize-none focus:outline-none focus:border-[#004aad]/45 focus:ring-2 focus:ring-[#004aad]/10 min-h-[44px]"
+                placeholder="Optional: add one sentence, like 'make the living room good for hosting.'"
+                rows={2}
+                value={optionalNote}
+                onChange={(e) => setOptionalNote(e.target.value)}
+                onBlur={handleOptionalNoteBlur}
+              />
             </div>
 
             <div className="flex items-end gap-3">
               <textarea
                 ref={textareaRef}
                 className="flex-1 bg-[#fffdf9] border border-[rgba(0,0,0,0.1)] rounded-2xl px-4 py-3 text-sm text-[#171717] placeholder:text-[#9a9a9a] resize-none focus:outline-none focus:border-[#004aad]/45 focus:ring-2 focus:ring-[#004aad]/10 min-h-[44px] max-h-[120px]"
-                placeholder="Tell me anything specific, or choose options above."
+                placeholder="Ask the assistant anything (optional)"
                 rows={1}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -494,44 +535,45 @@ export default function ProjectVisionIntake({ project, onPersist }) {
               </button>
             </div>
 
+            <div className="rounded-xl border border-[rgba(0,0,0,0.08)] bg-[#fffdf9] px-4 py-3">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-2">Readiness</p>
+              <ul className="space-y-1.5">
+                {Object.entries(CHECKLIST_LABELS).map(([key, label]) => {
+                  const done = readiness.checklist[key];
+                  if (key === 'roomFocus' && readiness.spaces.length === 0) return null;
+                  if (key === 'roomNeeds' && readiness.spaces.length === 0) return null;
+                  return (
+                    <li key={key} className="flex items-center gap-2 text-sm">
+                      <span
+                        className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
+                          done
+                            ? 'border-[#004aad] bg-[#004aad] text-white'
+                            : 'border-[rgba(0,0,0,0.15)] text-transparent'
+                        }`}
+                        aria-hidden
+                      >
+                        ✓
+                      </span>
+                      <span className={done ? 'text-[#171717]' : 'text-[#8b7355]'}>{label}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-2">
               <button
                 type="button"
                 onClick={handleReviewContinue}
                 className="btn-ink px-6 py-3 text-[11px] uppercase tracking-[0.15em] disabled:opacity-40"
-                disabled={!visionReady || !readiness.ready || sending}
+                disabled={!visionReady || sending}
               >
-                Review project & spaces
+                {continueLabel}
               </button>
-              {!visionReady && (
-                <span className="text-xs text-[#8b7355]">
-                  Pick a few chips or send a short note — no long form required.
-                </span>
-              )}
+              <span className={`text-xs ${visionReady ? 'text-[#5b5b5b]' : 'text-[#8b7355]'}`}>
+                {readiness.helperText}
+              </span>
             </div>
-            {!readiness.ready && (
-              <div className="rounded-xl border border-sienna-500/35 bg-paper-100/90 px-4 py-3">
-                <p className="text-xs uppercase tracking-[0.18em] text-sienna-700 mb-2">A little more context helps</p>
-                <ul className="text-sm text-ink-700 space-y-1">
-                  {readiness.missing.map((item) => (
-                    <li key={item}>- {item}</li>
-                  ))}
-                </ul>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {GUIDED_QUESTIONS.map((q) => (
-                    <button
-                      key={q}
-                      type="button"
-                      onClick={() => sendUserMessage(q)}
-                      disabled={sending}
-                      className="text-[10px] uppercase tracking-editorial px-3 py-1.5 rounded-full border border-[rgba(0,0,0,0.1)] bg-[#fffdf9] hover:border-[#004aad]/35 disabled:opacity-50"
-                    >
-                      {q}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>

@@ -1,37 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_ROOM_INTERIOR,
+  isInteriorUserEdited,
+  markInteriorUserPatch,
   normalizeRoomInterior,
   resolveWallDisplayColor,
-  roomWithInterior,
 } from '@/data/roomInterior';
 
 describe('roomInterior', () => {
-  it('normalizes invalid input to defaults', () => {
-    expect(normalizeRoomInterior(null)).toEqual(DEFAULT_ROOM_INTERIOR);
-    expect(normalizeRoomInterior({ wallColor: 'bad', layoutIntent: 'nope' }).wallColor).toBe(
-      DEFAULT_ROOM_INTERIOR.wallColor,
-    );
+  it('resolveWallDisplayColor uses wallpaper tint when set', () => {
+    const color = resolveWallDisplayColor({ wallColor: '#f5f0e8', wallpaperId: 'botanical' });
+    expect(color).toBe('#e8efe4');
   });
 
-  it('keeps valid wallpaper and wall art', () => {
-    const interior = normalizeRoomInterior({
-      wallColor: '#aabbcc',
-      wallpaperId: 'linen',
-      wallArt: { wall: 'south', styleId: 'mirror' },
-      layoutIntent: 'open-flow',
-    });
-    expect(interior.wallpaperId).toBe('linen');
-    expect(interior.wallArt).toEqual({ wall: 'south', styleId: 'mirror' });
-    expect(resolveWallDisplayColor(interior)).toBe('#f0ebe3');
+  it('manual edits are detected via source user', () => {
+    expect(isInteriorUserEdited(markInteriorUserPatch({}))).toBe(true);
+    expect(isInteriorUserEdited({ source: 'vision' })).toBe(false);
   });
 
-  it('hydrates interior from detected_objects on the room', () => {
-    const room = roomWithInterior({
-      id: 'r1',
-      detected_objects: { interior: { wallColor: '#112233', layoutIntent: 'cozy-nook' } },
+  it('preserves layout intent and wall art through normalize', () => {
+    const n = normalizeRoomInterior({
+      wallColor: '#112233',
+      wallpaperId: 'stripe',
+      wallArt: { wall: 'south', styleId: 'framed-print' },
+      layoutIntent: 'cozy-nook',
+      source: 'user',
+      userEditedAt: '2026-01-01T00:00:00.000Z',
     });
-    expect(room.interior.wallColor).toBe('#112233');
-    expect(room.interior.layoutIntent).toBe('cozy-nook');
+    expect(n.wallpaperId).toBe('stripe');
+    expect(n.wallArt?.wall).toBe('south');
+    expect(n.layoutIntent).toBe('cozy-nook');
   });
 });

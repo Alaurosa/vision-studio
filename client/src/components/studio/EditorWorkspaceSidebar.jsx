@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import FurnitureCatalogPanel from '@/components/catalog/FurnitureCatalogPanel';
 import InteriorDesignPanel from '@/components/studio/InteriorDesignPanel';
-import { useLayoutStore } from '@/store/layoutStore';
+import { useLayoutStore, selectVisibleFurniture } from '@/store/layoutStore';
 import { useRoomExport } from '@/hooks/useRoomExport';
 
 const TABS = [
@@ -15,9 +15,14 @@ const TABS = [
 /**
  * IDE-style left workspace: tabs + catalog / export / validation / space list.
  */
-export default function EditorWorkspaceSidebar({ project, onNavigateToSpace }) {
+export default function EditorWorkspaceSidebar({
+  project,
+  onNavigateToSpace,
+  visionStyleHint = null,
+  onApplyVisionLayout = null,
+}) {
   const [tab, setTab] = useState('furniture');
-  const furnitureItems = useLayoutStore((s) => s.furniture);
+  const furnitureItems = useLayoutStore(selectVisibleFurniture);
   const selectedCatalogItem = useLayoutStore((s) => s.selectedCatalogItem);
   const setSelectedCatalogItem = useLayoutStore((s) => s.setSelectedCatalogItem);
   const clearSelectedCatalogItem = useLayoutStore((s) => s.clearSelectedCatalogItem);
@@ -132,11 +137,17 @@ export default function EditorWorkspaceSidebar({ project, onNavigateToSpace }) {
                 <FurnitureCatalogPanel
                   selectedItemId={selectedCatalogItem?.id ?? null}
                   onSelectItem={setSelectedCatalogItem}
+                  defaultStyleHint={visionStyleHint}
                 />
               </div>
             )}
 
-            {tab === 'materials' && <InteriorDesignPanel />}
+            {tab === 'materials' && (
+              <InteriorDesignPanel
+                globalVision={project?.globalVision}
+                onApplyVisionLayout={onApplyVisionLayout}
+              />
+            )}
 
             {tab === 'layers' && (
               <div className="p-4">

@@ -9,6 +9,8 @@ export const DEFAULT_ROOM_INTERIOR = Object.freeze({
   wallpaperId: null,
   wallArt: null,
   layoutIntent: 'balanced',
+  source: null,
+  userEditedAt: null,
 });
 
 export const WALL_COLOR_PRESETS = [
@@ -100,7 +102,39 @@ export function normalizeRoomInterior(raw) {
 
   const layoutIntent = INTENT_IDS.has(raw.layoutIntent) ? raw.layoutIntent : base.layoutIntent;
 
-  return { wallColor, floorColor, wallpaperId, wallArt, layoutIntent };
+  const source = raw.source === 'user' || raw.source === 'vision' ? raw.source : null;
+  const userEditedAt =
+    typeof raw.userEditedAt === 'string' && raw.userEditedAt.trim() ? raw.userEditedAt.trim() : null;
+
+  return {
+    wallColor,
+    floorColor,
+    wallpaperId,
+    wallArt,
+    layoutIntent,
+    source,
+    userEditedAt,
+    visionRevision: raw.visionRevision,
+    visionPlacementsRevision: raw.visionPlacementsRevision,
+    visionMoodTags: Array.isArray(raw.visionMoodTags) ? raw.visionMoodTags : undefined,
+    visionPriorities: Array.isArray(raw.visionPriorities) ? raw.visionPriorities : undefined,
+    appliedFromVisionRevision: raw.appliedFromVisionRevision,
+  };
+}
+
+/** True when the user has manually edited materials via the Materials panel. */
+export function isInteriorUserEdited(interior) {
+  const n = normalizeRoomInterior(interior);
+  return n.source === 'user' || Boolean(n.userEditedAt);
+}
+
+/** Mark interior patch as user-authored (blocks vision overwrite). */
+export function markInteriorUserPatch(patch = {}) {
+  return {
+    ...patch,
+    source: 'user',
+    userEditedAt: new Date().toISOString(),
+  };
 }
 
 export function getWallpaperPreset(wallpaperId) {

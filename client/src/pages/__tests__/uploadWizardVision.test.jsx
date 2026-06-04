@@ -33,6 +33,7 @@ vi.mock('@/lib/api', () => ({
 describe('upload wizard vision routing', () => {
   it('removes the old manual vision overlay copy from Upload.jsx', () => {
     expect(uploadSource).not.toContain('What feeling should guests have when entering?');
+    expect(uploadSource).not.toContain('Describe the whole-house mood');
     expect(uploadSource).not.toContain('Inspiration image (optional)');
     expect(uploadSource).not.toContain('visionStep');
     expect(uploadSource).toContain('continueToProjectVision');

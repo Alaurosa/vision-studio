@@ -282,11 +282,24 @@ function passesHardRules({
   largestFreeRect,
   freeAreaSqIn,
   roomBucket,
+  roomType,
   placements,
 }) {
   const { width: fw, depth: fd } = getFootprint(item);
   if (!(fw > 0 && fd > 0)) {
     return { ok: false, reason: 'Item has no usable footprint' };
+  }
+
+  // Rule 0 — room-type appropriateness. When we know the room type and the item
+  // is tagged for specific rooms, only surface it where it belongs (no dining
+  // tables in a bedroom). Untagged items (e.g. server catalog) are always allowed.
+  if (
+    roomType &&
+    Array.isArray(item.roomTypes) &&
+    item.roomTypes.length > 0 &&
+    !item.roomTypes.includes(roomType)
+  ) {
+    return { ok: false, reason: `Better suited to a ${item.roomTypes[0]} room` };
   }
 
   // Rule 1 — footprint fit (try rotation as a fallback)
@@ -402,10 +415,16 @@ function scoreItem({
   rotationHint,
   largestFreeRect,
   placements,
+  roomType,
   options,
 }) {
   const reasons = [];
   let score = 0;
+
+  if (roomType && Array.isArray(item.roomTypes) && item.roomTypes.includes(roomType)) {
+    score += 15;
+    reasons.push(`A natural fit for a ${roomType} room`);
+  }
 
   const { width: fw, depth: fd } = getFootprint(item);
   const effW = rotationHint === 0 ? fw : fd;
@@ -475,7 +494,7 @@ function scoreItem({
  * }} params
  * @returns {RecommendationResult}
  */
-export function recommendFurniture({ room, placements = [], catalog = [], category, options = {} }) {
+export function recommendFurniture({ room, placements = [], catalog = [], category, roomType = '', options = {} }) {
   const maxResults = options.maxResults ?? DEFAULT_MAX_RESULTS;
 
   if (!category || typeof category !== 'string') {
@@ -542,6 +561,7 @@ export function recommendFurniture({ room, placements = [], catalog = [], catego
       largestFreeRect,
       freeAreaSqIn,
       roomBucket,
+      roomType,
       placements,
     });
     if (!verdict.ok) continue;
@@ -551,6 +571,7 @@ export function recommendFurniture({ room, placements = [], catalog = [], catego
       rotationHint: verdict.rotationHint,
       largestFreeRect,
       placements,
+      roomType,
       options,
     });
 
@@ -586,6 +607,7 @@ export function recommendForRoom({
   placements = [],
   catalog = [],
   category = '',
+  roomType = '',
   options = {},
 }) {
   const maxResults = options.maxResults ?? DEFAULT_ROOM_SECTION_MAX_RESULTS;
@@ -596,6 +618,7 @@ export function recommendForRoom({
       placements,
       catalog,
       category,
+      roomType,
       options: { ...options, maxResults },
     });
     return {
@@ -625,6 +648,7 @@ export function recommendForRoom({
       placements,
       catalog,
       category: bucketId,
+      roomType,
       options: { ...options, maxResults: perCategoryMax },
     });
     if (!metrics && result.metrics) {

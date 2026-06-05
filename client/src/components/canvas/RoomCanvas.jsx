@@ -249,6 +249,16 @@ export default function RoomCanvas() {
     warningTimeoutRef.current = window.setTimeout(() => setPlacementWarning(''), 2200);
   }, []);
 
+  // Reset the placement cursor when the catalog selection is cleared while the
+  // pointer is still over the canvas — the overlay Rect unmounts before its
+  // onMouseLeave can fire, which would otherwise leave a stuck crosshair.
+  useEffect(() => {
+    if (!selectedCatalogItem) {
+      const c = stageRef.current?.container?.();
+      if (c) c.style.cursor = '';
+    }
+  }, [selectedCatalogItem]);
+
   const handleCatalogPlacementClick = useCallback(
     async (e) => {
       const cat = useLayoutStore.getState().selectedCatalogItem;
@@ -558,6 +568,14 @@ export default function RoomCanvas() {
               width={focusPxW}
               height={focusPxH}
               fill="transparent"
+              onMouseEnter={(e) => {
+                const c = e.target.getStage()?.container();
+                if (c) c.style.cursor = 'crosshair';
+              }}
+              onMouseLeave={(e) => {
+                const c = e.target.getStage()?.container();
+                if (c) c.style.cursor = '';
+              }}
               onMouseDown={handleCatalogPlacementClick}
             />
           </Layer>

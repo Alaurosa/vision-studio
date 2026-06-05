@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120" role="img" aria-label="Lighting">
+  <rect width="160" height="120" fill="#f3ecd6"/>
+  <g fill="#c9a94e">
+    <path d="M64 52 L96 52 L88 74 L72 74 Z" fill="#e3c873"/>
+    <rect x="77" y="74" width="6" height="26"/>
+    <rect x="66" y="98" width="28" height="6" rx="3"/>
+  </g>
+</svg>

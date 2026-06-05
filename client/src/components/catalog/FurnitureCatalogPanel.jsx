@@ -4,6 +4,7 @@ import FurnitureCard from '@/components/catalog/FurnitureCard';
 import {
   FURNITURE_CATEGORIES,
   STARTER_FURNITURE_CATALOG,
+  matchRoomType,
 } from '@/data/furnitureCatalog';
 import { FURNITURE_STYLE_TAGS, getStyleTagLabel } from '@/data/furnitureStyleTags';
 import { filterStarterFurnitureCatalog } from '@/utils/furnitureCatalogFilters';
@@ -27,8 +28,23 @@ export default function FurnitureCatalogPanel({ onSelectItem, selectedItemId: se
 
   const room = useLayoutStore((s) => s.room);
   const furniture = useLayoutStore((s) => s.furniture);
+  const zones = useLayoutStore((s) => s.zones);
+  const activeZoneId = useLayoutStore((s) => s.activeZoneId);
 
   const roomKnown = Boolean(room?.width && room?.depth);
+
+  // Infer the room type (bedroom / living / dining / office) from the selected
+  // room's name so recommendations suit it. Null when it can't be inferred —
+  // recommendations then fall back to fit-only ranking (unchanged behavior).
+  const activeZone = useMemo(
+    () => (zones || []).find((z) => z.id === activeZoneId) || null,
+    [zones, activeZoneId],
+  );
+  const roomType = useMemo(
+    () => matchRoomType(activeZone?.name || room?.name || ''),
+    [activeZone, room],
+  );
+  const roomTypeLabel = roomType ? roomType.charAt(0).toUpperCase() + roomType.slice(1) : null;
 
   const browseResults = useMemo(
     () =>
@@ -52,9 +68,10 @@ export default function FurnitureCatalogPanel({ onSelectItem, selectedItemId: se
       placements: furniture,
       catalog: STARTER_FURNITURE_CATALOG,
       category: categoryId,
+      roomType: roomType || '',
       options: recommendationOptions,
     });
-  }, [roomKnown, categoryId, room, furniture, recommendationOptions]);
+  }, [roomKnown, categoryId, room, furniture, roomType, recommendationOptions]);
 
   const recommendedEntries = roomRecommendations?.items ?? [];
 
@@ -72,11 +89,12 @@ export default function FurnitureCatalogPanel({ onSelectItem, selectedItemId: se
     ? `${inchesToFeet(room.width)} × ${inchesToFeet(room.depth)} room`
     : 'Room dimensions unknown';
 
+  const forLabel = roomTypeLabel ? `your ${roomTypeLabel.toLowerCase()}` : 'this room';
   const recommendationSummary = !roomKnown
     ? 'Set room size to unlock picks'
     : recommendedEntries.length === 0
       ? 'No fits for current filters'
-      : `${recommendedEntries.length} pick${recommendedEntries.length === 1 ? '' : 's'} for this room${styleTagId ? ` · ${getStyleTagLabel(styleTagId)}` : ''}`;
+      : `${recommendedEntries.length} pick${recommendedEntries.length === 1 ? '' : 's'} for ${forLabel}${styleTagId ? ` · ${getStyleTagLabel(styleTagId)}` : ''}`;
 
   return (
     <div className="flex h-full min-h-0 flex-col">

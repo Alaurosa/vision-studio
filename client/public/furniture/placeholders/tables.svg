@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120" role="img" aria-label="Tables">
+  <rect width="160" height="120" fill="#ece3d6"/>
+  <g fill="#9c7a4d">
+    <rect x="34" y="52" width="92" height="12" rx="4"/>
+    <rect x="40" y="64" width="7" height="34" rx="2"/>
+    <rect x="113" y="64" width="7" height="34" rx="2"/>
+    <rect x="40" y="62" width="80" height="5" rx="2" fill="#b8966a"/>
+  </g>
+</svg>

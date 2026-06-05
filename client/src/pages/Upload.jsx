@@ -281,7 +281,7 @@ export default function Upload({ embedInWizard = false }) {
   const continueToProjectVision = () => {
     if (!spaceReview || savingSpaces) return;
     if (!user) {
-      setShowSaveAuthGate(true);
+      finalizeAndGoToVision(false);
       return;
     }
     finalizeAndGoToVision();

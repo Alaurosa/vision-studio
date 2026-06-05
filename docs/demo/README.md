@@ -17,6 +17,8 @@ After recording, the demo is saved as:
 3. **Project vision** — style chips + assistant direction
 4. **Space Assistant** — furnish living room, then move furniture via chat
 5. **3D** — orbit / zoom / Walkthrough & Overview presets (Screen Studio–style smooth camera moves)
+
+**Screen Studio–style zoom:** `e2e/helpers/demo-motion.js` zooms the viewport toward each click target and during key holds (upload preview, floorplan zones, 2D layout, 3D canvas).
 6. **Confirmation** — project summary before editor
 
 Recording uses deterministic API mocks (`e2e/helpers/demo-mocks.js`) so no OpenAI/Python is required.

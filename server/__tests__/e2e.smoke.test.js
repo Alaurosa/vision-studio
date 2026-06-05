@@ -148,6 +148,30 @@ describe('E2E API smoke', () => {
     expect(res.body.placements.some((p) => p.id === placementId)).toBe(true);
   });
 
+  it('POST /api/layout/generate — bedroom constraint layout', async () => {
+    const res = await request(app).post('/api/layout/generate').send({
+      room_type: 'bedroom',
+      room: { width: 144, depth: 132 },
+      use_catalog: true,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.method).toBe('constraint_layout_v1');
+    expect(res.body.validation.valid).toBe(true);
+    expect(res.body.placements.some((p) => p.category === 'bed')).toBe(true);
+  });
+
+  it('POST /api/layout/generate — living room constraint layout', async () => {
+    const res = await request(app).post('/api/layout/generate').send({
+      room_type: 'living_room',
+      room: { width: 216, depth: 168 },
+      use_catalog: true,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.validation.valid).toBe(true);
+    expect(res.body.placements.some((p) => p.category === 'sofa')).toBe(true);
+    expect(res.body.placements.some((p) => p.category === 'tv_stand')).toBe(true);
+  });
+
   it('POST /api/layout/validate accepts draft room_context', async () => {
     const res = await auth(
       request(app).post('/api/layout/validate').send({

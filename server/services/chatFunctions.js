@@ -4,6 +4,7 @@
 import { useDb, supabaseAdmin, fallback } from './db.js';
 import { chat } from './llmRouter.js';
 import { resolveOverlaps, getEffectiveDims, validateLayout } from './overlapResolver.js';
+import { generateLayout } from './layoutGenerator.js';
 
 /** Fuzzy match: all words in needle must appear in haystack (diacritics-insensitive). */
 function fuzzyMatch(haystack, needle) {
@@ -553,9 +554,33 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
         allPlacements = fallback.getPlacementsForRoom(roomId);
       }
 
-      const arrangeResult = await executeFunction('arrange_room', { style: args.style || 'functional' }, roomId, allPlacements, room, db);
+      const layout = generateLayout({
+        roomType: args.room_type,
+        room: { width: room.width, depth: room.depth },
+        furniture: allPlacements.map((p) => ({
+          id: p.id,
+          name: p.name,
+          category: p.category,
+          width: p.width,
+          depth: p.depth,
+          height: p.height,
+        })),
+      });
 
-      // Re-fetch placements after arrangement to get final positions
+      for (const pos of layout.placements) {
+        const patch = {
+          x_inches: pos.x_inches,
+          y_inches: pos.y_inches,
+          rotation: pos.rotation,
+          updated_at: new Date().toISOString(),
+        };
+        if (db) {
+          await supabaseAdmin.from('placements').update(patch).eq('id', pos.id);
+        } else {
+          fallback.updatePlacement(pos.id, patch);
+        }
+      }
+
       let finalPlacements;
       if (db) {
         const { data } = await supabaseAdmin.from('placements').select('*').eq('room_id', roomId);
@@ -564,18 +589,29 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
         finalPlacements = fallback.getPlacementsForRoom(roomId);
       }
 
-      // Match by order (added array corresponds to finalPlacements for this room)
       const arrangedItems = selectedItems.map((item, idx) => {
-        const placed = added[idx] ? finalPlacements.find(p => p.id === added[idx].id) : null;
-        return { ...item, x_inches: placed?.x_inches ?? 12, y_inches: placed?.y_inches ?? 12, rotation: placed?.rotation ?? 0 };
+        const placed = added[idx] ? finalPlacements.find((p) => p.id === added[idx].id) : null;
+        return {
+          ...item,
+          x_inches: placed?.x_inches ?? 12,
+          y_inches: placed?.y_inches ?? 12,
+          rotation: placed?.rotation ?? 0,
+        };
       });
+
+      const arrangeResult = {
+        success: layout.validation.valid,
+        message: layout.validation.valid
+          ? `Constraint layout (${layout.room_type})`
+          : `Layout has issues: ${layout.validation.errors.join('; ')}`,
+      };
 
       const totalCost = selectedItems.reduce((sum, it) => sum + (it.price_usd || 0), 0);
       const itemNames = selectedItems.map(it => it.name).join(', ');
 
       return {
         success: true,
-        message: `Furnished ${(args.room_type || 'room').replace('_', ' ')} with ${selectedItems.length} items: ${itemNames}. Total estimated cost: $${totalCost.toFixed(0)}. ${arrangeResult.success ? 'Arranged optimally.' : ''}`,
+        message: `Furnished ${(args.room_type || 'room').replace('_', ' ')} with ${selectedItems.length} items: ${itemNames}. Total estimated cost: $${totalCost.toFixed(0)}. ${arrangeResult.success ? 'Placed using room constraints.' : arrangeResult.message}`,
         refresh: true,
         suggestions: arrangedItems,
       };

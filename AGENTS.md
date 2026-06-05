@@ -288,6 +288,7 @@ vision-studio/
 │   │   ├── fallbackStore.js      # In-memory store when Supabase unavailable (27 embedded catalog items)
 │   │   ├── fileStorage.js        # Shared local file storage helper (saves to uploads/)
 │   │   ├── kenneyMapping.js      # Category defaults + per-item overrides → /models/kenney/*.glb (used by seedFurniture + fallbackStore)
+│   │   ├── layoutGenerator.js    # Constraint-based room layouts (bedroom, living_room, etc.) — no LLM; used by POST /api/layout/generate and chat `furnish_room`
 │   │   ├── overlapResolver.js    # Shared overlap resolver (greedy spiral + linear scan) + layout validator
 │   │   ├── normalizeZones.js    # Shared zone normalization (boundary-relative coordinates)
 │   │   ├── floorplanParse.js    # Python /parse-floorplan client + shared guest/authed response (zones, parse_method, openai_vision)
@@ -477,6 +478,8 @@ Lazy-loaded pages; `ErrorBoundary` + `HelmetProvider` + `Toaster` at root. Navba
 
 | Method | Route | Description |
 | --- | --- | --- |
+| GET | `/api/layout/room-types` | List constraint-based room types (`bedroom`, `living_room`, `office`, `dining_room`, `studio`) with category order and placement rules |
+| POST | `/api/layout/generate` | Deterministic constraint layout (no LLM). Body: `{ room_type, room: { width, depth }, furniture?, use_catalog? }`. Omits `furniture` → picks catalog items for the room type, then places via `server/services/layoutGenerator.js` + `overlapResolver` |
 | POST | `/api/layout/auto-place` | LLM auto-place all furniture optimally (uses overlapResolver) |
 | POST | `/api/layout/validate` | Validate current layout for overlaps and bounds |
 
@@ -651,7 +654,7 @@ The chat endpoint supports 15 layout manipulation functions via LLM tool use:
 - `validate_layout` — Check overlaps and bounds
 - `arrange_room` — AI auto-arrange all furniture (uses nested LLM call)
 - `swap_furniture` — Replace one item with another from catalog
-- `furnish_room` — Autonomously select + place + arrange furniture for a room type
+- `furnish_room` — Autonomously select catalog items, place them, then arrange with `layoutGenerator` room constraints (bedroom, living_room, etc.)
 - `set_style_preference` — Record user style/mood/palette preferences for context-aware suggestions
 - `clear_room` — Remove all furniture at once
 - `estimate_budget` — Calculate total cost of current furniture

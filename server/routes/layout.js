@@ -5,8 +5,73 @@ import { buildLayoutJSON } from '../services/exportFormats.js';
 import { chat } from '../services/llmRouter.js';
 import { log } from '../services/logger.js';
 import { resolveOverlaps, getEffectiveDims, validateLayout } from '../services/overlapResolver.js';
+import {
+  generateLayout,
+  generateLayoutFromCatalog,
+  normalizeRoomType,
+  ROOM_LAYOUT_CONSTRAINTS,
+} from '../services/layoutGenerator.js';
+import * as fallbackStore from '../services/fallbackStore.js';
 
 const router = express.Router();
+
+// GET /api/layout/room-types — constraint definitions for supported room types
+router.get('/room-types', (req, res) => {
+  const types = Object.entries(ROOM_LAYOUT_CONSTRAINTS).map(([id, def]) => ({
+    id,
+    label: def.label,
+    categories: def.categories,
+    rules: def.rules,
+  }));
+  res.json({ room_types: types });
+});
+
+/**
+ * POST /api/layout/generate — constraint-based layout (no LLM).
+ * Body: { room_type, room: { width, depth }, furniture?: [...] }
+ * If furniture omitted, picks catalog items for the room type (demo/DB catalog).
+ */
+router.post('/generate', optionalAuth, async (req, res) => {
+  const { room_type, room, furniture, use_catalog } = req.body;
+  const type = normalizeRoomType(room_type);
+
+  if (!room?.width || !room?.depth) {
+    return res.status(400).json({ error: 'room.width and room.depth are required (inches)' });
+  }
+
+  try {
+    let result;
+    if (use_catalog !== false && (!furniture || furniture.length === 0)) {
+      const db = (await useDb()) && hasDbUserId(req.user?.id);
+      if (db) {
+        const { data } = await supabaseAdmin.from('furniture_catalog').select('*').eq('available', true).limit(50);
+        result = generateLayoutFromCatalog(type, room, () => data || []);
+      } else {
+        result = generateLayoutFromCatalog(type, room, () => fallbackStore.getCatalog({ limit: 50 }).items);
+      }
+    } else {
+      result = generateLayout({ roomType: type, room, furniture });
+    }
+
+    res.json({
+      room_type: result.room_type,
+      method: result.method,
+      placements: result.placements,
+      validation: result.validation,
+      constraints_applied: result.constraints_applied,
+      catalog_items: result.catalog_items?.map((i) => ({
+        id: i.id,
+        name: i.name,
+        category: i.category,
+        width: i.width,
+        depth: i.depth,
+      })),
+    });
+  } catch (err) {
+    log.error('Layout generate error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // POST /api/layout/auto-place — Use LLM to compute optimal placement for all furniture
 router.post('/auto-place', optionalAuth, async (req, res) => {

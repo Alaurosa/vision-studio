@@ -2,9 +2,15 @@
  * Deterministic layout generator using per-room-type placement constraints.
  * No LLM required — positions are rule-based, then overlap-resolved on a 6" grid.
  */
-import { getEffectiveDims, resolveOverlaps, validateLayout } from './overlapResolver.js';
+import {
+  getEffectiveDims,
+  resolveOverlaps,
+  validateLayout,
+  CLEARANCE_IN,
+  GRID_STEP_IN,
+} from './overlapResolver.js';
 
-export const GRID_STEP_IN = 6;
+export { GRID_STEP_IN };
 export const WALL_MARGIN_IN = 12;
 export const WALKWAY_CLEARANCE_IN = 24;
 
@@ -380,7 +386,7 @@ export function generateLayout({ roomType, room, furniture }) {
     effD: p.effD,
   }));
 
-  const resolved = resolveOverlaps(candidates, roomW, roomD, GRID_STEP_IN);
+  const resolved = resolveOverlaps(candidates, roomW, roomD, GRID_STEP_IN, { clearance: CLEARANCE_IN });
 
   const placements = resolved.map((c, idx) => {
     const p = placed[idx];
@@ -403,6 +409,7 @@ export function generateLayout({ roomType, room, furniture }) {
   const validation = validateLayout(
     placements.map((p) => ({ ...p, rotation: p.rotation })),
     { width: roomW, depth: roomD },
+    { clearance: CLEARANCE_IN },
   );
 
   return {

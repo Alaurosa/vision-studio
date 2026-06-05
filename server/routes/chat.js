@@ -3,6 +3,10 @@ import { optionalAuth } from '../middleware/auth.js';
 import { useDb, supabaseAdmin, fallback, hasDbUserId } from '../services/db.js';
 import { chat } from '../services/llmRouter.js';
 import { LAYOUT_FUNCTIONS, executeFunction } from '../services/chatFunctions.js';
+import {
+  buildZoneContext,
+  filterPlacementsForZone,
+} from '../services/zonePlacement.js';
 import { log } from '../services/logger.js';
 
 const router = express.Router();
@@ -18,6 +22,8 @@ router.post('/message', optionalAuth, async (req, res) => {
     context_type,
     global_vision,
     space_vision,
+    zone_id,
+    zone_context,
   } = req.body;
   const isDraft = typeof room_id === 'string' && room_id.startsWith('draft-');
   const db = (await useDb()) && hasDbUserId(req.user?.id) && !isDraft;
@@ -27,7 +33,10 @@ router.post('/message', optionalAuth, async (req, res) => {
 
     if (isDraft && room_context) {
       // Draft rooms live client-side only — accept context from the request
-      room = room_context;
+      room = {
+        ...room_context,
+        zones: Array.isArray(room_context.zones) ? room_context.zones : [],
+      };
       placements = room_context.placements || [];
       history = [];
     } else if (db) {
@@ -55,6 +64,11 @@ router.post('/message', optionalAuth, async (req, res) => {
 
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
+    const zoneContext = buildZoneContext(room, zone_id, zone_context);
+    const scopedPlacements = zoneContext
+      ? filterPlacementsForZone(placements, zoneContext)
+      : placements;
+
     const stylePrefs = room?.style_preferences;
     const contextType = context_type || 'current_space';
     const projectVision = global_vision && typeof global_vision === 'object' ? global_vision : {};
@@ -70,6 +84,15 @@ Use this context when interpreting "whole house", "interior", "exterior", or "th
 `;
     const styleContext = stylePrefs
       ? `\nSTYLE PREFERENCES (user-set):\n- Design style: ${stylePrefs.style || 'not set'}\n- Mood: ${stylePrefs.mood || 'not set'}\n- Color palette: ${stylePrefs.color_palette || 'not set'}\n- Budget: ${stylePrefs.budget_preference || 'not set'}\n- Notes: ${stylePrefs.notes || 'none'}\nAlways respect these preferences when suggesting or arranging furniture.\n`
+      : '';
+
+    const activeSpaceContext = zoneContext
+      ? `
+ACTIVE EDITOR SPACE (scope add/remove/move/furnish/clear to THIS space only):
+- Space: ${zoneContext.name} (zone_id: ${zoneContext.id})
+- Bounds (inches from floorplan origin): left=${zoneContext.bounds?.left ?? 0}, top=${zoneContext.bounds?.top ?? 0}, width=${zoneContext.bounds?.width ?? room?.width ?? '?'}, depth=${zoneContext.bounds?.depth ?? room?.depth ?? '?'}
+- All new furniture must be placed inside these bounds. Coordinates are relative to the full floorplan, not the space-local origin.
+`
       : '';
 
     const systemPrompt = `You are an expert AI interior design agent for Vision Studio. You don't just answer questions — you take action by calling tools. You can chain multiple actions autonomously to fulfill complex requests.
@@ -90,8 +113,8 @@ CAPABILITIES:
 ROOM CONTEXT:
 - Room: ${room?.name || 'Unnamed'} — ${room?.width || '?'}" wide × ${room?.depth || '?'}" deep × ${room?.height || 96}" tall
 - Unit system: ${room?.unit || 'inches'}
-- Current furniture (${placements.length} items):
-${placements.length > 0 ? placements.map((p) => `  • ${p.name} (${p.category}) — ${p.width}"W × ${p.depth}"D at (${p.x_inches}", ${p.y_inches}"), rotation ${p.rotation}°`).join('\n') : '  (empty room)'}
+${activeSpaceContext}- Current furniture${zoneContext ? ' in active space' : ''} (${scopedPlacements.length} items):
+${scopedPlacements.length > 0 ? scopedPlacements.map((p) => `  • ${p.name} (${p.category}) — ${p.width}"W × ${p.depth}"D at (${p.x_inches}", ${p.y_inches}"), rotation ${p.rotation}°`).join('\n') : '  (empty)'}
 ${projectContext}
 ${styleContext}
 AUTONOMOUS MULTI-STEP BEHAVIOR:
@@ -171,7 +194,7 @@ RESPONSE STYLE:
             }
           }
 
-          result = await executeFunction(fnName, args, room_id, placements, room, db);
+          result = await executeFunction(fnName, args, room_id, placements, room, db, zoneContext);
         } catch (parseErr) {
           fnName = toolCall.function?.name;
           args = {};

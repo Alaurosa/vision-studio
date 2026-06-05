@@ -3,8 +3,15 @@
  */
 import { useDb, supabaseAdmin, fallback } from './db.js';
 import { chat } from './llmRouter.js';
-import { resolveOverlaps, getEffectiveDims, validateLayout } from './overlapResolver.js';
+import { getEffectiveDims, validateLayout, CLEARANCE_IN } from './overlapResolver.js';
 import { generateLayout } from './layoutGenerator.js';
+import { autoArrangeFurniture } from './autoArrange.js';
+import {
+  filterPlacementsForZone,
+  findOpenSlotInZone,
+  globalizeLayoutPosition,
+  layoutRoomForZone,
+} from './zonePlacement.js';
 
 /** Fuzzy match: all words in needle must appear in haystack (diacritics-insensitive). */
 function fuzzyMatch(haystack, needle) {
@@ -205,10 +212,13 @@ export const LAYOUT_FUNCTIONS = [
 /**
  * Execute a single tool-call function against the room state.
  */
-export async function executeFunction(fnName, args, roomId, placements, room, db) {
+export async function executeFunction(fnName, args, roomId, placements, room, db, zoneContext = null) {
+  const scoped = filterPlacementsForZone(placements, zoneContext);
+  const layoutRoom = layoutRoomForZone(zoneContext, room);
+
   switch (fnName) {
     case 'move_furniture': {
-      const p = findPlacement(placements, args.furniture_name);
+      const p = findPlacement(scoped, args.furniture_name);
       if (!p) return { success: false, message: `Furniture "${args.furniture_name}" not found` };
       if (db) {
         const err = await dbUpdatePlacement(p.id, { x_inches: args.x_inches, y_inches: args.y_inches });
@@ -223,7 +233,7 @@ export async function executeFunction(fnName, args, roomId, placements, room, db
       };
     }
     case 'rotate_furniture': {
-      const p = findPlacement(placements, args.furniture_name);
+      const p = findPlacement(scoped, args.furniture_name);
       if (!p) return { success: false, message: `Furniture "${args.furniture_name}" not found` };
       if (db) {
         const err = await dbUpdatePlacement(p.id, { rotation: args.rotation });
@@ -268,6 +278,14 @@ export async function executeFunction(fnName, args, roomId, placements, room, db
       }
       if (!item) return { success: false, message: `"${args.catalog_item_name}" not found in catalog` };
 
+      let x = args.x_inches;
+      let y = args.y_inches;
+      if (x == null || y == null) {
+        const slot = findOpenSlotInZone(scoped, item.width, item.depth, zoneContext, room);
+        x = slot.x;
+        y = slot.y;
+      }
+
       const placement = {
         room_id: roomId,
         catalog_id: item.id,
@@ -277,12 +295,13 @@ export async function executeFunction(fnName, args, roomId, placements, room, db
         width: item.width,
         depth: item.depth,
         height: item.height,
-        x_inches: args.x_inches || 12,
-        y_inches: args.y_inches || 12,
+        x_inches: x,
+        y_inches: y,
         rotation: args.rotation || 0,
         color: '#d4a27a',
         image_url: item.image_url || null,
         model_url: item.model_url || null,
+        zone_id: zoneContext?.id || null,
       };
       if (db) {
         const { error, data } = await dbInsertPlacement(placement);
@@ -301,7 +320,7 @@ export async function executeFunction(fnName, args, roomId, placements, room, db
       };
     }
     case 'remove_furniture': {
-      const p = findPlacement(placements, args.furniture_name);
+      const p = findPlacement(scoped, args.furniture_name);
       if (!p) return { success: false, message: `Furniture "${args.furniture_name}" not found` };
       if (db) {
         const { error } = await supabaseAdmin.from('placements').delete().eq('id', p.id);
@@ -316,89 +335,65 @@ export async function executeFunction(fnName, args, roomId, placements, room, db
       };
     }
     case 'validate_layout': {
-      return { success: true, ...validateLayout(placements, room) };
+      const roomForValidation = {
+        width: Number(room?.width) || layoutRoom.width,
+        depth: Number(room?.depth) || layoutRoom.depth,
+      };
+      return {
+        success: true,
+        ...validateLayout(scoped, roomForValidation, {
+          clearance: CLEARANCE_IN,
+          bounds: zoneContext?.bounds || null,
+        }),
+      };
     }
     case 'arrange_room': {
-      if (placements.length === 0) return { success: false, message: 'No furniture to arrange' };
-      if (!room?.width || !room?.depth) return { success: false, message: 'Room dimensions not set' };
+      if (scoped.length === 0) return { success: false, message: 'No furniture to arrange in the active space' };
+      if (!layoutRoom?.width || !layoutRoom?.depth) return { success: false, message: 'Room dimensions not set' };
 
-      const arrangePrompt = `You are a senior interior designer. Produce an optimal furniture arrangement for this room.
-
-ROOM: ${room.width}" wide (x-axis) × ${room.depth}" deep (y-axis)${args.style ? `   STYLE: ${args.style}` : ''}
-
-COORDINATE SYSTEM:
-- (x=0, y=0) is the top-left corner
-- x increases to the right (max x = ${room.width})
-- y increases downward (max y = ${room.depth})
-- A piece at (x, y) occupies [x, x+W] × [y, y+D] where W,D = effective width/depth after rotation
-- rotation=0: item's back/headboard at LOW y, front faces toward HIGH y (downward)
-- rotation=90: back at HIGH x, front faces LOW x (left); W and D are swapped
-- rotation=180: back at HIGH y, front faces LOW y (upward)
-- rotation=270: back at LOW x, front faces HIGH x (right); W and D are swapped
-
-FURNITURE TO PLACE:
-${placements.map((p, i) => `  ${i}: "${p.name}" (${p.category}) — ${p.width}"W × ${p.depth}"D`).join('\n')}
-
-REASONING STEPS (do these in order silently, then output the JSON):
-1. Identify the focal point of the room. Priority: TV > fireplace > window > bed. If there is a TV/tv_stand, it is the focal point for the living area. If there is a bed, it is the focal point for the sleeping area.
-2. Place the focal point FIRST, against a wall. TV stands/bookshelves/bed headboards touch a wall (the item's back edge at y=0, y=room depth, x=0, or x=room width).
-3. Orient the sofa/armchair to FACE the focal point. A sofa faces the TV — this means the sofa's FRONT (not back) must point toward the TV. If TV is on the north wall (y=0), the sofa's back must be closer to the south wall, and rotation=180 so it faces up toward the TV.
-4. Place secondary pieces relative to the focal group:
-   - coffee_table: 18" in front of the sofa (between sofa and TV)
-   - nightstand: immediately beside the bed (left or right, touching the bed's long side)
-   - armchair: angled at ~45° or perpendicular to the sofa facing the focal point — snap to nearest of 0/90/180/270
-   - dresser: against a wall not used by the bed
-   - desk: against a wall, with rotation so the user faces the wall (back of chair is toward the room)
-   - bookshelf: against a wall, low priority for the main wall
-   - dining_table: in an open area, not against any wall
-5. Verify constraints:
-   - NO two items overlap in their [x, x+effW] × [y, y+effD] rectangles
-   - Every item satisfies 0 <= x, 0 <= y, x + effW <= ${room.width}, y + effD <= ${room.depth}
-   - Leave at least one 24"-wide walkway connecting the room's entry area to each major zone
-   - Beds/bookshelves/dressers/tv_stands can have their back touching a wall; sofas should be 2-6" off the wall; free-standing items need 18"+ clearance
-
-OUTPUT: Return ONLY a JSON array, no prose. Each entry must include index, x, y, rotation, and a short "reason" field explaining the choice.
-Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV on north wall"}, ...]`;
-
-      try {
-        const arrangeRes = await chat({
-          messages: [{ role: 'user', content: arrangePrompt }],
-          systemPrompt: 'You are a spatial layout optimizer. Reason step by step internally, then return only valid JSON matching the requested schema.',
-        });
-
-        let positions;
-        const jsonMatch = arrangeRes.text.match(/\[[\s\S]*\]/);
-        if (jsonMatch) positions = JSON.parse(jsonMatch[0]);
-        else positions = JSON.parse(arrangeRes.text);
-
-        const candidates = positions.map((pos) => {
-          const p = placements[pos.index];
-          if (!p) return null;
-          const rotation = [0, 90, 180, 270].includes(pos.rotation) ? pos.rotation : 0;
-          const { effW, effD } = getEffectiveDims(p, rotation);
-          const x = Math.max(0, Math.min(Number(pos.x) || 0, room.width - effW));
-          const y = Math.max(0, Math.min(Number(pos.y) || 0, room.depth - effD));
-          return { placement: p, rotation, x, y, effW, effD };
-        }).filter(Boolean);
-
-        const placed = resolveOverlaps(candidates, room.width, room.depth);
-
-        let moved = 0;
-        for (const c of placed) {
-          if (db) {
-            await supabaseAdmin.from('placements').update({ x_inches: c.x, y_inches: c.y, rotation: c.rotation, updated_at: new Date().toISOString() }).eq('id', c.placement.id);
-          } else {
-            fallback.updatePlacement(c.placement.id, { x_inches: c.x, y_inches: c.y, rotation: c.rotation });
-          }
-          moved++;
-        }
-        return { success: true, message: `Arranged ${moved} items${args.style ? ` in ${args.style} style` : ''}`, refresh: true };
-      } catch (err) {
-        return { success: false, message: `Arrangement failed: ${err.message}` };
+      const result = autoArrangeFurniture({ room, placements, zoneContext });
+      if (!result.placements.length) {
+        return { success: false, message: 'Nothing to arrange in the active space' };
       }
+
+      for (const p of result.placements) {
+        if (db) {
+          await supabaseAdmin
+            .from('placements')
+            .update({
+              x_inches: p.x_inches,
+              y_inches: p.y_inches,
+              rotation: p.rotation,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', p.id);
+        } else {
+          fallback.updatePlacement(p.id, {
+            x_inches: p.x_inches,
+            y_inches: p.y_inches,
+            rotation: p.rotation,
+          });
+        }
+      }
+
+      const plan = result.plan;
+      const orderSummary = plan?.placement_order
+        ?.slice(0, 3)
+        .map((s) => s.name)
+        .join(', ');
+      const styleNote = args.style ? ` (${args.style} style)` : '';
+      const validNote = result.validation.valid ? '' : ` Note: ${result.validation.errors[0]}`;
+
+      return {
+        success: true,
+        message: `Planned ${plan?.room_label || 'room'} layout${styleNote}: ${orderSummary || `${result.placements.length} items`} — ${CLEARANCE_IN}" clearance, no overlaps.${validNote}`,
+        refresh: true,
+        plan,
+        placements: result.placements,
+      };
     }
     case 'swap_furniture': {
-      const current = findPlacement(placements, args.current_furniture_name);
+      const current = findPlacement(scoped, args.current_furniture_name);
       if (!current) return { success: false, message: `"${args.current_furniture_name}" not found in room` };
 
       let newItem;
@@ -433,6 +428,7 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
           color: '#d4a27a',
           image_url: newItem.image_url || null,
           model_url: newItem.model_url || null,
+          zone_id: current.zone_id || zoneContext?.id || null,
         });
       } else {
         fallback.deletePlacement(current.id);
@@ -448,6 +444,7 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
           x_inches: pos.x_inches,
           y_inches: pos.y_inches,
           rotation: pos.rotation,
+          zone_id: current.zone_id || zoneContext?.id || null,
           color: '#d4a27a',
           image_url: newItem.image_url || null,
           model_url: newItem.model_url || null,
@@ -506,8 +503,8 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
         if (items.length === 0) continue;
 
         const pick = items[0];
-        if (pick.width > room.width || pick.depth > room.depth) {
-          if (pick.depth <= room.width && pick.width <= room.depth) {
+        if (pick.width > layoutRoom.width || pick.depth > layoutRoom.depth) {
+          if (pick.depth <= layoutRoom.width && pick.width <= layoutRoom.depth) {
             selectedItems.push({ ...pick, _rotation: 90 });
           }
           continue;
@@ -520,7 +517,9 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
       }
 
       const added = [];
+      let tempScoped = [...scoped];
       for (const item of selectedItems) {
+        const slot = findOpenSlotInZone(tempScoped, item.width, item.depth, zoneContext, room);
         const placement = {
           room_id: roomId,
           catalog_id: item.id,
@@ -530,19 +529,24 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
           width: item.width,
           depth: item.depth,
           height: item.height,
-          x_inches: 12,
-          y_inches: 12,
+          x_inches: slot.x,
+          y_inches: slot.y,
           rotation: item._rotation || 0,
           color: '#d4a27a',
           image_url: item.image_url || null,
           model_url: item.model_url || null,
+          zone_id: zoneContext?.id || null,
         };
+        let newP;
         if (db) {
-          const { data: newP } = await dbInsertPlacement(placement);
-          if (newP) added.push(newP);
+          const { data } = await dbInsertPlacement(placement);
+          newP = data;
         } else {
-          const newP = fallback.addPlacement(placement);
+          newP = fallback.addPlacement(placement);
+        }
+        if (newP) {
           added.push(newP);
+          tempScoped = [...tempScoped, newP];
         }
       }
 
@@ -554,10 +558,16 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
         allPlacements = fallback.getPlacementsForRoom(roomId);
       }
 
+      const zonePlacements = zoneContext?.id
+        ? allPlacements.filter(
+            (p) => p.zone_id === zoneContext.id || added.some((a) => a.id === p.id),
+          )
+        : allPlacements;
+
       const layout = generateLayout({
         roomType: args.room_type,
-        room: { width: room.width, depth: room.depth },
-        furniture: allPlacements.map((p) => ({
+        room: layoutRoom,
+        furniture: zonePlacements.map((p) => ({
           id: p.id,
           name: p.name,
           category: p.category,
@@ -568,9 +578,10 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
       });
 
       for (const pos of layout.placements) {
+        const global = globalizeLayoutPosition(pos, zoneContext);
         const patch = {
-          x_inches: pos.x_inches,
-          y_inches: pos.y_inches,
+          x_inches: global.x_inches,
+          y_inches: global.y_inches,
           rotation: pos.rotation,
           updated_at: new Date().toISOString(),
         };
@@ -596,6 +607,7 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
           x_inches: placed?.x_inches ?? 12,
           y_inches: placed?.y_inches ?? 12,
           rotation: placed?.rotation ?? 0,
+          zone_id: zoneContext?.id || placed?.zone_id || null,
         };
       });
 
@@ -646,9 +658,14 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
       };
     }
     case 'clear_room': {
-      if (placements.length === 0) return { success: true, message: 'Room is already empty.' };
-      const count = placements.length;
-      for (const p of placements) {
+      if (scoped.length === 0) {
+        return {
+          success: true,
+          message: zoneContext?.id ? 'This space is already empty.' : 'Room is already empty.',
+        };
+      }
+      const count = scoped.length;
+      for (const p of scoped) {
         if (db) {
           await supabaseAdmin.from('placements').delete().eq('id', p.id);
         } else {
@@ -658,10 +675,10 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
       return { success: true, message: `Removed all ${count} items from the room.`, refresh: true };
     }
     case 'estimate_budget': {
-      if (placements.length === 0) return { success: true, message: 'Room is empty — no cost to estimate.' };
+      if (scoped.length === 0) return { success: true, message: 'Room is empty — no cost to estimate.' };
       let total = 0;
       const items = [];
-      for (const p of placements) {
+      for (const p of scoped) {
         let price = null;
         if (p.catalog_id && db) {
           const { data } = await supabaseAdmin.from('furniture_catalog').select('price_usd').eq('id', p.catalog_id).single();
@@ -678,18 +695,21 @@ Format: [{"index": 0, "x": 12, "y": 4, "rotation": 180, "reason": "sofa faces TV
       return { success: true, message: `Budget estimate:\n${breakdown}\n\nTotal: $${total.toFixed(0)}`, total_usd: total };
     }
     case 'get_room_summary': {
-      const roomW = room?.width || 0;
-      const roomD = room?.depth || 0;
+      const roomW = layoutRoom.width || 0;
+      const roomD = layoutRoom.depth || 0;
       const areaFt = (roomW * roomD) / 144;
       let furnitureArea = 0;
-      for (const p of placements) {
+      for (const p of scoped) {
         const { effW, effD } = getEffectiveDims(p, p.rotation || 0);
         furnitureArea += effW * effD;
       }
       const coveragePct = roomW && roomD ? ((furnitureArea / (roomW * roomD)) * 100).toFixed(1) : 0;
-      const validation = validateLayout(placements, room);
+      const roomForValidation = zoneContext?.bounds
+        ? { ...room, width: layoutRoom.width, depth: layoutRoom.depth }
+        : room;
+      const validation = validateLayout(scoped, roomForValidation);
       const categories = {};
-      for (const p of placements) {
+      for (const p of scoped) {
         categories[p.category || 'other'] = (categories[p.category || 'other'] || 0) + 1;
       }
       const catSummary = Object.entries(categories).map(([k, v]) => `${v}× ${k}`).join(', ');

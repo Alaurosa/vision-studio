@@ -6,6 +6,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { inchesToFeet } from '@/utils/scale';
 import { isPolygonWallsFormat } from '@/utils/roomWallMath';
 import api from '@/lib/api';
+import { placementsForActiveZone } from '@/utils/chatPlacement';
 import LoginModal from '@/components/auth/LoginModal';
 import KeyboardShortcutsPopover from '@/components/studio/KeyboardShortcutsPopover';
 
@@ -26,7 +27,7 @@ export default function StudioToolbar({
     roomWallsTool, toggleRoomWallsTool, roomResizeTool, toggleRoomResizeTool,
     isChatOpen, toggleChat, undo, redo, validate,
     selectedId, furniture, rotateFurniture, removeFurniture,
-    saveProject,
+    saveProject, activeZoneId, zones,
   } = useLayoutStore();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -61,36 +62,67 @@ export default function StudioToolbar({
   };
 
   const autoPlace = async () => {
-    if (!room?.id || furniture.length === 0) return;
-    const toastId = toast.loading('Auto-arranging furniture…');
+    const state = useLayoutStore.getState();
+    const scoped = placementsForActiveZone(state.furniture, state.activeZoneId, state.zones);
+    if (!room?.id || scoped.length === 0) return;
+    const activeZone = state.zones.find((z) => z.id === state.activeZoneId) || null;
+    const toastId = toast.loading('Planning layout…');
+    const zonePayload = activeZone
+      ? {
+          zone_id: activeZone.id,
+          zone_context: {
+            id: activeZone.id,
+            name: activeZone.name,
+            bbox: activeZone.bbox,
+            polygon: activeZone.polygon,
+            width: activeZone.width,
+            depth: activeZone.depth,
+          },
+        }
+      : {};
+
     try {
       if (draft) {
-        // Draft rooms: send room context + placements to the server
         const { data } = await api.post('/api/layout/auto-place', {
           room_id: room.id,
+          ...zonePayload,
           room_context: {
-            id: room.id, name: room.name, width: room.width, depth: room.depth,
-            height: room.height || 96, unit: room.unit || 'inches',
+            id: room.id,
+            name: room.name,
+            width: room.width,
+            depth: room.depth,
+            height: room.height || 96,
+            unit: room.unit || 'inches',
+            zones: state.zones,
           },
-          placements_context: furniture.map(f => ({
-            id: f.id, name: f.name, category: f.category, width: f.width,
-            depth: f.depth, height: f.height, x_inches: f.x_inches,
-            y_inches: f.y_inches, rotation: f.rotation,
+          placements_context: scoped.map((f) => ({
+            id: f.id,
+            name: f.name,
+            category: f.category,
+            width: f.width,
+            depth: f.depth,
+            height: f.height,
+            x_inches: f.x_inches,
+            y_inches: f.y_inches,
+            rotation: f.rotation,
+            zone_id: f.zone_id || state.activeZoneId || null,
           })),
         });
-        // Apply the returned positions to local state
         const updates = data.placements || [];
         for (const u of updates) {
-          const existing = furniture.find(f => f.id === u.id || f.name === u.name);
+          const existing = scoped.find((f) => f.id === u.id || f.name === u.name);
           if (existing) {
             useLayoutStore.getState().updateFurniture(existing.id, {
-              x_inches: u.x_inches, y_inches: u.y_inches, rotation: u.rotation,
+              x_inches: u.x_inches,
+              y_inches: u.y_inches,
+              rotation: u.rotation,
             });
           }
         }
-        toast.success('Auto-arranged successfully', { id: toastId });
+        const note = data.validation?.valid === false ? ' (some items may be tight)' : '';
+        toast.success(`Auto-arranged${note}`, { id: toastId });
       } else {
-        await api.post('/api/layout/auto-place', { room_id: room.id });
+        await api.post('/api/layout/auto-place', { room_id: room.id, ...zonePayload });
         const { data } = await api.get(`/api/rooms/${room.id}`);
         useLayoutStore.setState({ furniture: data.placements || [] });
         toast.success('Auto-arranged successfully', { id: toastId });

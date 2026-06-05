@@ -50,7 +50,7 @@ cd server && npm run test:e2e               # Same as e2e.smoke.test.js only (12
 cd server && npm run test:watch             # Watch mode
 
 # Browser E2E + demo recorder (optional local dev — `/e2e/` is gitignored)
-# cd e2e && npm install && npm run install:browsers && npm test && npm run demo
+# cd e2e && npm install && npm run install:browsers && npm test && npm run demo:live
 
 # Setup verification (checks env, DB, seeds catalog)
 cd server && node scripts/setup.js
@@ -192,7 +192,7 @@ vision-studio/
 │       │   │   ├── RoomCanvas.jsx     # Konva: pan/zoom, zones, starter click-to-place, wall tools, furniture transform
 │       │   │   ├── ProjectCanvas.jsx  # Project floorplan SVG overlays
 │       │   │   ├── FurnitureItem.jsx
-│       │   │   ├── RoomInteriorSurfaces.jsx # 2D wall/floor styling from room.interior (Materials tab)
+│       │   │   ├── RoomInteriorSurfaces.jsx # 2D floor fill from room.interior (Materials tab; wall bands removed)
 │       │   │   ├── WallOutline.jsx
 │       │   │   ├── WallJointHandles.jsx
 │       │   │   ├── WallDimensionLabels.jsx
@@ -217,7 +217,7 @@ vision-studio/
 │       │   │   ├── RoomViewer3D.jsx
 │       │   │   ├── RoomSceneControls.jsx
 │       │   │   ├── RoomShell3D.jsx       # Legacy shell mesh (not mounted in RoomViewer3D; see ProjectSpaceShell3D)
-│       │   │   ├── RoomInterior3D.jsx    # Selected-room 3D: floor, wall planes, wallpaper, wall art
+│       │   │   ├── RoomInterior3D.jsx    # Selected-room 3D: floor plane only (Materials floor color)
 │       │   │   ├── ProjectSpaceShell3D.jsx # All-spaces per-zone shells + interior
 │       │   │   ├── ProjectViewer3D.jsx   # All-spaces floorplan overview + furniture
 │       │   │   ├── SmartFurnitureModel.jsx
@@ -275,7 +275,8 @@ vision-studio/
 │   │   ├── auth.js               # GET /api/auth/me
 │   │   ├── rooms.js              # CRUD + floor plan upload + calibrate + zone normalization
 │   │   ├── furniture.js          # Catalog search + single item lookup + placements CRUD (with zone_id support)
-│   │   ├── layout.js             # LLM auto-placement + validation (uses shared overlapResolver)
+│   │   ├── layout.js             # Auto-arrange + constraint generate + validation
+│   │   ├── autoArrange.js        # Analyze → constraint placement → overlap repair (auto-place + arrange_room)
 │   │   ├── chat.js               # Agentic chat route (15 tools via chatFunctions.js, multi-turn up to 5 rounds, guest/draft support)
 │   │   ├── projects.js           # CRUD for `projects` + `spaces`; auto-creates compatible `rooms` rows when a space has no `room_id`; in-memory fallback when project tables are missing
 │   │   ├── publicParse.js        # POST /api/public/parse-floorplan — stateless guest parse, no auth, no DB writes
@@ -480,7 +481,7 @@ Lazy-loaded pages; `ErrorBoundary` + `HelmetProvider` + `Toaster` at root. Navba
 | --- | --- | --- |
 | GET | `/api/layout/room-types` | List constraint-based room types (`bedroom`, `living_room`, `office`, `dining_room`, `studio`) with category order and placement rules |
 | POST | `/api/layout/generate` | Deterministic constraint layout (no LLM). Body: `{ room_type, room: { width, depth }, furniture?, use_catalog? }`. Omits `furniture` → picks catalog items for the room type, then places via `server/services/layoutGenerator.js` + `overlapResolver` |
-| POST | `/api/layout/auto-place` | LLM auto-place all furniture optimally (uses overlapResolver) |
+| POST | `/api/layout/auto-place` | Constraint-based auto-arrange with explicit plan + guaranteed de-overlap (`autoArrange.js`; supports `zone_id`) |
 | POST | `/api/layout/validate` | Validate current layout for overlaps and bounds |
 
 ### Chat Routes
@@ -585,8 +586,8 @@ All tables use Row Level Security — users can only access their own data. The 
 ### Materials (2D vs 3D)
 
 - **Materials tab** (`InteriorDesignPanel` + `roomInterior.js`): wall paint presets, wallpaper, wall art placement, layout-intent guidance. Persisted on `room.interior` via `updateRoomInterior` → `PUT /api/rooms/:id` (stored in `detected_objects.interior` and/or `interior` column). User edits set `source: 'user'` and `userEditedAt`.
-- **2D** (`RoomInteriorSurfaces.jsx`): renders styled walls/floor inside the Konva room.
-- **3D selected room** (`RoomInterior3D.jsx` in `RoomViewer3D`): floor, perimeter wall shells, wallpaper/paint planes, and wall art from `room.interior` (`wallpaperTexture.js`).
+- **2D** (`RoomCanvas`): floor fill from `room.interior.floorColor`; wall outline only when **Wall points** tool is on.
+- **3D selected room** (`RoomInterior3D.jsx` in `RoomViewer3D`): floor plane only from `room.interior.floorColor` (no perimeter walls).
 - **3D all spaces** (`ProjectSpaceShell3D` + `ProjectViewer3D`): floorplan-positioned shells; shared `room.interior` for shell tint until per-space interior is modeled.
 
 ### Editor & canvas
@@ -626,6 +627,7 @@ All tables use Row Level Security — users can only access their own data. The 
 - When Supabase **public** URL/key are missing in the client (`client` env / `VITE_` + `NEXT_PUBLIC_` aliases), the app skips Supabase Auth network calls and uses the guest/test-token path only — avoiding failed session requests to placeholder hosts. `fetchRoomsListOnce()` dedupes concurrent `GET /api/rooms` during React StrictMode double-mount.
 - Project space rows from the API normalize `type` to `interior` \| `exterior` (string casing + optional `placeholder_mode` fallback) so exterior spaces stay in the Exterior section after refresh.
 - The chat endpoint runs a multi-turn tool execution loop (up to 5 rounds). After each round of tool calls, it re-fetches placements from the DB before executing the next tool, ensuring tools always operate on current state.
+- **Space Assistant zone scope**: Editor `ChatPanel` sends `zone_id` + `zone_context` (active tab / sub-room bounds). Server chat tools (`add_furniture`, `furnish_room`, `clear_room`, etc.) scope placements to that zone via `server/services/zonePlacement.js`; new items get `zone_id` and coordinates inside the active space bbox so `selectVisibleFurniture` shows them on the current tab.
 - Studio now presents a **project-first dashboard** at `/studio`, with localStorage-backed compatibility objects that group existing backend room records into floorplan projects. The dashboard safely merges `GET /api/projects` with local `vs-projects-v1`: **API projects remain authoritative for spaces/room links**, matching IDs keep a **local `globalVision` overlay**, and **local-only projects still render** so prior drafts remain visible during migration.
 - Project compatibility shaping (`toDashboardProjects`) no longer drops spaces whose `roomId` no longer exists in the current room list. These spaces remain visible and are flagged with `missingLinkedRoom` so interior/exterior structure is preserved while users relink or recreate editable rooms.
 - **Guided new-project flow** (only when user goes through `/studio/new` or upload intake): **`/studio/new`** → **`/studio/new?projectId=:id&step=upload`** (embedded `Upload`) → confirm spaces → **`/studio/project/:id/vision?setup=new`** (`ProjectVisionIntake`) → confirm/adjust/editor. **`/studio/new?projectId=:id`** (without `step=upload`) redirects to **`/vision?setup=new`**. Project hub and **`/vision`** remain available but no longer gate floorplan setup. **`/confirm?phase=spaces`** redirects to **`?mode=adjust`** (legacy Floorplan Intake removed). Opening an **existing** project from `/studio` goes **directly to the project hub** — no automatic redirect to vision or confirm once the user can navigate freely. **`/studio/project/:id/chat`** is the full-page **Project Assistant** (project-wide Q&amp;A); **`/vision`** is the **Project Vision Assistant** structured intake. **Space Assistant** = editor `ChatPanel`. Legacy `/studio/project/:id/:spaceId` → `.../editor/:spaceId` unless `legacySpaceId` is `confirm`, `vision`, `editor`, or `chat`. `/upload` → wizard.

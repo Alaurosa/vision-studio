@@ -1,10 +1,10 @@
 import express from 'express';
 import { optionalAuth } from '../middleware/auth.js';
 import { useDb, supabaseAdmin, fallback, hasDbUserId, getFallbackRoom } from '../services/db.js';
-import { buildLayoutJSON } from '../services/exportFormats.js';
-import { chat } from '../services/llmRouter.js';
 import { log } from '../services/logger.js';
-import { resolveOverlaps, getEffectiveDims, validateLayout } from '../services/overlapResolver.js';
+import { validateLayout, CLEARANCE_IN } from '../services/overlapResolver.js';
+import { autoArrangeFurniture } from '../services/autoArrange.js';
+import { buildZoneContext } from '../services/zonePlacement.js';
 import {
   generateLayout,
   generateLayoutFromCatalog,
@@ -73,9 +73,9 @@ router.post('/generate', optionalAuth, async (req, res) => {
   }
 });
 
-// POST /api/layout/auto-place — Use LLM to compute optimal placement for all furniture
+// POST /api/layout/auto-place — Analyze, constraint-place, then de-overlap (no raw LLM coordinates)
 router.post('/auto-place', optionalAuth, async (req, res) => {
-  const { room_id, room_context, placements_context } = req.body;
+  const { room_id, room_context, placements_context, zone_id, zone_context } = req.body;
   const isDraft = typeof room_id === 'string' && room_id.startsWith('draft-');
   const db = (await useDb()) && hasDbUserId(req.user?.id);
 
@@ -83,7 +83,10 @@ router.post('/auto-place', optionalAuth, async (req, res) => {
     let room, placements;
 
     if (isDraft && room_context) {
-      room = room_context;
+      room = {
+        ...room_context,
+        zones: Array.isArray(room_context.zones) ? room_context.zones : [],
+      };
       placements = placements_context || [];
     } else if (db) {
       const [roomRes, placementsRes] = await Promise.all([
@@ -100,93 +103,54 @@ router.post('/auto-place', optionalAuth, async (req, res) => {
     }
 
     if (placements.length === 0) {
-      return res.json({ message: 'No furniture to arrange.', placements: [] });
+      return res.json({ message: 'No furniture to arrange.', placements: [], plan: null });
     }
 
-    const roomW = room.width || 120;
-    const roomD = room.depth || 120;
+    const zoneContext = buildZoneContext(room, zone_id, zone_context);
 
-    const systemPrompt = `You are an expert interior designer. Given a room and furniture items, compute the optimal (x, y) position and rotation for each item.
+    const result = autoArrangeFurniture({ room, placements, zoneContext });
 
-COORDINATE SYSTEM:
-- (x=0, y=0) is the top-left corner of the room.
-- x increases to the right (max x = ${roomW}).
-- y increases downward (max y = ${roomD}).
-- The room is ${roomW}" wide (x-axis) × ${roomD}" deep (y-axis).
-
-BOUNDING BOX RULES:
-- A piece at (x, y) with rotation 0 or 180 occupies the rectangle [x, x+width] × [y, y+depth].
-- A piece at (x, y) with rotation 90 or 270 occupies [x, x+depth] × [y, y+width] (width and depth are swapped).
-- HARD CONSTRAINT: For every item, x >= 0, y >= 0, x + effective_width <= ${roomW}, y + effective_depth <= ${roomD}.
-- HARD CONSTRAINT: No two items' bounding boxes may overlap. For items A and B, they overlap if NOT (A.right <= B.left OR B.right <= A.left OR A.bottom <= B.top OR B.bottom <= A.top).
-
-PLACEMENT GUIDELINES:
-- Keep at least 24" of walkway clearance in main traffic paths.
-- Place sofas/seating facing the center or toward a TV if present.
-- Place beds with headboard against a wall.
-- Place desks near walls with space for a chair.
-- Group related items (nightstands beside beds, coffee tables near sofas).
-
-VERIFICATION STEP: Before outputting, verify EVERY pair of items for overlap. If any two items overlap, adjust positions until they don't.
-
-CRITICAL: Respond ONLY with a valid JSON array. No markdown, no explanation, just the JSON.
-Each element: {"id": "placement_id", "x_inches": number, "y_inches": number, "rotation": 0|90|180|270}`;
-
-    const furnitureList = placements.map(p => 
-      `- ${p.name} (id: ${p.id}): ${p.width}"W × ${p.depth}"D × ${p.height}"H, category: ${p.category}`
-    ).join('\n');
-
-    const messages = [{
-      role: 'user',
-      content: `Room: "${room.name}" — ${room.width || 120}" wide × ${room.depth || 120}" deep
-
-Furniture to place:
-${furnitureList}
-
-Compute the optimal position and rotation for each item. Return ONLY a JSON array.`
-    }];
-
-    const response = await chat({ messages, systemPrompt });
-    
-    let arrangements;
-    try {
-      let jsonStr = response.text.trim();
-      const jsonMatch = jsonStr.match(/\[[\s\S]*?\]/);
-      if (jsonMatch) jsonStr = jsonMatch[0];
-      arrangements = JSON.parse(jsonStr);
-    } catch (parseErr) {
-      return res.status(500).json({ error: 'Failed to parse AI layout response', raw: response.text });
-    }
-
-    // Build candidates with effective dimensions and clamp within room bounds
-    const candidates = arrangements.map(arr => {
-      const placement = placements.find(p => p.id === arr.id);
-      if (!placement) return null;
-      const rotation = [0, 90, 180, 270].includes(arr.rotation) ? arr.rotation : 0;
-      const { effW, effD } = getEffectiveDims(placement, rotation);
-      const x = Math.max(0, Math.min(Math.round(arr.x_inches || 0), roomW - effW));
-      const y = Math.max(0, Math.min(Math.round(arr.y_inches || 0), roomD - effD));
-      return { placement, rotation, x, y, effW, effD };
-    }).filter(Boolean);
-
-    const placed = resolveOverlaps(candidates, roomW, roomD);
-
-    // Save resolved positions (skip DB writes for draft rooms)
     const updates = [];
-    for (const c of placed) {
+    for (const p of result.placements) {
       if (!isDraft) {
         if (db) {
-          await supabaseAdmin.from('placements')
-            .update({ x_inches: c.x, y_inches: c.y, rotation: c.rotation, updated_at: new Date().toISOString() })
-            .eq('id', c.placement.id);
+          await supabaseAdmin
+            .from('placements')
+            .update({
+              x_inches: p.x_inches,
+              y_inches: p.y_inches,
+              rotation: p.rotation,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', p.id);
         } else {
-          fallback.updatePlacement(c.placement.id, { x_inches: c.x, y_inches: c.y, rotation: c.rotation });
+          fallback.updatePlacement(p.id, {
+            x_inches: p.x_inches,
+            y_inches: p.y_inches,
+            rotation: p.rotation,
+          });
         }
       }
-      updates.push({ id: c.placement.id, name: c.placement.name, x_inches: c.x, y_inches: c.y, rotation: c.rotation });
+      updates.push({
+        id: p.id,
+        name: p.name,
+        x_inches: p.x_inches,
+        y_inches: p.y_inches,
+        rotation: p.rotation,
+      });
     }
 
-    res.json({ message: `Auto-placed ${updates.length} items.`, placements: updates });
+    const summary = result.plan
+      ? `Arranged as ${result.plan.room_label} (${result.plan.placement_order.length} items, ${CLEARANCE_IN}" clearance).`
+      : `Auto-placed ${updates.length} items.`;
+
+    res.json({
+      message: summary,
+      method: result.method,
+      plan: result.plan,
+      validation: result.validation,
+      placements: updates,
+    });
   } catch (err) {
     log.error('Auto-place error', { error: err.message });
     res.status(500).json({ error: err.message });

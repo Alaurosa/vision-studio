@@ -10,13 +10,21 @@ import WallOutline from './WallOutline';
 import WallJointHandles from './WallJointHandles';
 import RoomBoundsHandles from './RoomBoundsHandles';
 import WallDimensionLabels from './WallDimensionLabels';
-import RoomInteriorSurfaces from './RoomInteriorSurfaces';
 import {
   isPolygonWallsFormat,
   isSegmentWallsFormat,
   roomRectangleOutline,
   scaleSegmentWallsToRoomBox,
 } from '@/utils/roomWallMath';
+import { normalizeRoomInterior } from '@/data/roomInterior';
+
+function isEditableTarget(target) {
+  if (!target || typeof target !== 'object') return false;
+  const el = /** @type {HTMLElement} */ (target);
+  const tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  return Boolean(el.isContentEditable);
+}
 
 function getZoneBox(zone) {
   if (Array.isArray(zone?.bbox) && zone.bbox.length === 4) {
@@ -112,10 +120,12 @@ export default function RoomCanvas() {
   };
 
   const onKeyDown = useCallback((e) => {
+    if (isEditableTarget(e.target)) return;
+
     const state = useLayoutStore.getState();
     const { selectedId, furniture, removeFurniture, updateFurniture, clearSelection, undo, redo } = state;
 
-    // Undo / Redo — works everywhere
+    // Undo / Redo
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key === 'z' && !e.shiftKey) {
       e.preventDefault();
@@ -151,7 +161,7 @@ export default function RoomCanvas() {
 
     // Below shortcuts require a selection
     if (!selectedId) return;
-    if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (e.key === 'Delete') {
       e.preventDefault();
       removeFurniture(selectedId);
     } else if (e.key === 'r' || e.key === 'R') {
@@ -366,7 +376,7 @@ export default function RoomCanvas() {
           if (e.target === e.target.getStage()) clearSelection();
         }}
       >
-        {/* Room floor + interior wall bands */}
+        {/* Room floor */}
         <Layer listening={false}>
           {focusWidth > 0 && (
             <>
@@ -375,18 +385,9 @@ export default function RoomCanvas() {
                 y={roomOffsetY}
                 width={focusPxW}
                 height={focusPxH}
-                fill="#2a2a2a"
-                stroke="#404040"
-                strokeWidth={2 / viewport.scale}
-              />
-              <RoomInteriorSurfaces
-                interior={room?.interior}
-                originX={roomOffsetX}
-                originY={roomOffsetY}
-                widthPx={focusPxW}
-                heightPx={focusPxH}
-                pxPerInch={pxPerInch}
-                strokeScale={viewport.scale}
+                fill={normalizeRoomInterior(room?.interior).floorColor || '#2a2a2a'}
+                stroke="#505050"
+                strokeWidth={1.5 / viewport.scale}
               />
             </>
           )}
@@ -405,9 +406,9 @@ export default function RoomCanvas() {
           )}
         </Layer>
 
-        {/* Walls (from parser or live drag preview) */}
+        {/* Wall outline — only while editing wall points */}
         <Layer listening={false}>
-          {wallsForOutline && (
+          {wallsForOutline && roomWallsTool && (
             <WallOutline
               walls={wallsForOutline}
               pxPerInch={pxPerInch}
@@ -689,9 +690,18 @@ export default function RoomCanvas() {
               step="1"
               value={Math.round(sel.rotation || 0)}
               onChange={(e) => {
-                const nextValue = Number(e.target.value);
+                const raw = e.target.value;
+                if (raw === '') return;
+                const nextValue = Number(raw);
                 if (Number.isNaN(nextValue)) return;
                 updateFurniture(sel.id, computeRotation(sel, nextValue));
+              }}
+              onBlur={(e) => {
+                const nextValue = Number(e.target.value);
+                updateFurniture(
+                  sel.id,
+                  computeRotation(sel, Number.isNaN(nextValue) ? 0 : nextValue),
+                );
               }}
               className="w-16 rounded border border-ink-900/15 px-2 py-1 text-[11px] text-ink-800"
             />

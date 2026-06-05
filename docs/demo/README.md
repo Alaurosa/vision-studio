@@ -8,20 +8,29 @@ After recording, the demo is saved as:
 
 (1920×1080 WebM from Playwright; plays in Chrome, Firefox, and VLC.)
 
-**Length:** ~**2 minutes** (120s) — scripted pauses in `e2e/tests/vision-studio-demo.spec.js` (`HOLD` timings + `DEMO_TARGET_MS`).
+**Length:** ~**1.5 minutes** (90s) — scripted pauses in the demo spec (`HOLD` timings).
+
+**Recommended (real site):** `cd e2e && npm run demo:live` — live OpenAI floorplan segmentation on Python :5001, real chat API, **60fps** CDP+ffmpeg capture (`vision-studio-demo-live.spec.js`).
+
+**Offline fallback:** `npm run demo` — mocked APIs for CI/no-keys (`vision-studio-demo.spec.js`, ~25fps Playwright WebM).
 
 ## What the demo covers
 
+Full room design process end to end:
+
 1. **Landing** → **Studio** — product intro
 2. **Upload floorplan** — AI analysis pipeline + room zone editor (mocked parse for reliable recording)
-3. **Project vision** — style chips + assistant direction
-4. **Space Assistant** — furnish living room, then move furniture via chat
-5. **3D** — orbit / zoom / Walkthrough & Overview presets (Screen Studio–style smooth camera moves)
+3. **Project vision** — style chips + design direction
+4. **Confirmation** — review spaces before editor
+5. **2D editor** — catalog click-add (sofa + coffee table) on the canvas
+6. **Space Assistant** — furnish living room, then move furniture via chat
+7. **3D** — orbit, zoom, Walkthrough camera preset
 
 **Screen Studio–style zoom:** `e2e/helpers/demo-motion.js` zooms the viewport toward each click target and during key holds (upload preview, floorplan zones, 2D layout, 3D canvas).
-6. **Confirmation** — project summary before editor
 
-Recording uses deterministic API mocks (`e2e/helpers/demo-mocks.js`) so no OpenAI/Python is required.
+**Live recording** hits real `/api/public/parse-floorplan` → Python OpenAI vision grid+snap (labeled rooms, not generic OpenCV boxes). Requires server :3001, client :5173, python :5001, and `OPENAI_API_KEY` in root `.env`. Preflight: `npm run preflight:live`.
+
+**Offline** `npm run demo` uses mocks (`e2e/helpers/demo-mocks.js`) when Python/keys are unavailable.
 
 ## Automated tests
 
@@ -31,10 +40,17 @@ Fast smoke (editor flow, no recording):
 cd e2e && npm install && npm test
 ```
 
-~2 min demo recording + copy to this folder:
+~1.5 min live demo (real AI, 60fps):
 
 ```bash
-cd e2e && npm run demo && node scripts/copy-demo-video.js
+# Terminals: server :3001, client :5173, python :5001 (or let Playwright start them without SKIP_WEBSERVER)
+cd e2e && npm run demo:live
+```
+
+Offline mocked demo:
+
+```bash
+cd e2e && npm run demo
 ```
 
 Server API smoke: `cd server && npm run test:e2e`
@@ -55,9 +71,6 @@ cd e2e
 npm install
 npx playwright install chromium
 npm run demo
-
-# Copy to docs/demo/
-node scripts/copy-demo-video.js
 ```
 
 To lengthen the recording, raise values in `HOLD` inside `vision-studio-demo.spec.js`, or add delay: `PLAYWRIGHT_SLOW_MO=50 npm run demo`

@@ -231,14 +231,20 @@ export const useLayoutStore = create(
         try {
           const { data } = await api.get(`/api/rooms/${roomId}`);
           const fallbackZones = normalizeZoneObjects(data);
-          set({
-            room: roomWithInterior(data),
-            furniture: data.placements || [],
-            detections: normalizeDetectedObjects(data.detected_objects),
-            zones: fallbackZones,
-            activeZoneId: fallbackZones[0]?.id || null,
-            loading: false,
-            loadRoomFailed: false,
+          set((s) => {
+            const keepZone =
+              s.activeZoneId && fallbackZones.some((z) => z.id === s.activeZoneId)
+                ? s.activeZoneId
+                : fallbackZones[0]?.id || null;
+            return {
+              room: roomWithInterior(data),
+              furniture: data.placements || [],
+              detections: normalizeDetectedObjects(data.detected_objects),
+              zones: fallbackZones,
+              activeZoneId: keepZone,
+              loading: false,
+              loadRoomFailed: false,
+            };
           });
         } catch (e) {
           console.error('loadRoom', e);

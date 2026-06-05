@@ -3,6 +3,7 @@ import { AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { useLayoutStore } from '@/store/layoutStore';
+import { addAssistantFurniture, placementsForActiveZone } from '@/utils/chatPlacement';
 import MessageBubble from './MessageBubble';
 import StylePrompts from './StylePrompts';
 
@@ -77,12 +78,32 @@ export default function ChatPanel({
           : spaceVisionProp && typeof spaceVisionProp === 'object'
             ? spaceVisionProp
             : null;
+      const storeSnapshot = useLayoutStore.getState();
+      const { activeZoneId, zones } = storeSnapshot;
+      const activeZone = zones.find((z) => z.id === activeZoneId) || null;
+      const zoneScopedFurniture = placementsForActiveZone(
+        storeSnapshot.furniture,
+        activeZoneId,
+        zones,
+      );
+
       const { data } = await api.post('/api/chat/message', {
         room_id: room.id,
         message: text,
         context_type: 'current_space',
         ...(projectIdProp && { project_id: projectIdProp }),
         ...(spaceIdProp && { space_id: spaceIdProp }),
+        ...(activeZoneId && { zone_id: activeZoneId }),
+        ...(activeZone && {
+          zone_context: {
+            id: activeZone.id,
+            name: activeZone.name,
+            bbox: activeZone.bbox,
+            polygon: activeZone.polygon,
+            width: activeZone.width,
+            depth: activeZone.depth,
+          },
+        }),
         ...(globalVisionProp && typeof globalVisionProp === 'object' && { global_vision: globalVisionProp }),
         ...(spaceVisionOut && { space_vision: spaceVisionOut }),
         // For draft rooms, send room context since the server doesn't have it
@@ -94,10 +115,19 @@ export default function ChatPanel({
             depth: room.depth,
             height: room.height || 96,
             unit: room.unit || 'inches',
-            placements: useLayoutStore.getState().furniture.map(f => ({
-              id: f.id, name: f.name, category: f.category, provider: f.provider,
-              width: f.width, depth: f.depth, height: f.height,
-              x_inches: f.x_inches, y_inches: f.y_inches, rotation: f.rotation,
+            zones,
+            placements: zoneScopedFurniture.map((f) => ({
+              id: f.id,
+              name: f.name,
+              category: f.category,
+              provider: f.provider,
+              width: f.width,
+              depth: f.depth,
+              height: f.height,
+              x_inches: f.x_inches,
+              y_inches: f.y_inches,
+              rotation: f.rotation,
+              zone_id: f.zone_id || activeZoneId || null,
             })),
           },
         }),
@@ -137,27 +167,19 @@ export default function ChatPanel({
         if (isDraft) {
           // Draft rooms: apply mutations locally from action results
           const store = useLayoutStore.getState();
+          const visibleFurniture = () =>
+            placementsForActiveZone(store.furniture, store.activeZoneId, store.zones);
           for (const action of (data.actions || [])) {
             const r = action.result;
             if (!r?.success) continue;
             switch (action.function) {
               case 'add_furniture': {
-                const added = r.added_item;
-                if (added) {
-                  store.addFurniture({
-                    name: added.name, category: added.category, provider: added.provider,
-                    width: added.width, depth: added.depth, height: added.height,
-                    x_inches: added.x_inches || 12, y_inches: added.y_inches || 12,
-                    rotation: added.rotation || 0, color: added.color || '#d4a27a',
-                    image_url: added.image_url, model_url: added.model_url,
-                    _animDelay: 300,
-                  });
-                }
+                if (r.added_item) addAssistantFurniture(store, r.added_item);
                 break;
               }
               case 'move_furniture':
               case 'rotate_furniture': {
-                const match = findFurnitureByRef(store.furniture, {
+                const match = findFurnitureByRef(visibleFurniture(), {
                   placementId: r.placement_id,
                   name: action.args?.furniture_name,
                 });
@@ -171,7 +193,7 @@ export default function ChatPanel({
                 break;
               }
               case 'remove_furniture': {
-                const match = findFurnitureByRef(store.furniture, {
+                const match = findFurnitureByRef(visibleFurniture(), {
                   placementId: r.placement_id,
                   name: action.args?.furniture_name,
                 });
@@ -179,47 +201,46 @@ export default function ChatPanel({
                 break;
               }
               case 'clear_room':
-                // Remove all furniture
-                for (const f of [...store.furniture]) store.removeFurniture(f.id);
+                for (const f of visibleFurniture()) store.removeFurniture(f.id);
                 break;
               case 'swap_furniture': {
-                const removed = findFurnitureByRef(store.furniture, {
+                const removed = findFurnitureByRef(visibleFurniture(), {
                   placementId: r.removed_placement_id,
                   name: r.removed_name,
                 });
                 if (removed) store.removeFurniture(removed.id);
-                const added = r.added_item;
-                if (added) {
-                  store.addFurniture({
-                    name: added.name, category: added.category, provider: added.provider,
-                    width: added.width, depth: added.depth, height: added.height,
-                    x_inches: added.x_inches || 12, y_inches: added.y_inches || 12,
-                    rotation: added.rotation || 0, color: added.color || '#d4a27a',
-                    image_url: added.image_url, model_url: added.model_url,
-                    _animDelay: 300,
-                  });
-                }
+                if (r.added_item) addAssistantFurniture(store, r.added_item);
                 break;
               }
               case 'furnish_room': {
                 const items = r.suggestions || [];
                 items.forEach((item, idx) => {
-                  store.addFurniture({
-                    name: item.name, category: item.category, provider: item.provider,
-                    width: item.width, depth: item.depth, height: item.height,
-                    x_inches: item.x_inches || 12, y_inches: item.y_inches || 12,
-                    rotation: item.rotation || 0, color: '#d4a27a',
-                    image_url: item.image_url, model_url: item.model_url,
-                    _animDelay: 400 + idx * 500,
-                  });
+                  addAssistantFurniture(store, item, { animDelay: 400 + idx * 500 });
                 });
+                break;
+              }
+              case 'arrange_room': {
+                for (const u of r.placements || []) {
+                  const match = store.furniture.find((f) => f.id === u.id);
+                  if (match) {
+                    store.updateFurniture(match.id, {
+                      x_inches: u.x_inches,
+                      y_inches: u.y_inches,
+                      rotation: u.rotation ?? match.rotation,
+                    });
+                  }
+                }
                 break;
               }
             }
           }
-          // For arrange_room only (furnish_room already returns arranged positions)
-          const hasArrange = (data.actions || []).some(a =>
-            a.function === 'arrange_room' && a.result?.success);
+          // Legacy fallback if arrange_room omitted placement payloads
+          const hasArrange = (data.actions || []).some(
+            (a) =>
+              a.function === 'arrange_room' &&
+              a.result?.success &&
+              !(a.result?.placements?.length > 0),
+          );
           if (hasArrange) {
             // The server arranged in the fallback store; we need to get those positions
             // Send a follow-up auto-place request with current state

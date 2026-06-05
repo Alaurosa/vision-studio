@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-**Vision Studio** is a full-stack AI-powered spatial layout design application. Users can upload floor plans or room photos, get AI-detected room geometry and furniture, browse real IKEA/Ashley catalogs, drag-and-drop furniture in a 2D Konva editor, chat with an AI assistant for layout suggestions, and export to JSON/SVG/DXF. Built for CSE 115A Spring 2026 Capstone at UCSC by William Liu, Ethan Cao, Sriya Katreddi, and Ashley Kim.
+**Vision Studio** is a full-stack AI-powered spatial layout design application. Users can upload floor plans or room photos, get AI-detected room geometry, complete guided **Project Vision**, explicitly **Apply Vision to Layout**, place furniture in a 2D Konva editor (starter Kenney catalog + API IKEA/Ashley via chat), style interiors in the **Materials** tab (wall paint, wallpaper, wall art), preview in 2D/3D (Materials sync to `RoomInterior3D`), chat with AI assistants, and export to JSON/SVG/DXF. Built for CSE 115A Spring 2026 Capstone at UCSC by William Liu, Ethan Cao, Sriya Katreddi, and Ashley Kim.
 
 ### Current Phase
 
@@ -24,7 +24,7 @@ Full-stack implementation — monorepo with React/Vite client, separate Next.js 
 | Python AI     | FastAPI 0.115 + OpenAI Vision gpt-5.4 (20×20 grid + wall-snap room segmentation) + Replicate (Grounding DINO + SAM 2 for room photos; constant currently named `SAM3_MODEL`) + OpenCV fallback |
 | Database      | Supabase (PostgreSQL + Auth + Storage)         |
 | 3D Models     | Kenney Furniture Kit (CC0 GLBs in `client/public/models/kenney/`): starter catalog sets `modelUrl` in `furnitureCatalog.js`; API catalog via `server/services/kenneyMapping.js` at seed time. GLBs are visual-only; catalog dimensions stay source of truth. Procedural fallback when `modelUrl` is missing or load fails. Meshy v2 route exists for future batch generation, not the live editor. |
-| 3D Viewer     | React Three Fiber 8.18 + @react-three/drei 9.122 + GLTFLoader; camera nav = smooth OrbitControls + per-frame collision + top-down minimap (`client/src/utils/cameraNav.js`) |
+| 3D Viewer     | React Three Fiber 8.18 + @react-three/drei 9.122 + GLTFLoader |
 | Marketing     | Next.js 16.2 + React 19.2 + Tailwind CSS 4 + Supabase SSR helpers |
 | SEO           | react-helmet-async 3.0                        |
 | Notifications | react-hot-toast 2.6                           |
@@ -45,8 +45,12 @@ cd marketing && npm run lint                # ESLint
 # Server (Express)
 cd server && npm install && npm run dev     # Dev on :3001 (nodemon)
 cd server && npm start                      # Production start
-cd server && npm test                       # Vitest smoke tests (save/load against live Supabase)
+cd server && npm test                       # Vitest: corsOrigins, placementPersistence, e2e.smoke, saveLoad (skipped without real Supabase)
+cd server && npm run test:e2e               # Same as e2e.smoke.test.js only (12 in-process API tests)
 cd server && npm run test:watch             # Watch mode
+
+# Browser E2E + demo recorder (optional local dev — `/e2e/` is gitignored)
+# cd e2e && npm install && npm run install:browsers && npm test && npm run demo
 
 # Setup verification (checks env, DB, seeds catalog)
 cd server && node scripts/setup.js
@@ -54,18 +58,25 @@ cd server && node scripts/setup.js
 # Apply database schema (auto or manual)
 node server/scripts/applySchema.js [DB_PASSWORD]
 
-# Python AI Service
+# Python AI Service (required for real floorplan GPT analysis)
 cd python && pip install -r requirements.txt
 uvicorn app:app --host 0.0.0.0 --port 5001 --reload
+
+# Verify floorplan AI (OpenAI key + Python + sample parse)
+node server/scripts/checkFloorplanAi.js floorplan2.jpg
 
 # Scripts
 cd server && node scripts/seedFurniture.js  # Seed IKEA + Ashley data
 cd server && node scripts/applySchema.js    # Apply schema.sql to Supabase
 ```
 
-## Client testing — starter furniture catalog
+## Client testing
 
-Automated coverage lives under `client/src/**/__tests__/` (catalog data, filters, `FurnitureCatalogPanel`, `FurnitureCard`, `furniturePlacement`, `layoutStore` catalog selection, sidebar hint/clear).
+Vitest config: `client/vitest.config.js` + `client/src/test/setup.js` (`@testing-library/jest-dom` only). **Note:** `layoutStore` uses `zustand/persist`; tests that call `useLayoutStore.setState` need a `localStorage` mock in setup or they fail with `storage.setItem is not a function`.
+
+Automated coverage under `client/src/**/__tests__/` includes: `furnitureCatalog`, `furnitureStyleTags`, `roomInterior`, `furnitureCatalogFilters`, `furniturePlacement`, `furniture3d`, `roomShell3d`, `roomCamera3d`, `wallpaperTexture`, `recommendationRules`, `layoutGuidance`, `projectVision`, `guidedVisionFlow`, `FurnitureCatalogPanel`, `FurnitureCard`, `catalogFlow`, `layoutStore` (catalog + visible furniture), `EditorWorkspaceSidebar`, `InteriorDesignPanel`, `ProjectVisionIntake`, `uploadWizardVision`.
+
+### Starter furniture catalog — manual QA
 
 **Manual QA checklist (Furniture tab → RoomCanvas placement):**
 
@@ -98,24 +109,6 @@ Pure logic: `client/src/utils/__tests__/furniture3d.test.js` (`resolveFurnitureM
 
 Meshy/Tripo and other external 3D APIs are **not** called from the editor viewer; procedural fallback remains required when GLB is absent or fails.
 
-## Client testing — 3D camera navigation
-
-Sprint 4 US3 (camera & navigation). Pure math: `client/src/utils/__tests__/cameraNav.test.js` (24 cases) — furniture world boxes, `resolveCameraCollision` (floor + furniture push-out), `clampTargetToRoom`, zoom-distance bounds, default/reset pose, and minimap projection (`minimapProjection` / `worldToMinimap` / `furnitureFootprintCorners`) — exercised across varied room sizes and furniture densities. Run with `cd client && npm test`.
-
-Camera nav lives in `RoomViewer3D` only (room-scoped viewer): smooth damped `OrbitControls` (pan/orbit/zoom, room-scaled min/max distance, polar clamp so it can't orbit under the floor), `CameraCollider` (per-frame: keeps the camera above the floor and out of furniture, clamps the orbit target inside the room), and the `Minimap` overlay (`MinimapTracker` paints a top-down canvas of room + furniture footprints + live camera position/cone). The Three.js/Canvas interaction itself is not unit-tested — see the manual checklist.
-
-**Manual usability checklist (RoomCanvas → 3D view), across small and large rooms + sparse/dense furniture:**
-
-1. Switch the editor to **3D** view (`StudioToolbar` 2D/3D toggle) with furniture placed.
-2. **Orbit**: drag to rotate — motion is smooth (damped) and can't roll under the floor.
-3. **Zoom**: scroll/pinch — bounded; can't zoom past the room center or infinitely far.
-4. **Pan**: right-drag — the view stays focused on the room (target stays inside).
-5. **Collision**: orbit/zoom toward a sofa or wall — the camera bumps and never clips inside furniture or below the floor.
-6. **Minimap**: bottom-right panel shows the room, furniture footprints, and a blue camera marker + view cone that track as you move; **Hide/Show map** toggles it.
-7. **Reset view**: returns to the default framing.
-8. Repeat in a small room (e.g. 60×60) and a large one (e.g. 480×360) and with many items — controls stay usable and the minimap rescales.
-9. Confirm no console errors when switching 2D ↔ 3D or toggling the minimap.
-
 ## Monorepo Structure
 
 ```
@@ -128,6 +121,9 @@ vision-studio/
 ├── .prettierrc                   # Prettier config: single quotes, semi, trailing comma es5
 ├── supabase/
 │   └── schema.sql                # Full database schema (run in Supabase SQL Editor)
+├── e2e/                          # (gitignored) Playwright smoke + demo recorder — local dev only
+├── docs/
+│   └── demo/                     # (gitignored *.webm) optional README for re-recording demos
 │
 ├── client/                       # React + Vite frontend
 │   ├── package.json
@@ -136,11 +132,13 @@ vision-studio/
 │   ├── postcss.config.js
 │   ├── index.html                # Google Fonts (Fraunces + Inter), entry point
 │   ├── .env.local                # Client env vars (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, VITE_* aliases, VITE_API_URL)
+│   ├── vitest.config.js          # @ alias, jsdom, setupFiles: src/test/setup.js
 │   ├── public/
-│   │   ├── images/                 # Static image assets (logo, portfolio photos)
-│   │   └── models/                 # CC0 3D assets bundled with the client
-│   │       └── kenney/             # Kenney Furniture Kit (140 low-poly GLBs, CC0 / public domain)
+│   │   ├── images/               # Static assets (logo, portfolio photos)
+│   │   ├── furniture/placeholders/ # 2D catalog card previews (referenced by furnitureCatalog.js)
+│   │   └── models/kenney/        # Kenney Furniture Kit GLBs (CC0; LICENSE-kenney.txt)
 │   └── src/
+│       ├── test/setup.js         # Vitest + jest-dom
 │       ├── main.jsx              # ReactDOM.createRoot + StrictMode + BrowserRouter
 │       ├── App.jsx               # Route shell with lazy-loaded pages, ErrorBoundary, HelmetProvider, Toaster
 │       ├── index.css             # Tailwind directives + editorial theme + component classes + a11y focus-visible + reduced-motion
@@ -154,21 +152,32 @@ vision-studio/
 │       ├── store/
 │       │   └── layoutStore.js    # Zustand: room, furniture, zones, detections, chat, view state, undo/redo, draft mode
 │       ├── utils/
-│       │   ├── constants.js      # Grid snap, clearance, category colors/labels, room templates, zone colors (16 presets + random generator)
-│       │   ├── scale.js          # px↔inches conversion, snap-to-grid, rotation helpers, inchesToFeet formatter
-│       │   ├── furnitureDisplay.js # formatFurnitureDimensions, provider/model status labels for catalog cards
-│       │   ├── furnitureCatalogFilters.js # filterStarterFurnitureCatalog for FurnitureCatalogPanel search/category
-│       │   ├── furniturePlacement.js   # createPlacedFurnitureFromCatalogItem, getFurnitureFootprintSize (catalog → placement)
-│       │   ├── furniture3d.js          # 3D render helpers: modelUrl resolution, starter category→procedural map, inches→meters dimensions
-│       │   ├── collision.js      # AABB detection (arbitrary rotation), overlap check, room bounds validation
-│       │   ├── cameraNav.js      # 3D camera-nav math (US3): furniture world boxes, camera collision resolve (floor + furniture), target clamp, zoom-distance bounds, default/reset pose, minimap projection
-│       │   ├── floorplanGeometry.js # Shared floorplan geometry normalization for project-level 2D/3D overlays (rect + polygon)
-│       │   ├── projectCompat.js  # Frontend-only project compatibility layer (localStorage `vs-projects-v1`) + helper metadata for Phase 2 schema planning
-│       │   ├── chatRouting.js    # Global `/chat` intent routing helper (project/space name matching → Studio routes or suggestion options)
-│       │   ├── roomWallMath.js   # Wall geometry helpers (snap/clamp/move wall joints, rectangle perimeter, segment scaling, polygon vs segment detection)
-│       │   └── visionGate.js    # Client-side check that whole-property vision (`globalVision.propertyVision` + style/mood rules) is complete
+│       │   ├── constants.js      # Grid snap, clearance, category colors/labels, room templates, zone colors
+│       │   ├── scale.js          # px↔inches, snap-to-grid, rotation, inchesToFeet
+│       │   ├── apiBase.js        # API base URL helper
+│       │   ├── furnitureDisplay.js
+│       │   ├── furnitureCatalogFilters.js
+│       │   ├── furniturePlacement.js   # catalog item → placement draft
+│       │   ├── furniture3d.js          # modelUrl, procedural category map, inches→meters
+│       │   ├── roomShell3d.js          # shell dimensions, wall thickness constant, ceiling opacity
+│       │   ├── roomCamera3d.js         # Overview / Walkthrough camera presets
+│       │   ├── wallpaperTexture.js     # Canvas textures for 2D wallpaper presets
+│       │   ├── recommendationRules.js  # recommendForRoom() for FurnitureCatalogPanel
+│       │   ├── layoutGuidance.js       # copy for Materials layout-intent panel
+│       │   ├── collision.js
+│       │   ├── floorplanGeometry.js # Floorplan overlay coords: `resolveEditorZonesFromParse`, `zonesToImagePixels`, `ensureFloorplanZonesInImageSpace`, `projectFloorplanOverlays`; `project.floorplan.coordinateSpace: 'imagePixels'`
+│       │   ├── projectCompat.js        # localStorage `vs-projects-v1`
+│       │   ├── chatRouting.js
+│       │   ├── roomWallMath.js
+│       │   ├── projectVision.js
+│       │   ├── guidedVisionFlow.js     # guided vision chips, readiness, chat payload
+│       │   ├── visionDesignApply.js    # globalVision → interior, catalog hint, starter placements
+│       │   ├── projectFloorplan3d.js   # whole-floorplan 3D layout + overview camera
+│       │   └── visionGate.js
 │       ├── data/
-│       │   └── furnitureCatalog.js # Starter catalog + `kenneyCuratedModel()` Kenney GLB metadata
+│       │   ├── furnitureCatalog.js     # STARTER_FURNITURE_CATALOG (9 items) + kenneyCuratedModel()
+│       │   ├── furnitureStyleTags.js   # style chips for catalog filter + recommendations
+│       │   └── roomInterior.js         # wall/floor/wallpaper/wall-art/layout-intent presets
 │       ├── components/
 │       │   ├── project/
 │       │   │   └── ProjectVisionIntake.jsx   # Project Vision Assistant (`/studio/project/:id/vision`); `whole_project` chat → `globalVision`
@@ -180,35 +189,39 @@ vision-studio/
 │       │   │   ├── Navbar.jsx         # Top nav (Home/New project/Studio/Chat), scroll-aware blur, mobile hamburger, skip-to-content
 │       │   │   └── Footer.jsx         # Editorial 4-column footer with semantic HTML (hidden on /studio routes)
 │       │   ├── canvas/
-│       │   │   ├── RoomCanvas.jsx     # Konva Stage with zoom/pan, room-zone overlays, snap guides, draggable wall joints and resize-floor handles when toggled
-│       │   │   ├── ProjectCanvas.jsx  # Full-floorplan SVG preview for project mode (interior/exterior overlays, Color Overlay toggle, click-to-select)
-│       │   │   ├── FurnitureItem.jsx  # Draggable/rotatable Konva Group with Transformer, hover states, staggered fade-in animation (_animDelay)
-│       │   │   ├── WallOutline.jsx    # Wall polygon/segment renderer
-│       │   │   ├── WallJointHandles.jsx # Drag wall-joint circles when the Wall points tool is on (segment-walls only)
-│       │   │   ├── WallDimensionLabels.jsx # Per-segment feet/inches labels rendered along each wall midpoint
-│       │   │   ├── RoomBoundsHandles.jsx # East / south / SE corner handles that resize the floor rectangle (origin fixed) with grid-snap previews
-│       │   │   └── GridOverlay.jsx    # 6" snap grid (memoized)
+│       │   │   ├── RoomCanvas.jsx     # Konva: pan/zoom, zones, starter click-to-place, wall tools, furniture transform
+│       │   │   ├── ProjectCanvas.jsx  # Project floorplan SVG overlays
+│       │   │   ├── FurnitureItem.jsx
+│       │   │   ├── RoomInteriorSurfaces.jsx # 2D wall/floor styling from room.interior (Materials tab)
+│       │   │   ├── WallOutline.jsx
+│       │   │   ├── WallJointHandles.jsx
+│       │   │   ├── WallDimensionLabels.jsx
+│       │   │   ├── RoomBoundsHandles.jsx
+│       │   │   └── GridOverlay.jsx
 │       │   ├── upload/
 │       │   │   ├── AnalysisWorkflow.jsx # 6-step animated floor-plan pipeline overlay (guest + authed paths)
 │       │   │   └── RoomEditor.jsx     # Full-screen SVG zone editor: drag/resize/draw rooms (rectangle + polygon), edit names/dimensions/colors, native color picker, decoupled dimensions
 │       │   ├── studio/
-│       │   │   ├── StudioToolbar.jsx  # Save / Undo / Redo / Grid / Resize floor / Wall points / Validate / Auto-Arrange / 2D-3D / Space Assistant; keyboard shortcuts (? → portal); back link to project hub when scoped
-│       │   │   ├── KeyboardShortcutsPopover.jsx  # Body portal for shortcuts (high z-index, avoids editor clipping)
-│       │   │   ├── EditorWorkspaceSidebar.jsx  # IDE-style two-part sidebar: far-left activity bar (icon navigation) + collapsible content panel for Spaces/Furniture/Materials/Layers/Export (useRoomExport)
-│       │   │   ├── ProjectSpaceBottomBar.jsx # Project-editor bottom bar: All Spaces + interior/exterior chips + add-interior/exterior shortcuts
-│       │   │   ├── RoomSetupModal.jsx # Template + dimensions picker
-│       │   │   └── ZoneBottomBar.jsx  # Bottom room switcher + room box inspector/add-remove actions
+│       │   │   ├── StudioToolbar.jsx
+│       │   │   ├── KeyboardShortcutsPopover.jsx
+│       │   │   ├── EditorWorkspaceSidebar.jsx  # Tabs: Spaces | Furniture | Materials | Layers | Export
+│       │   │   ├── InteriorDesignPanel.jsx     # Materials tab: walls, wallpaper, wall art, layout guidance
+│       │   │   ├── ProjectSpaceBottomBar.jsx
+│       │   │   ├── RoomSetupModal.jsx
+│       │   │   └── ZoneBottomBar.jsx
 │       │   ├── catalog/
 │       │   │   ├── CatalogPanel.jsx   # Legacy API-backed catalog + Recommended tab (unused in editor sidebar)
 │       │   │   ├── FurnitureCatalogPanel.jsx # Starter catalog browse/search/filter in editor Furniture tab
 │       │   │   └── FurnitureCard.jsx  # Reusable starter-catalog card (name, category, dimensions, preview)
 │       │   ├── viewer/
-│       │   │   ├── RoomViewer3D.jsx   # Room-level R3F viewer: live `selectVisibleFurniture` from layoutStore; GLB/procedural via SmartFurnitureModel (no Canvas-level Suspense); camera navigation = smooth OrbitControls + CameraCollider + Minimap + Reset-view HUD (US3)
-│       │   │   ├── ProjectViewer3D.jsx # Project-level 3D fallback preview: places linked rooms in relative bounding boxes (no per-space layout)
-│       │   │   ├── SmartFurnitureModel.jsx # GLB when model_url/modelUrl set; else ProceduralFurniture via furniture3d category map
-│       │   │   ├── ProceduralFurniture.jsx # Category-specific Three.js primitives (legacy API + starter: seating→sofa, tables, beds, storage, lamp, decor)
-│       │   │   ├── CameraCollider.jsx # Per-frame camera collision (US3 3.2): above-floor + out-of-furniture push-out, orbit-target clamp; needs makeDefault OrbitControls
-│       │   │   └── Minimap.jsx        # Top-down 2D minimap (US3 3.3): MinimapTracker (in-canvas useFrame draw) + MinimapPanel (HTML overlay)
+│       │   │   ├── RoomViewer3D.jsx
+│       │   │   ├── RoomSceneControls.jsx
+│       │   │   ├── RoomShell3D.jsx       # Legacy shell mesh (not mounted in RoomViewer3D; see ProjectSpaceShell3D)
+│       │   │   ├── RoomInterior3D.jsx    # Selected-room 3D: floor, wall planes, wallpaper, wall art
+│       │   │   ├── ProjectSpaceShell3D.jsx # All-spaces per-zone shells + interior
+│       │   │   ├── ProjectViewer3D.jsx   # All-spaces floorplan overview + furniture
+│       │   │   ├── SmartFurnitureModel.jsx
+│       │   │   └── ProceduralFurniture.jsx
 │       │   └── chatbot/
 │       │       ├── ChatPanel.jsx      # Enhanced agentic chat sidebar — rich messages, style prompts, textarea input, auto-refresh
 │       │       ├── MessageBubble.jsx  # Rich message renderer — inline markdown, action result cards, assistant avatar
@@ -217,7 +230,7 @@ vision-studio/
 │           ├── Home.jsx              # Editorial landing (Batako-inspired: hero, process, quote band, services, CTA, smooth staggered reveals)
 │           ├── Login.jsx             # Email/password auth with Helmet SEO
 │           ├── Chat.jsx              # `/chat` = Design Inspiration Assistant (local-only transcript; `draft-global-inspiration` + `room_context`, no project fields). `/studio/project/:id/chat` = Project Assistant (room + project context)
-│           ├── Upload.jsx            # Floorplan intake → AI analysis → room-zone editor → finalize → `/studio/project/:id/confirm?mode=adjust` → editor
+│           ├── Upload.jsx            # Floorplan intake → AI analysis → room-zone editor → confirm spaces → `/studio/project/:id/vision?setup=new` (ProjectVisionIntake; no inline manual vision form)
 │           ├── Studio.jsx            # Dashboard (/studio), hub + confirm + vision + editor under /studio/project/..., legacy /studio/:roomId
 │           ├── StudioNewWizard.jsx   # Full-page new project wizard (/studio/new)
 │           └── NotFound.jsx          # Polished 404 page with animated entry
@@ -236,10 +249,10 @@ vision-studio/
 │       │   ├── page.tsx          # Renders landing page
 │       │   ├── globals.css
 │       │   └── todos/page.tsx    # Supabase SSR example query page
-│       ├── components/landing/   # Landing-page sections
+│       ├── components/landing/   # LandingPage, Hero, FeatureSplit, GalleryGrid, CTASection, etc.
 │       ├── lib/images.ts
-│       ├── middleware.ts         # Next middleware entrypoint
-│       └── utils/supabase/       # Supabase SSR/browser/middleware clients
+│       ├── middleware.ts
+│       └── utils/supabase/       # server.ts, client.ts, middleware.ts
 │
 ├── server/                       # Node.js + Express backend
 │   ├── package.json
@@ -247,11 +260,14 @@ vision-studio/
 │   ├── app.js                    # Express app factory (Helmet, CORS, rate-limit, image proxy, /health, /api/status, route mounting). Exported for tests.
 │   ├── vitest.config.js          # Vitest config (node env, in-band, 30s timeouts)
 │   ├── __tests__/
-│   │   └── saveLoad.test.js      # S2-5 save/load smoke tests — creates a real Supabase test user, exercises the full save→load→delete flow, cleans up
-│   ├── .env.example              # Template for server env vars
+│   │   ├── e2e.smoke.test.js     # 12 in-process API smokes (supertest + app)
+│   │   ├── corsOrigins.test.js
+│   │   ├── placementPersistence.test.js
+│   │   └── saveLoad.test.js       # Live Supabase save/load (skipped on placeholder env)
 │   ├── config/
-│   │   ├── env.js                # dotenv loader (root .env; must be imported first)
-│   │   └── defaults.js           # Export schema version, LLM config (gpt-5.4)
+│   │   ├── env.js
+│   │   ├── defaults.js
+│   │   └── corsOrigins.js         # CORS origin validator (localhost, CLIENT_ORIGIN, Vercel previews)
 │   ├── middleware/
 │   │   ├── auth.js               # requireAuth + optionalAuth (Supabase JWT + fallback test account: test@visionstudio.dev / test1234)
 │   │   └── errorHandler.js       # Centralized error handling with structured logger (5xx = error, 4xx = warn)
@@ -274,10 +290,13 @@ vision-studio/
 │   │   ├── kenneyMapping.js      # Category defaults + per-item overrides → /models/kenney/*.glb (used by seedFurniture + fallbackStore)
 │   │   ├── overlapResolver.js    # Shared overlap resolver (greedy spiral + linear scan) + layout validator
 │   │   ├── normalizeZones.js    # Shared zone normalization (boundary-relative coordinates)
+│   │   ├── floorplanParse.js    # Python /parse-floorplan client + shared guest/authed response (zones, parse_method, openai_vision)
 │   │   ├── chatFunctions.js      # 15 chat tool definitions + executeFunction() dispatch
-│   │   ├── llmRouter.js          # OpenAI chat completions wrapper (hardcoded gpt-5.4)
-│   │   ├── exportFormats.js      # Build JSON, SVG, DXF export payloads (rotation-aware, wall-format agnostic)
-│   │   └── logger.js             # Structured logger with timestamps and configurable log levels
+│   │   ├── llmRouter.js
+│   │   ├── exportFormats.js
+│   │   ├── placementEnrichment.js # Enrich GET room placements from catalog (image_url, model_url)
+│   │   ├── placementPersistence.js # Retry writes without optional placement columns
+│   │   └── logger.js
 │   ├── scripts/
 │   │   ├── setup.js              # Setup verification (env vars, Supabase connection, DB tables, catalog seed)
 │   │   ├── seedFurniture.js      # Seed 22 IKEA + 5 Ashley catalog items (upsert on provider+provider_id)
@@ -294,31 +313,44 @@ vision-studio/
 │       ├── floorplan_parser.py   # OpenAI Vision (gpt-5.4) room zoning + OpenCV wall-snap + OpenCV fallback + PDF support
 │       └── object_recognition.py # Grounding DINO + SAM 2 via Replicate (constant currently named SAM3_MODEL)
 │
-└── docs/                         # Sprint documentation (PDFs)
+└── docs/                         # demo/ (recorded walkthrough); sprint PDFs may live here
 ```
 
 ## Environment Variables
 
 Server and Python load the root `.env` file. The React client reads Vite env vars from `client/.env.local` or the shell when run from `client/`; the marketing app reads Next env vars from `marketing/.env.local` or the shell.
 
-### Client (`client/.env.local`)
+### Client (`client/.env.local`) — Vercel / local Vite only
+
+**Never put server secrets here** (`OPENAI_API_KEY`, `REPLICATE_API_TOKEN`, `SUPABASE_SERVICE_ROLE_KEY`, `MESHY_API_KEY`). The browser calls Express; keys stay on Render.
+
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — preferred public Supabase client vars
 - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` — legacy aliases still accepted by client code
-- `VITE_API_URL` — Backend URL (default: `http://localhost:3001`)
+- `VITE_API_URL` — Express API URL (default: `http://localhost:3001`; production: your Render server URL)
+
+See `client/.env.example`.
 
 ### Marketing (`marketing/.env.local`)
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — used by the Supabase SSR/browser helpers in `marketing/src/utils/supabase/`
+
+### Deployed services (typical Render + Vercel)
+
+| Service | Host | Required env |
+| -------- | ------ | ------------- |
+| **vision-studio** (Vite client) | Vercel | `VITE_API_URL`, `VITE_SUPABASE_*` or `NEXT_PUBLIC_SUPABASE_*` only |
+| **vision-studio-server** (Express) | Render | `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_PUBLIC_ANON_KEY`, `PYTHON_SERVICE_URL`, CORS (`CLIENT_ORIGIN` / `CLIENT_ORIGINS` / `ALLOW_VERCEL_PREVIEWS`) |
+| **vision-studio-python** (FastAPI) | Render | `OPENAI_API_KEY` (floorplan parse); `REPLICATE_API_TOKEN` only if using `/detect-objects` or `/segment-room` |
 
 ### Server (`root/.env`)
 - `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL`
 - `SUPABASE_PUBLIC_ANON_KEY` or `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (for auth verification client)
 - `SUPABASE_SERVICE_ROLE_KEY` (required for DB/admin operations)
 - `OPENAI_API_KEY` (required for chat assistant)
-- `REPLICATE_API_TOKEN` (optional — for AI room photo detection)
+- `REPLICATE_API_TOKEN` (optional on server — room-photo routes proxy to Python)
 - `MESHY_API_KEY` (optional — for 3D model generation)
-- `PORT` (default: 3001), `PYTHON_SERVICE_URL` (default: `http://localhost:5001`)
+- `PORT` (default: 3001), `PYTHON_SERVICE_URL` (default: `http://localhost:5001`; Render: `https://vision-studio-python.onrender.com`)
 - `NODE_ENV` (development/production)
-- `ALLOWED_ORIGINS` (comma-separated, default: `http://localhost:5173,http://localhost:4173`)
+- **CORS** (`server/config/corsOrigins.js`): always allows `http://localhost:5173`, `http://localhost:3000`, `http://localhost:4173`. Also merges `CLIENT_ORIGIN` (single), `CLIENT_ORIGINS` (comma-separated), and legacy `ALLOWED_ORIGINS`. Requests with **no `Origin` header** are allowed (curl/health/server-to-server). Set `ALLOW_VERCEL_PREVIEWS=true` to allow any `https://*.vercel.app` preview host (credentials stay on — no `*`). Blocked origins are logged in non-production only.
 - `LOG_LEVEL` (debug/info/warn/error, default: `info`)
 
 Current hosted DB status (expected baseline):
@@ -339,7 +371,7 @@ Store in `client/src/store/layoutStore.js` (wrapped with `zustand/persist` for d
 
 | Field                   | Type              | Purpose                                     |
 | ----------------------- | ----------------- | ------------------------------------------- |
-| `room`                  | `object \| null`  | Current room (id, name, walls, dimensions)  |
+| `room`                  | `object \| null`  | Current room (id, name, walls, dimensions, `interior` for Materials)  |
 | `furniture`             | `array`           | Placed furniture items with positions, free-angle rotation, and optional model/image URLs |
 | `selectedId`            | `string \| null`  | Currently selected furniture ID              |
 | `detections`            | `array`           | AI-detected objects (pending/confirmed)      |
@@ -359,11 +391,35 @@ Store in `client/src/store/layoutStore.js` (wrapped with `zustand/persist` for d
 | `loadRoomFailed`        | `boolean`         | Last `loadRoom` failed (invalid id, API error, or missing draft); Studio redirects to `/studio` |
 | `selectedCatalogItem`   | `object \| null`  | Starter catalog template queued for click-to-place on `RoomCanvas` (session-only, not persisted) |
 
-Actions: `loadRoom`, `createRoom`, `createDraftRoom`, `clearDraft`, `saveDraftToAccount`, `saveProject`, `updateRoom`, `addFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setProjectTheme`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleRoomWallsTool`, `clearRoomWallsTool`, `toggleRoomResizeTool`, `clearRoomResizeTool`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `getActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`, `findOpenSlot`, `validate`.
+Actions: `loadRoom`, `createRoom`, `createDraftRoom`, `clearDraft`, `saveDraftToAccount`, `saveProject`, `updateRoom`, `updateRoomInterior`, `addFurniture`, `addCatalogFurniture`, `updateFurniture`, `removeFurniture`, `rotateFurniture`, `selectFurniture`, `clearSelection`, `setSelectedCatalogItem`, `clearSelectedCatalogItem`, `setDetections`, `confirmDetection`, `dismissDetection`, `addChatMessage`, `clearChat`, `setProjectTheme`, `setRecommendedItems`, `clearRecommendedItems`, `setViewMode`, `toggleGrid`, `toggleRoomWallsTool`, `clearRoomWallsTool`, `toggleRoomResizeTool`, `clearRoomResizeTool`, `toggleChat`, `undo`, `redo`, `setActiveZone`, `getActiveZone`, `saveZones`, `addZone`, `updateZone`, `removeZone`, `getVisibleFurniture`, `findOpenSlot`, `validate`.
 
-Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furnitureBelongsToZone`, `normalizeDetectedObjects`, `normalizeZoneObjects` — handle various zone/detection data shapes from the server.
+Exported selector: `selectVisibleFurniture(state)` — filters `furniture` by `activeZoneId` (center-in-zone).
+
+Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furnitureBelongsToZone`, `normalizeDetectedObjects`, `normalizeZoneObjects`, `roomWithInterior` (from `data/roomInterior.js`).
 
 `saveProject` is an explicit-save action: it flushes pending debounced edits, then `PUT /api/rooms/:id` + `PUT /api/furniture/placements/:id` for every placement. Drafts delegate to `saveDraftToAccount` (caller is responsible for auth).
+
+## Client routes (`App.jsx`)
+
+| Path | Page / behavior |
+| --- | --- |
+| `/` | `Home` |
+| `/login` | `Login` |
+| `/upload` | Redirect → `/studio/new?startMode=upload` |
+| `/studio/new` | `StudioNewWizard` (upload branch embeds `Upload` when `?projectId=&step=upload`) |
+| `/studio` | `Studio` dashboard |
+| `/studio/:roomId` | Legacy single-room editor |
+| `/studio/project/:projectId` | Project hub |
+| `/studio/project/:id/vision` | `ProjectVisionIntake` |
+| `/studio/project/:id/confirm` | Confirm / adjust spaces |
+| `/studio/project/:id/editor` | Project-wide editor |
+| `/studio/project/:id/editor/:spaceId` | Space-scoped editor |
+| `/studio/project/:id/chat` | `Chat` (project assistant) |
+| `/studio/project/:id/:legacySpaceId` | Redirect → `.../editor/:legacySpaceId` (except reserved segments) |
+| `/chat` | `Chat` (global inspiration) |
+| `*` | `NotFound` |
+
+Lazy-loaded pages; `ErrorBoundary` + `HelmetProvider` + `Toaster` at root. Navbar/footer hidden on editor, vision, and project chat paths.
 
 ## API Routes
 
@@ -388,9 +444,9 @@ Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furn
 | POST | `/api/rooms` | Create room |
 | GET | `/api/rooms` | List user rooms (with placements) |
 | GET | `/api/rooms/:id` | Get room + placements |
-| PUT | `/api/rooms/:id` | Update room (name, dimensions, walls, zones, scale) |
+| PUT | `/api/rooms/:id` | Update room (name, dimensions, walls, zones, scale, `interior` → `detected_objects.interior` and/or `interior` column when present) |
 | DELETE | `/api/rooms/:id` | Delete room and associated placements |
-| POST | `/api/rooms/:id/upload-floorplan` | Upload floor plan → Python AI parse → zone extraction + dimension detection |
+| POST | `/api/rooms/:id/upload-floorplan` | Upload floor plan → Python GPT parse → returns `zones`, `parse_method`, `openai_vision`, `parse_result` (same shape as public parse) + persists to room |
 | POST | `/api/rooms/:id/calibrate` | Two-point scale calibration (p1, p2, real_world_inches) |
 
 ### Project Routes (Phase 2 additive alignment)
@@ -434,7 +490,7 @@ Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furn
 
 | Method | Route | Description |
 | --- | --- | --- |
-| POST | `/api/public/parse-floorplan` | Stateless guest floorplan parse (no auth, no DB writes) |
+| POST | `/api/public/parse-floorplan` | Stateless guest floorplan parse (no auth, no DB writes); GPT via Python when service is up |
 
 ### 3D Model Routes
 
@@ -476,10 +532,10 @@ Internal helpers: `normalizeZone`, `normalizeZonesArray`, `getZoneBounds`, `furn
 
 - **`providers`** — IKEA, Ashley, Wayfair, Custom (seeded via schema.sql)
 - **`furniture_catalog`** — 27 seeded items (22 IKEA + 5 Ashley) with dimensions, prices, provider links, model_url; public read via RLS; unique index on `(provider, provider_id)` for upsert
-- **`rooms`** — User rooms with walls (jsonb), dimensions, floor plan/photo URLs, detected_objects (jsonb), zones (jsonb array of sub-rooms); RLS: own rooms only
+- **`rooms`** — User rooms with walls (jsonb), dimensions, floor plan/photo URLs, `detected_objects` (jsonb; may include `interior` for Materials), optional `interior` jsonb, `zones` (jsonb sub-rooms); RLS: own rooms only
 - **`projects`** — User projects/floorplans with `property_type`, `scope`, `global_vision`, `status`; RLS: own projects only
 - **`spaces`** — Project-level interior/exterior space structure linked to existing `rooms` via nullable `room_id`; includes `category`, `space_vision`, `placeholder_mode`; RLS: via owning project
-- **`placements`** — Furniture placed in rooms with position, rotation, color, optional zone_id for sub-room assignment; RLS: via room ownership join
+- **`placements`** — Furniture in rooms: position, rotation, color, optional `zone_id`, `image_url`, `model_url`; RLS: via room ownership join
 - **`layout_exports`** — Archived JSON exports with schema_version; RLS: via room ownership join
 - **`chat_messages`** — Chat history per room with role, content, tool_calls (jsonb), model_used; RLS: via room ownership join
 
@@ -504,10 +560,43 @@ All tables use Row Level Security — users can only access their own data. The 
 
 ## Notable Behaviors
 
+### Dual furniture catalogs
+
+| Catalog | Source | Editor UI | Persistence |
+| -------- | ------ | --------- | ------------ |
+| **Starter** | `client/src/data/furnitureCatalog.js` (9 items: sofa, armchair, coffee/dining table, bookshelf, dresser, queen bed, floor lamp, area rug) | `FurnitureCatalogPanel` → select card → click `RoomCanvas` | Draft/local + `POST/PUT /api/furniture/placements` with `modelUrl` / dimensions from template |
+| **API (IKEA/Ashley)** | `GET /api/furniture/catalog` (27 seeded items) | **Space Assistant** / **Project Assistant** tool calls (`add_furniture`, `suggest_furniture`, etc.) | Server placements linked to `furniture_catalog` ids |
+| **Legacy** | Same API | `CatalogPanel.jsx` (drag/add + Recommended tab) | Not mounted in `EditorWorkspaceSidebar`; kept for reference/tests |
+
+### Editor architecture (project flow)
+
+1. **Create project** — wizard (`/studio/new`) or upload intake; guests may hit `ProjectSaveAuthModal` before vision.
+2. **Review spaces** — `RoomEditor` at `/confirm?mode=adjust`; zones persist on project + linked rooms.
+3. **Project Vision** — guided chips + live chat (`ProjectVisionIntake`, `guidedVisionFlow.js`) → `globalVision` on project.
+4. **Editor** — `/studio/project/:id/editor/:spaceId`; no silent vision apply on load.
+5. **Apply Vision to Layout** — explicit button in Materials tab (`InteriorDesignPanel`) and optional chat callback (`handleApplyVisionLayout` in `Studio.jsx`, `visionDesignApply.js`). Skips interior overwrite when `isInteriorUserEdited(room.interior)` unless user chooses **Regenerate layout from vision** (`force: true`).
+6. **Materials** — manual wall color, wallpaper, wall art, layout intent (`markInteriorUserPatch` on user edits).
+7. **Furniture** — starter catalog click-to-place on `RoomCanvas`; API catalog via chat tools.
+8. **2D / 3D** — zone-scoped `RoomViewer3D`; all-spaces `ProjectViewer3D` + `projectFloorplan3d.js`.
+
+### Materials (2D vs 3D)
+
+- **Materials tab** (`InteriorDesignPanel` + `roomInterior.js`): wall paint presets, wallpaper, wall art placement, layout-intent guidance. Persisted on `room.interior` via `updateRoomInterior` → `PUT /api/rooms/:id` (stored in `detected_objects.interior` and/or `interior` column). User edits set `source: 'user'` and `userEditedAt`.
+- **2D** (`RoomInteriorSurfaces.jsx`): renders styled walls/floor inside the Konva room.
+- **3D selected room** (`RoomInterior3D.jsx` in `RoomViewer3D`): floor, perimeter wall shells, wallpaper/paint planes, and wall art from `room.interior` (`wallpaperTexture.js`).
+- **3D all spaces** (`ProjectSpaceShell3D` + `ProjectViewer3D`): floorplan-positioned shells; shared `room.interior` for shell tint until per-space interior is modeled.
+
+### Editor & canvas
+
+- **Starter placement**: select item in Furniture tab → click canvas (`createPlacedFurnitureFromCatalogItem`); Esc or **Clear selection** cancels. Overlap and room/zone bounds enforced with toast warnings.
 - Furniture can be rotated freely in the 2D editor via the Konva transformer handle, 15° toolbar nudges, or the in-canvas rotation slider.
-- **3D furniture rendering** (`RoomViewer3D` + `SmartFurnitureModel` + `client/src/utils/furniture3d.js`): **`RoomViewer3D`** (room-scoped editor with `RoomCanvas`) subscribes to `layoutStore` via `selectVisibleFurniture` and renders the same placements as 2D. **`ProjectViewer3D`** is floorplan-only (zones/spaces, no furniture). If a placement has `model_url` or `modelUrl`, load the GLB (uniform-scaled to catalog footprint/dimensions, `model_rotation_y` optional); on load error or missing URL, fall back to `ProceduralFurniture` (per-item Suspense/error boundary—do not wrap the whole `Canvas` in Suspense or GLB loading unmounts the scene). **Starter catalog** (`client/src/data/furnitureCatalog.js`) ships curated Kenney `modelUrl` values (`modelStatus: curated`, `modelSourceType: kenney`, CC0 attribution fields); GLBs are visual proxies only—**catalog inch dimensions remain the layout source of truth**. This path does **not** call Meshy/Tripo from the editor.
+- **3D selected room** (`RoomViewer3D` + `RoomInterior3D` + `roomShell3d.js` + `roomView3d.js` + `SmartFurnitureModel` + `furniture3d.js`): Shell size from active zone bbox or room dimensions (inches → meters). `RoomInterior3D` renders Materials (floor, walls, wallpaper, art). Furniture uses the same inch→meter origin as 2D (`x_inches` / `y_inches`). Polygon/L-shaped **floorplan walls** are not extruded as 3D meshes yet. GLB via `model_url` / `modelUrl`, else `ProceduralFurniture` (per-item Suspense—do not wrap the whole `Canvas`). Starter catalog Kenney GLBs are visual-only; catalog inch dimensions stay authoritative.
+- **3D all spaces** (`ProjectViewer3D` + `projectFloorplan3d.js` + `ProjectSpaceShell3D`): Floorplan overview with per-space shells, zone-scoped furniture, and shared interior tint. Not a random block layout.
+- **3D room camera navigation** (`roomCamera3d.js` + `RoomSceneControls.jsx`): OrbitControls; **Overview** vs **Walkthrough** presets; **Reset view**. No WASD pointer-lock yet.
+- **Room-scoped 3D** (`roomView3d.js`): Active space/zone → local furniture coords and shell bounds; label `3D View: {space name}`.
+- **Project finalization auth** (`ProjectSaveAuthModal`, `projectSaveAuth.js`): Guests are prompted to sign in after floorplan space review (before Project Vision Assistant) and before blank/template wizard continues to confirm; `persistFloorplanRoomToServer` saves the floorplan room to the API after auth.
 - The legacy Meshy v2 route (`/api/models/*`) and server `kenneyMapping.js` remain for seeded API catalog items but are not required for starter-catalog editor placements.
-- Floorplan upload uses a 3-stage pipeline: (1) 20×20 grid overlay drawn on image, (2) GPT-5.4 identifies rooms using grid coordinates — returns rectangular bboxes for simple rooms and polygon vertices for L-shaped/irregular rooms (only real habitable rooms — no hallways, stairs, or entries), (3) OpenCV wall-snap aligns each bbox edge to the nearest architectural wall. Results are normalized into editable `zones` stored in room-local coordinates.
+- **Floorplan upload (requires Python on :5001 + `OPENAI_API_KEY` in root `.env`)**: Client `AnalysisWorkflow` → `POST /api/public/parse-floorplan` (guest) or `POST /api/rooms/:id/upload-floorplan` (after room create). Both routes call `server/services/floorplanParse.js` → Python `POST /parse-floorplan` → `python/services/floorplan_parser.py`: (1) 20×20 grid overlay on image, (2) **GPT-5.4 vision** identifies rooms in grid coordinates (rect bboxes or polygons for L-shaped rooms; habitable rooms only), (3) OpenCV wall-snap on bbox edges. OpenCV-only fallback runs if Python is down or the key is missing (`method: opencv` / `unavailable`). API responses include normalized `zones`, `parse_method`, `openai_vision`, and `parse_result` (with `zones` inside) so `RoomEditor` and `Upload` behave the same for guest and authed paths. Toasts in `AnalysisWorkflow` warn when AI is offline or fell back. Verify with `node server/scripts/checkFloorplanAi.js [image]`. **Playwright demo** (`e2e/helpers/demo-mocks.js`) mocks parse/chat for video only — not used in normal dev.
 - The RoomEditor (`upload/RoomEditor.jsx`) supports both rectangular and polygon room shapes. Users can draw rectangles (click-drag) or polygons (click vertices, close by clicking first vertex or "Close Shape" button). AI-detected polygons are rendered as SVG polygons with vertex handles. Room dimensions are decoupled from the visual shape.
 - The pre-editor adjust/confirm step is the geometry source of truth for the frontend project overlay: confirmed spaces persist normalized geometry on the localStorage-backed compatibility object (`project.floorplan.zones[]` and `project.spaces[].geometry` with `type`, `bbox`, optional polygon `points`, `source`) before entering the editor. The Supabase `projects`/`spaces` schema currently stores project/space metadata and room links; durable geometric room data still lives on `rooms.zones`.
 - The studio canvas (`RoomCanvas.jsx`) renders polygon zones using Konva `Line` with the actual polygon points, not just bounding boxes. This allows non-rectangular rooms to display correctly in the editor.
@@ -526,23 +615,25 @@ All tables use Row Level Security — users can only access their own data. The 
 - A skip-to-content link is rendered before the header for keyboard/screen-reader accessibility.
 - The server includes an image proxy endpoint (`/api/proxy-image`) that serves external product images with proper CORS headers for WebGL textures, restricted to whitelisted domains (IKEA, Ashley, Storyblok, Living Spaces image hosts).
 - Both Supabase clients (server admin + client anon) gracefully handle missing/placeholder credentials — they create a client pointing at a placeholder URL so the app boots without crashing, and operations fail at request time with clear warnings.
-- The `zone_id` column on placements and `zones` column on rooms use additive migrations (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`) for backward compatibility with existing deployments. Routes retry without these columns if the DB rejects them.
+- **Auth**: Invalid `Authorization: Bearer …` (not the test token) returns **401** — not treated as guest. Demo/fallback user: `Bearer vs-test-token-001` → `test@visionstudio.dev` (`server/middleware/auth.js`).
+- The `zone_id`, `image_url`, and `model_url` columns on placements (and `zones` on rooms) use additive migrations (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`) for backward compatibility. `placementPersistence.js` retries inserts/updates without optional columns when PostgREST reports a missing column in the schema cache (including when values are `null`).
 - `projects`/`spaces` endpoints use a narrow fallback guard: when Supabase returns relation-missing errors for those two tables, routes fall back to the in-memory compatibility store instead of failing authenticated flows.
 - **`loadRoom` recovery**: Failed server fetch or missing draft after rehydration sets `loadRoomFailed`; `Studio.jsx` toasts and replaces the route to `/studio` so the editor never spins forever. Switching to another server room clears stale `room`/placements until the new fetch completes.
-- **Guest / Draft Mode**: Upload and Studio pages are accessible without authentication. Guests create local "draft" rooms stored in localStorage via Zustand `persist`. The `StudioToolbar` shows a "Save to account" button that opens a `LoginModal` inline. On save, `saveDraftToAccount()` pushes the room, zones, and placements to the server. The guest upload path uses `/api/public/parse-floorplan` to avoid auth. 401 responses from the API are silently handled (no redirect).
+- **Guest / Draft Mode**: Upload and Studio pages are accessible without authentication. Guests create local "draft" rooms stored in localStorage via Zustand `persist` (`vs-draft-v1`; only draft room payload persisted, not `selectedCatalogItem`). The `StudioToolbar` shows a "Save to account" button that opens a `LoginModal` inline. On save, `saveDraftToAccount()` pushes the room, zones, and placements to the server. The guest upload path uses `/api/public/parse-floorplan` to avoid auth. Chat for draft rooms skips DB writes on the server.
 - When Supabase **public** URL/key are missing in the client (`client` env / `VITE_` + `NEXT_PUBLIC_` aliases), the app skips Supabase Auth network calls and uses the guest/test-token path only — avoiding failed session requests to placeholder hosts. `fetchRoomsListOnce()` dedupes concurrent `GET /api/rooms` during React StrictMode double-mount.
 - Project space rows from the API normalize `type` to `interior` \| `exterior` (string casing + optional `placeholder_mode` fallback) so exterior spaces stay in the Exterior section after refresh.
 - The chat endpoint runs a multi-turn tool execution loop (up to 5 rounds). After each round of tool calls, it re-fetches placements from the DB before executing the next tool, ensuring tools always operate on current state.
 - Studio now presents a **project-first dashboard** at `/studio`, with localStorage-backed compatibility objects that group existing backend room records into floorplan projects. The dashboard safely merges `GET /api/projects` with local `vs-projects-v1`: **API projects remain authoritative for spaces/room links**, matching IDs keep a **local `globalVision` overlay**, and **local-only projects still render** so prior drafts remain visible during migration.
 - Project compatibility shaping (`toDashboardProjects`) no longer drops spaces whose `roomId` no longer exists in the current room list. These spaces remain visible and are flagged with `missingLinkedRoom` so interior/exterior structure is preserved while users relink or recreate editable rooms.
-- **Guided new-project flow** (only when user goes through `/studio/new` or upload intake): **`/studio/new`** → **`/studio/project/:id/confirm?mode=adjust`** (Adjust Spaces / `RoomEditor`) → **`/studio/project/:id/editor/:firstEditableSpace`**. Project hub and **`/vision`** remain available but no longer gate floorplan setup. **`/confirm?phase=spaces`** redirects to **`?mode=adjust`** (legacy Floorplan Intake removed). Opening an **existing** project from `/studio` goes **directly to the project hub** — no automatic redirect to vision or confirm once the user can navigate freely. **`/studio/project/:id/chat`** is the full-page **Project Assistant** (project-wide Q&amp;A); **`/vision`** is the **Project Vision Assistant** structured intake. **Space Assistant** = editor `ChatPanel`. Legacy `/studio/project/:id/:spaceId` → `.../editor/:spaceId` unless `legacySpaceId` is `confirm`, `vision`, `editor`, or `chat`. `/upload` → wizard.
-- **Hub** (`/studio/project/:id`): primary **Open Editor**; optional **Edit Project Vision**, **Review Spaces** (`/confirm?from=hub`), **Ask Project Assistant** (`/chat`). **Continue guided setup** appears only while vision or confirmation is incomplete. **`Review project & spaces`** on vision routes to **confirm** only when URL has **`setup=new`**; otherwise it returns to the **hub**.
+- **Guided new-project flow** (only when user goes through `/studio/new` or upload intake): **`/studio/new`** → **`/studio/new?projectId=:id&step=upload`** (embedded `Upload`) → confirm spaces → **`/studio/project/:id/vision?setup=new`** (`ProjectVisionIntake`) → confirm/adjust/editor. **`/studio/new?projectId=:id`** (without `step=upload`) redirects to **`/vision?setup=new`**. Project hub and **`/vision`** remain available but no longer gate floorplan setup. **`/confirm?phase=spaces`** redirects to **`?mode=adjust`** (legacy Floorplan Intake removed). Opening an **existing** project from `/studio` goes **directly to the project hub** — no automatic redirect to vision or confirm once the user can navigate freely. **`/studio/project/:id/chat`** is the full-page **Project Assistant** (project-wide Q&amp;A); **`/vision`** is the **Project Vision Assistant** structured intake. **Space Assistant** = editor `ChatPanel`. Legacy `/studio/project/:id/:spaceId` → `.../editor/:spaceId` unless `legacySpaceId` is `confirm`, `vision`, `editor`, or `chat`. `/upload` → wizard.
+- **Hub** (`/studio/project/:id`): primary **Open Editor**; **Open Project Vision Assistant** (`/vision`); **Review Spaces** (`/confirm?from=hub`). Optional project Q&amp;A at `/chat`. Hub vision summary uses `formatProjectVisionSummary` (deduped text, tags shown once). **Continue guided setup** appears only while vision or confirmation is incomplete.
 - **Project editor scope**: `/studio/project/:id/editor` now opens **full-floorplan project mode** by default (not auto-routed into one room). `/studio/project/:id/editor/:spaceId` keeps the same project editor shell and sets the selected space context. In project mode, 2D/3D have project-wide fallback previews (`ProjectCanvas` / `ProjectViewer3D`) and the bottom bar lists **All Spaces + interior/exterior spaces** from project metadata; spaces without linked rooms remain selectable and show a placeholder notice instead of hard-failing.
 - **Project editor title + 3D fallback**: In project mode, toolbar metadata resolves the project name from current loaded project data (with query fallback) instead of a static label. `ProjectViewer3D` no longer lays out spaces in a generic strip; it uses linked room-zone bounding boxes for relative placement and shows a clean "3D preview needs confirmed floorplan geometry" fallback when usable geometry is missing.
+- **Floorplan overlay coordinates** (`floorplanGeometry.js` + `RoomEditor` + `Upload` + `ProjectCanvas`): AI/server `zones` are boundary-relative; editor and `project.floorplan.zones` use **full image pixel space** (`coordinateSpace: 'imagePixels'`, plus `imageWidth`/`imageHeight`/`boundary`). `RoomEditor` aligns SVG and image with `object-fill` (1:1 viewBox). Room DB rows still get boundary-relative zones via `zonesToBoundaryRelative` on save.
 - **Color overlay toggle**: Both pre-editor (`RoomEditor`) and project editor (`ProjectCanvas`) include a visual-only `Color Overlay` toggle to switch between filled overlays and outline-only overlays over the floorplan image; geometry data is unchanged.
 - **Canonical review path**: Project hub **Review Spaces** now routes to `/studio/project/:id/confirm?mode=adjust`, which opens the `RoomEditor`-based adjust workflow for move/resize/rename/type/overlay edits and persists updates back into the local project compatibility overlay (`project.floorplan.zones` + `project.spaces[].geometry`) while room-level zones remain in `rooms.zones`.
 - **Editor entry hardening**: Hub **Open Editor** now chooses the first editable linked space (interior-first) and navigates to `/studio/project/:id/editor/:spaceId`. If no space has a valid linked room, the hub shows an inline guidance state (Review Spaces / Add Interior / Add Exterior) instead of bouncing with a toast.
-- **Project vision** in **`ProjectVisionIntake.jsx`**: `whole_project` chat + `globalVision` persistence. **Confirmation** sets `confirmationCompletedAt` and now opens the **editor directly** (first valid editable space) while keeping **Back to Project Hub** available. If AI chat suggestions are temporarily unavailable, the intake keeps the saved vision and appends deterministic fallback planning suggestions so setup can continue.
+- **Project vision** in **`ProjectVisionIntake.jsx`** + **`guidedVisionFlow.js`**: guided chip flow (one question at a time: mood ≥2, priorities ≥2, constraints ≥1 or “No major constraints”, room focus from project spaces or “Use all rooms evenly”, room-specific needs by inferred room type). Compact readiness checklist + continue label (`Review Project & Spaces` when `?setup=new`, else `Continue to Studio`). Chip picks update `globalVision` immediately; live chat still calls `/api/chat/message` with `buildChatGlobalVisionPayload`. **`visionDesignApply.js`**: explicit **Apply Vision to Layout** (Materials tab + Space Assistant); maps vision → interior/recommendations/grouped furniture in empty zones; respects `interior.source=user` / `userEditedAt` (no silent overwrite). **`RoomInterior3D`**: full wall paint, procedural wallpaper textures (`wallpaperTexture.js`), wall art on N/S/E/W. Persists via `prepareGlobalVisionForSave` / `updateRoom` + `detected_objects.interior`. AI unavailable → toast + deterministic fallback in-thread.
 - Editor route also resolves legacy upload-derived ids like `space-zone-*` via `zoneId`, then rewrites to canonical `/editor/:spaceId` when a match exists.
 - **`App.jsx`** hides **Navbar**/**Footer** on **editor**, **vision**, and **`/studio/project/:id/chat`**.
 - The project detail page (`/studio/project/:projectId`) acts as a floorplan hub with Interior/Exterior sections, empty-state add actions, and type pickers for creating interior/exterior spaces while still creating backend-compatible room records under the hood.
@@ -590,4 +681,5 @@ The chat endpoint supports 15 layout manipulation functions via LLM tool use:
   - `marketing/src/utils/supabase/middleware.ts`
   - `marketing/src/middleware.ts`
   - Example query page: `marketing/src/app/todos/page.tsx`
+- **Testing**: API smokes in `server/__tests__/e2e.smoke.test.js` (`npm run test:e2e`). Browser Playwright + demo video tooling under `e2e/` is **gitignored** (not required to run the app). No GitHub Actions workflow in repo yet.
 - **Update this AGENTS.md file whenever changes are made**

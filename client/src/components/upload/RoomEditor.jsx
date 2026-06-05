@@ -537,7 +537,7 @@ export default function RoomEditor({
         {/* Canvas */}
         <div className="flex-1 min-w-0 overflow-auto flex items-center justify-center p-5 bg-paper-100">
           <div className="relative" style={{ width: imageWidth * viewScale, height: imageHeight * viewScale, cursor: drawing ? 'crosshair' : 'default' }}>
-            <img src={imageUrl} alt="Floor plan" className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" draggable={false} />
+            <img src={imageUrl} alt="Floor plan" className="absolute inset-0 w-full h-full object-fill pointer-events-none select-none" draggable={false} />
             <svg ref={svgRef} viewBox={`0 0 ${imageWidth} ${imageHeight}`} className="absolute inset-0 w-full h-full"
               onPointerDown={onSvgPointerDown}
               onPointerMove={onPointerMove}

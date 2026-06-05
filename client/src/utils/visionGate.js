@@ -1,19 +1,16 @@
-/**
- * Whether the user has completed the required whole-property vision step
- * (stored in project.globalVision on the client / projectCompat).
- *
- * Required: propertyVision — overall house/property description (min length).
- * If the description is shorter, require at least one style keyword or a mood.
- */
-const MIN_VISION = 40;
-const MIN_VISION_STANDALONE = 72;
+import { evaluateGuidedVisionReadiness } from '@/utils/guidedVisionFlow';
 
-export function isProjectVisionComplete(gv) {
+/**
+ * Whether guided project vision selections satisfy readiness (chip-based flow).
+ * @param {object | null | undefined} gv
+ * @param {{ spaces?: object[] } | null} [project]
+ */
+export function isProjectVisionComplete(gv, project = null) {
   if (!gv || typeof gv !== 'object') return false;
-  const text = (gv.propertyVision || '').trim();
-  if (text.length < MIN_VISION) return false;
-  if (text.length >= MIN_VISION_STANDALONE) return true;
-  const mood = (gv.moodVibe || '').trim();
-  const styles = Array.isArray(gv.styleKeywords) ? gv.styleKeywords.filter(Boolean).length : 0;
-  return styles > 0 || mood.length > 0;
+  const projectLike =
+    project ||
+    (Array.isArray(gv.spacesContext) && gv.spacesContext.length > 0
+      ? { spaces: gv.spacesContext }
+      : null);
+  return evaluateGuidedVisionReadiness(gv, projectLike).ready;
 }

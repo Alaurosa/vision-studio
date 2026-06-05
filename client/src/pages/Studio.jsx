@@ -29,9 +29,18 @@ import {
   upsertProject,
 } from '@/utils/projectCompat';
 import { isProjectVisionComplete } from '@/utils/visionGate';
+import {
+  formatProjectVisionSummary,
+  mergeGlobalVisionSources,
+  normalizeGlobalVision,
+  prepareGlobalVisionForSave,
+} from '@/utils/projectVision';
+import { resolveActiveZoneIdForSpace } from '@/utils/roomView3d';
+import { applyVisionDesignToEditor, deriveStyleHintFromVision } from '@/utils/visionDesignApply';
 import ProjectVisionIntake from '@/components/project/ProjectVisionIntake';
 import RoomEditor from '@/components/upload/RoomEditor';
 import ConfirmModal from '@/components/ConfirmModal';
+import { ensureFloorplanZonesInImageSpace } from '@/utils/floorplanGeometry';
 
 const isConfirmationDone = (project) => Boolean(project?.confirmationCompletedAt);
 
@@ -89,10 +98,13 @@ function normalizeProjectPayload(project) {
   const gvRaw = project.globalVision ?? project.global_vision;
   const gv =
     gvRaw && typeof gvRaw === 'object'
-      ? {
-          propertyVision: gvRaw.propertyVision ?? gvRaw.property_vision ?? '',
-          ...gvRaw,
-        }
+      ? normalizeGlobalVision(
+          {
+            propertyVision: gvRaw.propertyVision ?? gvRaw.property_vision ?? '',
+            ...gvRaw,
+          },
+          project,
+        )
       : {};
   return {
     ...project,
@@ -137,10 +149,11 @@ function mergeDashboardProjects(apiProjects, localProjects) {
       if (!localProject) return apiProject;
       return normalizeProjectPayload({
         ...apiProject,
-        globalVision: {
-          ...(typeof apiProject.globalVision === 'object' ? apiProject.globalVision : {}),
-          ...(typeof localProject.globalVision === 'object' ? localProject.globalVision : {}),
-        },
+        globalVision: mergeGlobalVisionSources(
+          apiProject.globalVision,
+          localProject.globalVision,
+          apiProject,
+        ),
         confirmationCompletedAt:
           localProject.confirmationCompletedAt ?? apiProject.confirmationCompletedAt ?? null,
         visionIntakeCompletedAt:
@@ -156,35 +169,12 @@ function mergeDashboardProjects(apiProjects, localProjects) {
   });
 }
 
-// Shift a zone list's bbox / polygon / geometry by (dx, dy). Used to realign
-// origin-shifted saved zones with the full floor-plan image in Adjust Spaces.
-function shiftZones(zones, dx, dy) {
-  if (!dx && !dy) return zones || [];
-  return (zones || []).map((z) => ({
-    ...z,
-    bbox: Array.isArray(z.bbox) && z.bbox.length === 4
-      ? [z.bbox[0] + dx, z.bbox[1] + dy, z.bbox[2] + dx, z.bbox[3] + dy]
-      : z.bbox,
-    polygon: Array.isArray(z.polygon)
-      ? z.polygon.map(([x, y]) => [x + dx, y + dy])
-      : z.polygon,
-    geometry: z.geometry
-      ? {
-          ...z.geometry,
-          bbox: z.geometry.bbox
-            ? { ...z.geometry.bbox, x: z.geometry.bbox.x + dx, y: z.geometry.bbox.y + dy }
-            : z.geometry.bbox,
-          points: Array.isArray(z.geometry.points)
-            ? z.geometry.points.map((pt) => ({ ...pt, x: pt.x + dx, y: pt.y + dy }))
-            : z.geometry.points,
-        }
-      : z.geometry,
-  }));
-}
-
 function buildAdjustZones(project) {
   const floorplan = project?.floorplan || {};
-  const zones = Array.isArray(floorplan?.zones) ? floorplan.zones : [];
+  const zones = ensureFloorplanZonesInImageSpace(
+    Array.isArray(floorplan?.zones) ? floorplan.zones : [],
+    floorplan,
+  );
   const spaces = Array.isArray(project?.spaces) ? project.spaces : [];
   const spaceByZoneId = new Map(
     spaces
@@ -229,6 +219,9 @@ export default function Studio() {
   const { user, loading: authLoading } = useAuth();
   const {
     room,
+    furniture,
+    zones,
+    activeZoneId,
     loadRoom,
     viewMode,
     isChatOpen,
@@ -238,6 +231,9 @@ export default function Studio() {
     clearChat,
     setActiveZone,
     loadRoomFailed,
+    updateRoom,
+    addFurniture,
+    setRecommendedItems,
   } = useLayoutStore();
   const [rooms, setRooms] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -278,11 +274,11 @@ export default function Studio() {
         ...fromApi,
         ...fromLocal,
         name: fromLocal.name || fromApi.name,
-        globalVision: {
-          ...(typeof fromApi.globalVision === 'object' ? fromApi.globalVision : {}),
-          ...(typeof fromApi.global_vision === 'object' ? fromApi.global_vision : {}),
-          ...(fromLocal.globalVision && typeof fromLocal.globalVision === 'object' ? fromLocal.globalVision : {}),
-        },
+        globalVision: mergeGlobalVisionSources(
+          fromApi.globalVision ?? fromApi.global_vision,
+          fromLocal.globalVision,
+          fromApi,
+        ),
         spaces:
           Array.isArray(fromApi.spaces) && fromApi.spaces.length > 0
             ? fromApi.spaces
@@ -298,9 +294,13 @@ export default function Studio() {
 
   const resolvedRoomId = useMemo(() => {
     if (roomId) return roomId;
-    if (isProjectEditorRoute && editorSpaceId && currentProject) {
-      const sp = resolveSpaceByEditorId(currentProject, editorSpaceId);
-      return getSpaceRoomId(sp);
+    if (isProjectEditorRoute && currentProject) {
+      if (editorSpaceId) {
+        const sp = resolveSpaceByEditorId(currentProject, editorSpaceId);
+        return getSpaceRoomId(sp);
+      }
+      const fallback = getFirstEditableEditorSpace(currentProject);
+      return getSpaceRoomId(fallback);
     }
     return null;
   }, [roomId, editorSpaceId, currentProject, isProjectEditorRoute]);
@@ -465,17 +465,7 @@ export default function Studio() {
     if (!project?.id) return;
     const nextProject = {
       ...project,
-      globalVision: {
-        propertyVision: '',
-        styleKeywords: [],
-        moodVibe: '',
-        budgetRange: '',
-        inspirationNotes: '',
-        exteriorGoals: '',
-        interiorGoals: '',
-        ...(project.globalVision || {}),
-        ...patch,
-      },
+      globalVision: prepareGlobalVisionForSave(patch, project.globalVision || {}, project),
       updatedAt: new Date().toISOString(),
     };
     upsertProject(nextProject);
@@ -645,10 +635,60 @@ export default function Studio() {
   };
 
   useEffect(() => {
-    if (!room || !currentProject || !querySpaceId) return;
+    if (!room || !currentProject || !isProjectEditorRoute) return;
+    if (!querySpaceId) {
+      setActiveZone(null);
+      return;
+    }
     const activeSpace = resolveSpaceByEditorId(currentProject, querySpaceId);
-    if (activeSpace?.zoneId) setActiveZone(activeSpace.zoneId);
-  }, [room, currentProject, querySpaceId, setActiveZone]);
+    const zoneId = resolveActiveZoneIdForSpace(
+      useLayoutStore.getState().zones,
+      activeSpace,
+      currentProject,
+    );
+    if (zoneId) setActiveZone(zoneId);
+  }, [room, currentProject, querySpaceId, setActiveZone, isProjectEditorRoute]);
+
+  const visionStyleHint = useMemo(
+    () => deriveStyleHintFromVision(currentProject?.globalVision),
+    [currentProject?.globalVision],
+  );
+
+  const handleApplyVisionLayout = async (opts = {}) => {
+    if (!room || !currentProject?.globalVision) {
+      toast.error('Complete Project Vision first, then apply to this layout.');
+      return;
+    }
+    const activeZone = activeZoneId ? zones.find((z) => z.id === activeZoneId) : null;
+    const toastId = toast.loading('Applying vision to layout…');
+    try {
+      const result = await applyVisionDesignToEditor(
+        {
+          globalVision: currentProject.globalVision,
+          room,
+          zones,
+          furniture,
+          activeZone,
+          activeSpace: selectedProjectSpace,
+          updateRoom,
+          addFurniture,
+          setRecommendedItems,
+        },
+        { force: opts.force === true, applyInterior: true, applyFurniture: true },
+      );
+      const parts = [];
+      if (result.interiorUpdated) parts.push('interior');
+      if (result.placementsAdded > 0) parts.push(`${result.placementsAdded} piece(s)`);
+      toast.success(
+        parts.length
+          ? `Vision applied: ${parts.join(', ')}.`
+          : 'Vision synced — recommendations updated. Empty zones can receive new pieces.',
+        { id: toastId },
+      );
+    } catch {
+      toast.error('Could not apply vision to layout.', { id: toastId });
+    }
+  };
 
   const requestDiscardDraft = () => setConfirmDialog({ kind: 'discardDraft' });
   const confirmDiscardDraft = () => {
@@ -684,17 +724,6 @@ export default function Studio() {
     const adjustZones = buildAdjustZones(project);
     const floorplanImageUrl = project?.floorplan?.imageUrl || null;
     const scalePxPerInch = project?.floorplan?.scalePxPerInch || 1;
-    // When the saved floorplan carries the boundary offset + image size (new
-    // projects), render Adjust Spaces in full-image space so zones line up with
-    // the image — exactly like the setup screen. Older projects fall back to the
-    // legacy zone-extent sizing.
-    const fpBoundary = project?.floorplan?.boundary || null;
-    const fpImageW = project?.floorplan?.imageWidth || null;
-    const fpImageH = project?.floorplan?.imageHeight || null;
-    const canAlignToImage = Boolean(fpBoundary && fpImageW && fpImageH);
-    const displayZones = canAlignToImage
-      ? shiftZones(adjustZones, fpBoundary.x, fpBoundary.y)
-      : adjustZones;
 
     if (confirmPhase === 'spaces') {
       return <Navigate replace to={`/studio/project/${projectId}/confirm?mode=adjust`} />;
@@ -702,28 +731,26 @@ export default function Studio() {
 
     if (confirmMode === 'adjust') {
       const hasGeometry = adjustZones.length > 0;
-      const imageW = canAlignToImage
-        ? fpImageW
-        : hasGeometry
-          ? Math.max(...adjustZones.map((z) => z.bbox?.[2] || 0), 1)
-          : 0;
-      const imageH = canAlignToImage
-        ? fpImageH
-        : hasGeometry
-          ? Math.max(...adjustZones.map((z) => z.bbox?.[3] || 0), 1)
-          : 0;
+      const fp = project?.floorplan || {};
+      const imageW =
+        Number(fp.imageWidth) > 0
+          ? Number(fp.imageWidth)
+          : hasGeometry
+            ? Math.max(...adjustZones.map((z) => z.bbox?.[2] || 0), 1)
+            : 800;
+      const imageH =
+        Number(fp.imageHeight) > 0
+          ? Number(fp.imageHeight)
+          : hasGeometry
+            ? Math.max(...adjustZones.map((z) => z.bbox?.[3] || 0), 1)
+            : 600;
 
       const persistAdjustedSpaces = async (finalZones) => {
         setAdjustConfirmIssue(null);
-        // RoomEditor edited in full-image space when aligned; shift back to the
-        // stored origin-relative space so downstream consumers stay consistent.
-        const savedZones = canAlignToImage
-          ? shiftZones(finalZones, -fpBoundary.x, -fpBoundary.y)
-          : finalZones;
         const nextProject = { ...project };
-        const finalById = new Map(savedZones.map((z) => [z.id, z]));
+        const finalById = new Map(finalZones.map((z) => [z.id, z]));
         const existingSpaces = Array.isArray(project?.spaces) ? project.spaces : [];
-        const zoneSpaces = savedZones.map((zone, idx) => {
+        const zoneSpaces = finalZones.map((zone, idx) => {
           const existing = existingSpaces.find((s) => (s.zoneId || s.zone_id) === zone.id);
           return {
             ...(existing || {}),
@@ -743,7 +770,10 @@ export default function Studio() {
         nextProject.floorplan = {
           ...(project.floorplan || {}),
           imageUrl: floorplanImageUrl,
-          zones: savedZones,
+          imageWidth: imageW,
+          imageHeight: imageH,
+          coordinateSpace: 'imagePixels',
+          zones: finalZones,
           scalePxPerInch,
           updatedAt: new Date().toISOString(),
         };
@@ -892,10 +922,10 @@ export default function Studio() {
       return (
         <RoomEditor
           imageUrl={floorplanImageUrl}
-          imageWidth={canAlignToImage ? imageW : Math.max(800, imageW + 80)}
-          imageHeight={canAlignToImage ? imageH : Math.max(600, imageH + 80)}
-          initialZones={displayZones}
-          boundary={fpBoundary}
+          imageWidth={imageW}
+          imageHeight={imageH}
+          initialZones={adjustZones}
+          boundary={fp.boundary || null}
           scalePxPerInch={scalePxPerInch}
           onConfirm={persistAdjustedSpaces}
           onCancel={() => navigate('/studio')}
@@ -1005,11 +1035,11 @@ export default function Studio() {
 
             <section className="panel p-6 lg:col-span-2">
               <div className="eyebrow text-vs-accent mb-3">Overall project vision</div>
-              <div className="w-full rounded-xl border border-[rgba(0,0,0,0.08)] bg-[#fffdf9] px-4 py-3 text-sm text-[#2d2d2d] min-h-[140px] leading-relaxed whitespace-pre-wrap">
-                {gv.propertyVision || 'No overall vision provided yet.'}
+              <div className="w-full rounded-xl border border-[rgba(0,0,0,0.08)] bg-[#fffdf9] px-4 py-3 text-sm text-[#2d2d2d] min-h-[80px] leading-relaxed">
+                {formatProjectVisionSummary(gv, project)}
               </div>
               <p className="mt-2 text-[11px] text-[#8b7355]">
-                This summary is read-only here. If you need to revise, use Project Vision Assistant from the project hub.
+                Update direction anytime via Open Project Vision Assistant on the project hub.
               </p>
             </section>
           </div>
@@ -1391,7 +1421,7 @@ export default function Studio() {
     const interiorSpaces = (project?.spaces || []).filter((s) => s.type === 'interior');
     const exteriorSpaces = (project?.spaces || []).filter((s) => s.type === 'exterior');
     const gv = project?.globalVision || {};
-    const visionOk = isProjectVisionComplete(gv);
+    const visionOk = isProjectVisionComplete(gv, project);
     const confirmed = isConfirmationDone(project);
     const setupIncomplete = !visionOk || !confirmed;
     const continueSetupPath = !visionOk
@@ -1420,17 +1450,23 @@ export default function Studio() {
               </button>
               <div className="flex flex-wrap justify-end gap-2 max-w-md">
                 <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project?.id}/vision`)} disabled={!project?.id}>
-                  Edit Project Vision
+                  Open Project Vision Assistant
                 </button>
                 <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project?.id}/confirm?mode=adjust`)} disabled={!project?.id}>
                   Review Spaces
                 </button>
-                <button type="button" className="btn-ghost text-[10px]" onClick={() => navigate(`/studio/project/${project?.id}/chat`)} disabled={!project?.id}>
-                  Ask Project Assistant
-                </button>
               </div>
               <p className="text-[10px] text-[#8a857d] text-right max-w-sm leading-relaxed">
-                Vision review, space checklist, and project chat are optional once guided setup is finished — use anytime.
+                Room-level editing uses Space Assistant in the editor. Project-wide Q&amp;A chat remains at{' '}
+                <button
+                  type="button"
+                  className="underline hover:text-[#171717]"
+                  onClick={() => navigate(`/studio/project/${project?.id}/chat`)}
+                  disabled={!project?.id}
+                >
+                  /chat
+                </button>{' '}
+                if you need it.
               </p>
             </div>
           </div>
@@ -1486,12 +1522,20 @@ export default function Studio() {
           <section className="panel p-6 mb-10">
             <div className="eyebrow text-vs-accent mb-2">Project vision summary</div>
             <p className="text-sm text-[#2d2d2d] leading-relaxed">
-              {[
-                gv.propertyVision,
-                gv.moodVibe,
-                gv.styleKeywords?.join(', '),
-              ].filter(Boolean).join(' · ') || 'Your whole-property vision appears here.'}
+              {formatProjectVisionSummary(gv, project)}
             </p>
+            {(gv.styleKeywords?.length > 0 || gv.moodVibe) && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(gv.styleKeywords || []).map((k) => (
+                  <span
+                    key={k}
+                    className="text-[10px] uppercase tracking-editorial px-2.5 py-1 rounded-full border border-[rgba(0,0,0,0.1)] bg-[#fffdf9]"
+                  >
+                    {k}
+                  </span>
+                ))}
+              </div>
+            )}
           </section>
 
           <p className="mt-4 text-sm text-[#5b5b5b] mb-10">
@@ -1771,6 +1815,10 @@ export default function Studio() {
           >
             <EditorWorkspaceSidebar
               project={isProjectEditorRoute ? currentProject : null}
+              visionStyleHint={visionStyleHint}
+              onApplyVisionLayout={
+                isProjectEditorRoute && currentProject?.globalVision ? handleApplyVisionLayout : null
+              }
               onNavigateToSpace={
                 projectId
                   ? (spaceId) => {
@@ -1796,7 +1844,10 @@ export default function Studio() {
                         selectedSpaceId={selectedProjectSpaceId}
                       />
                     ) : (
-                      <RoomViewer3D />
+                      <RoomViewer3D
+                        spaceGeometry={selectedProjectSpace?.geometry || null}
+                        viewLabel={selectedProjectSpace?.name || room?.name || null}
+                      />
                     )
                   ) : isProjectEditorMode && !showRoomScopedCanvas ? (
                     <ProjectCanvas
@@ -1875,6 +1926,9 @@ export default function Studio() {
                   spaceVision={activeSpace?.spaceVision}
                   contextLabel={assistantContextLabel}
                   projectWideContext={isProjectEditorMode && !selectedProjectSpaceId}
+                  onApplyVisionLayout={
+                    currentProject?.globalVision ? () => handleApplyVisionLayout({ force: false }) : null
+                  }
                 />
               </motion.aside>
             )}
@@ -1896,6 +1950,9 @@ export default function Studio() {
                 spaceVision={activeSpace?.spaceVision}
                 contextLabel={assistantContextLabel}
                 projectWideContext={isProjectEditorMode && !selectedProjectSpaceId}
+                onApplyVisionLayout={
+                  currentProject?.globalVision ? () => handleApplyVisionLayout({ force: false }) : null
+                }
               />
             </motion.div>
           )}

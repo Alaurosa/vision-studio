@@ -55,16 +55,22 @@ function GalleryWallArt({ wall, roomW, roomD, roomH, color }) {
   const y = roomH * 0.52;
   const offsets = [-frameW - gap, 0, frameW + gap];
 
-  const placements = offsets.map((offset, i) => {
+  const placements = offsets.map((offset) => {
     switch (wall) {
       case 'north':
         return { pos: [roomW / 2 + offset, y, WALL_OFFSET + 0.02], size: [frameW, frameH, thickness] };
       case 'south':
-        return { pos: [roomW / 2 + offset, y, roomD - WALL_OFFSET - 0.02], size: [frameW, frameH, thickness] };
+        return {
+          pos: [roomW / 2 + offset, y, roomD - WALL_OFFSET - 0.02],
+          size: [frameW, frameH, thickness],
+        };
       case 'west':
         return { pos: [WALL_OFFSET + 0.02, y, roomD / 2 + offset], size: [thickness, frameH, frameW] };
       case 'east':
-        return { pos: [roomW - WALL_OFFSET - 0.02, y, roomD / 2 + offset], size: [thickness, frameH, frameW] };
+        return {
+          pos: [roomW - WALL_OFFSET - 0.02, y, roomD / 2 + offset],
+          size: [thickness, frameH, frameW],
+        };
       default:
         return { pos: [roomW / 2, y, WALL_OFFSET], size: [frameW, frameH, thickness] };
     }
@@ -107,8 +113,6 @@ function WallArt3D({ interior, roomW, roomD, roomH }) {
   let size = [artW, artH, thickness];
 
   switch (art.wall) {
-    case 'north':
-      break;
     case 'south':
       pos = [roomW / 2, roomH * 0.52, roomD - WALL_OFFSET - 0.02];
       break;
@@ -137,8 +141,8 @@ function WallArt3D({ interior, roomW, roomD, roomH }) {
 }
 
 /**
+ * Full interior rendering: floor, wall shells, wallpaper/paint planes, wall art.
  * @param {{ interior: unknown, roomW: number, roomD: number, roomH: number }} props
- * Meters for room dimensions.
  */
 export default function RoomInterior3D({ interior, roomW, roomD, roomH }) {
   const config = normalizeRoomInterior(interior);
@@ -177,21 +181,27 @@ export default function RoomInterior3D({ interior, roomW, roomD, roomH }) {
         <meshStandardMaterial color={config.floorColor} roughness={0.85} />
       </mesh>
 
-      {/* Wall shells (depth) */}
       <mesh position={[roomW / 2, roomH / 2, -WALL_THICKNESS / 2]} receiveShadow material={shellMaterial}>
         <boxGeometry args={[roomW, roomH, WALL_THICKNESS]} />
       </mesh>
-      <mesh position={[roomW / 2, roomH / 2, roomD + WALL_THICKNESS / 2]} receiveShadow material={shellMaterial}>
+      <mesh
+        position={[roomW / 2, roomH / 2, roomD + WALL_THICKNESS / 2]}
+        receiveShadow
+        material={shellMaterial}
+      >
         <boxGeometry args={[roomW, roomH, WALL_THICKNESS]} />
       </mesh>
       <mesh position={[-WALL_THICKNESS / 2, roomH / 2, roomD / 2]} receiveShadow material={shellMaterial}>
         <boxGeometry args={[WALL_THICKNESS, roomH, roomD]} />
       </mesh>
-      <mesh position={[roomW + WALL_THICKNESS / 2, roomH / 2, roomD / 2]} receiveShadow material={shellMaterial}>
+      <mesh
+        position={[roomW + WALL_THICKNESS / 2, roomH / 2, roomD / 2]}
+        receiveShadow
+        material={shellMaterial}
+      >
         <boxGeometry args={[WALL_THICKNESS, roomH, roomD]} />
       </mesh>
 
-      {/* Full interior wallpaper / paint planes */}
       <WallpaperWall
         args={[roomW, roomH]}
         position={[roomW / 2, roomH / 2, WALL_OFFSET]}

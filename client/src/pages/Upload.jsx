@@ -8,7 +8,12 @@ import { useAuth } from '@/hooks/useAuth';
 import { useLayoutStore } from '@/store/layoutStore';
 import AnalysisWorkflow from '@/components/upload/AnalysisWorkflow';
 import RoomEditor from '@/components/upload/RoomEditor';
+import ProjectSaveAuthModal from '@/components/project/ProjectSaveAuthModal';
 import { createProjectDraft, getProjectById, upsertProject } from '@/utils/projectCompat';
+import {
+  persistFloorplanRoomToServer,
+  syncProjectToServerIfPossible,
+} from '@/utils/projectSaveAuth';
 
 export default function Upload({ embedInWizard = false }) {
   const navigate = useNavigate();
@@ -16,7 +21,6 @@ export default function Upload({ embedInWizard = false }) {
   const { user } = useAuth();
   const isGuest = !user;
   const createDraftRoom = useLayoutStore((s) => s.createDraftRoom);
-  const setProjectTheme = useLayoutStore((s) => s.setProjectTheme);
 
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -28,10 +32,8 @@ export default function Upload({ embedInWizard = false }) {
   // { room, imageUrl, parseResult }
   const [editorData, setEditorData] = useState(null);
   const [spaceReview, setSpaceReview] = useState(null);
-  const [visionStep, setVisionStep] = useState(false);
-  const [visionPrompt, setVisionPrompt] = useState('');
-  const [visionStyle, setVisionStyle] = useState([]);
-  const [inspirationImageName, setInspirationImageName] = useState('');
+  const [savingSpaces, setSavingSpaces] = useState(false);
+  const [showSaveAuthGate, setShowSaveAuthGate] = useState(false);
 
   const inputRef = useRef(null);
   const projectIdParam = searchParams.get('projectId');
@@ -114,16 +116,12 @@ export default function Upload({ embedInWizard = false }) {
     let roomWidth = 240;
     let roomDepth = 180;
     let normalizedZones = finalZones;
-    let boundaryOffset = { x: 0, y: 0 };
 
     if (finalZones.length > 0) {
       const minX = Math.min(...finalZones.map(z => z.bbox[0]));
       const minY = Math.min(...finalZones.map(z => z.bbox[1]));
       const maxX = Math.max(...finalZones.map(z => z.bbox[2]));
       const maxY = Math.max(...finalZones.map(z => z.bbox[3]));
-      // Image-space origin of the detected region. Persisted so the Adjust
-      // Spaces editor can realign the (origin-shifted) zones with the full image.
-      boundaryOffset = { x: minX, y: minY };
 
       normalizedZones = finalZones.map((z) => {
         const relBbox = [z.bbox[0] - minX, z.bbox[1] - minY, z.bbox[2] - minX, z.bbox[3] - minY];
@@ -180,15 +178,13 @@ export default function Upload({ embedInWizard = false }) {
       scale,
       spaces,
       previewImageUrl,
-      boundary: boundaryOffset,
-      imageWidth: editorData.parseResult?.image_width || null,
-      imageHeight: editorData.parseResult?.image_height || null,
     });
     setEditorData(null);
   };
 
-  const finalizeProject = async () => {
-    if (!spaceReview) return;
+  /** Persist confirmed spaces/floorplan onto project (vision collected separately on /vision). */
+  const persistSpaceReviewToProject = async (authenticated = false) => {
+    if (!spaceReview) return null;
     let project = projectIdParam ? getProjectById(projectIdParam) : null;
     const nameFromWizard =
       resolvedProjectTitle || searchParams.get('projectName') || projectName?.trim();
@@ -202,24 +198,33 @@ export default function Upload({ embedInWizard = false }) {
       project = { ...project, name: nameFromWizard };
     }
 
-    const theme = {
-      styleChips: visionStyle,
-      prompt: visionPrompt,
-      inspirationImageName,
-      updatedAt: new Date().toISOString(),
-    };
-    setProjectTheme(theme);
-
-    let roomId = spaceReview.sourceRoomId;
-    const payload = {
-      zones: spaceReview.normalizedZones,
-      width: spaceReview.roomWidth,
-      depth: spaceReview.roomDepth,
-    };
-
     const displayProjectName = resolvedProjectTitle || projectName?.trim();
+    let roomId = spaceReview.sourceRoomId;
 
-    if (isGuest) {
+    const isAuthed = authenticated || Boolean(user);
+    if (isAuthed) {
+      try {
+        roomId = await persistFloorplanRoomToServer(
+          spaceReview,
+          displayProjectName || `${project.name} - Floorplan`,
+        );
+      } catch (err) {
+        console.error('Failed to save room updates:', err);
+        const draft = createDraftRoom({
+          name: displayProjectName || `${project.name} - Floorplan`,
+          width: spaceReview.roomWidth,
+          depth: spaceReview.roomDepth,
+          scale_px_per_inch: spaceReview.scale,
+          zones: spaceReview.normalizedZones,
+        });
+        roomId = draft.id;
+      }
+      try {
+        project = await syncProjectToServerIfPossible(project);
+      } catch {
+        // local project remains valid
+      }
+    } else {
       const draft = createDraftRoom({
         name: displayProjectName || `${project.name} - Floorplan`,
         width: spaceReview.roomWidth,
@@ -228,12 +233,6 @@ export default function Upload({ embedInWizard = false }) {
         zones: spaceReview.normalizedZones,
       });
       roomId = draft.id;
-    } else {
-      try {
-        await api.put(`/api/rooms/${spaceReview.sourceRoomId}`, payload);
-      } catch (err) {
-        console.error('Failed to save room updates:', err);
-      }
     }
 
     const mergedSpaces = spaceReview.spaces.map((space) => ({
@@ -243,17 +242,11 @@ export default function Upload({ embedInWizard = false }) {
       geometry: space.geometry || null,
     }));
     project.spaces = mergedSpaces;
-    project.theme = theme;
     project.floorplan = {
       imageUrl: spaceReview.imageUrl || null,
       zones: spaceReview.normalizedZones || [],
       scalePxPerInch: spaceReview.scale || null,
       sourceRoomId: roomId || null,
-      // Persisted so Adjust Spaces can realign origin-shifted zones with the
-      // full floor-plan image (see Studio adjust-spaces render).
-      boundary: spaceReview.boundary || null,
-      imageWidth: spaceReview.imageWidth || null,
-      imageHeight: spaceReview.imageHeight || null,
       updatedAt: new Date().toISOString(),
     };
     project.previewImageUrl =
@@ -264,8 +257,39 @@ export default function Upload({ embedInWizard = false }) {
     };
     project.updatedAt = new Date().toISOString();
     upsertProject(project);
+    return project;
+  };
 
-    navigate(`/studio/project/${project.id}/confirm?mode=adjust`);
+  const finalizeAndGoToVision = async (authenticated = false) => {
+    if (!spaceReview || savingSpaces) return;
+    setSavingSpaces(true);
+    try {
+      const project = await persistSpaceReviewToProject(authenticated);
+      if (!project?.id) {
+        toast.error('Could not save spaces. Please try again.');
+        return;
+      }
+      setSpaceReview(null);
+      navigate(`/studio/project/${project.id}/vision?setup=new`);
+    } catch {
+      toast.error('Could not save spaces. Please try again.');
+    } finally {
+      setSavingSpaces(false);
+    }
+  };
+
+  const continueToProjectVision = () => {
+    if (!spaceReview || savingSpaces) return;
+    if (!user) {
+      setShowSaveAuthGate(true);
+      return;
+    }
+    finalizeAndGoToVision();
+  };
+
+  const onSaveAuthComplete = () => {
+    setShowSaveAuthGate(false);
+    finalizeAndGoToVision(true);
   };
 
   const onEditorCancel = () => {
@@ -372,7 +396,7 @@ export default function Upload({ embedInWizard = false }) {
               <ol className="text-sm text-[#2d2d2d] space-y-2 mb-8">
                 <li>01 Upload plan or property photo</li>
                 <li>02 Confirm detected spaces and scale</li>
-                <li>03 Set project vision and enter studio</li>
+                <li>03 Open Project Vision Assistant, then enter studio</li>
               </ol>
 
               {error && (
@@ -469,51 +493,21 @@ export default function Upload({ embedInWizard = false }) {
               </div>
               <div className="flex justify-end gap-3 mt-6">
                 <button className="btn-ghost" onClick={() => setSpaceReview(null)}>Cancel</button>
-                <button className="btn-ink" onClick={() => { setSpaceReview((s) => ({ ...s })); setVisionStep(true); }}>Continue</button>
+                <button className="btn-ink" onClick={continueToProjectVision} disabled={savingSpaces}>
+                  {savingSpaces ? 'Saving spaces…' : 'Continue to Project Vision'}
+                </button>
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Whole-property vision onboarding */}
-      <AnimatePresence>
-        {spaceReview && visionStep && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-[#f6f3ee]/95 backdrop-blur-sm grid place-items-center p-4">
-            <div className="w-full max-w-2xl rounded-[22px] border border-[rgba(0,0,0,0.08)] bg-[#f8f8f6] p-8">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-vs-accent mb-3">Vision Step</div>
-              <h2 className="display-md mb-2">What feeling should guests have when entering?</h2>
-              <p className="text-sm text-[#5b5b5b] mb-5">Set a whole-property theme before entering the studio.</p>
-              <div className="flex flex-wrap gap-2 mb-4">
-                {['Warm', 'Modern', 'Minimal', 'Coastal', 'Industrial', 'Organic'].map((chip) => {
-                  const active = visionStyle.includes(chip);
-                  return (
-                    <button key={chip}
-                      onClick={() => setVisionStyle((prev) => (prev.includes(chip) ? prev.filter((c) => c !== chip) : [...prev, chip]))}
-                      className={`text-[10px] uppercase tracking-editorial rounded-full px-3 py-1.5 border ${active ? 'border-[#004aad]/45 text-[#004aad] bg-[#eef4f7]' : 'border-[rgba(0,0,0,0.08)] text-[#5b5b5b]'}`}>
-                      {chip}
-                    </button>
-                  );
-                })}
-              </div>
-              <textarea className="w-full min-h-[110px] rounded-xl border border-[rgba(0,0,0,0.08)] bg-[#fffdf9] p-4 text-sm"
-                value={visionPrompt}
-                onChange={(e) => setVisionPrompt(e.target.value)}
-                placeholder="Describe the whole-house mood, circulation feel, and design intent..." />
-              <label className="mt-4 block text-sm text-[#5b5b5b]">
-                Inspiration image (optional)
-                <input type="file" accept="image/*" className="mt-1 block w-full text-sm" onChange={(e) => setInspirationImageName(e.target.files?.[0]?.name || '')} />
-                {inspirationImageName && <span className="text-xs text-[#171717]">Selected: {inspirationImageName}</span>}
-              </label>
-              <div className="flex justify-end gap-3 mt-6">
-                <button className="btn-ghost" onClick={() => setVisionStep(false)}>Back</button>
-                <button className="btn-ink" onClick={finalizeProject}>Enter Studio</button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {showSaveAuthGate && (
+        <ProjectSaveAuthModal
+          onClose={() => setShowSaveAuthGate(false)}
+          onAuthed={onSaveAuthComplete}
+        />
+      )}
     </div>
   );
 }

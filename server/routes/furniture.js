@@ -1,6 +1,7 @@
 import express from 'express';
 import { optionalAuth } from '../middleware/auth.js';
 import { useDb, supabaseAdmin, fallback, hasDbUserId, roomOwnedByUser } from '../services/db.js';
+import { insertPlacementRow, updatePlacementRow } from '../services/placementPersistence.js';
 
 const router = express.Router();
 
@@ -103,16 +104,7 @@ router.post('/placements', optionalAuth, async (req, res) => {
       model_url: model_url || null,
     };
     if (zone_id) payload.zone_id = zone_id;
-    let { data, error } = await supabaseAdmin.from('placements').insert(payload).select().single();
-    // Retry without optional columns missing on older deployments
-    if (error && payload.zone_id && /zone_id/i.test(error.message || '')) {
-      delete payload.zone_id;
-      ({ data, error } = await supabaseAdmin.from('placements').insert(payload).select().single());
-    }
-    if (error && payload.image_url && /image_url/i.test(error.message || '')) {
-      delete payload.image_url;
-      ({ data, error } = await supabaseAdmin.from('placements').insert(payload).select().single());
-    }
+    const { data, error } = await insertPlacementRow(payload);
     if (error) return res.status(400).json({ error: error.message });
     return res.json({
       ...data,
@@ -142,31 +134,7 @@ router.put('/placements/:id', optionalAuth, async (req, res) => {
       return res.status(404).json({ error: 'Placement not found' });
     }
     updates.updated_at = new Date().toISOString();
-    let { data, error } = await supabaseAdmin
-      .from('placements')
-      .update(updates)
-      .eq('id', req.params.id)
-      .select()
-      .single();
-    // Retry without optional columns missing on older deployments
-    if (error && /zone_id/i.test(error.message || '') && 'zone_id' in updates) {
-      const { zone_id, ...rest } = updates;
-      ({ data, error } = await supabaseAdmin
-        .from('placements')
-        .update(rest)
-        .eq('id', req.params.id)
-        .select()
-        .single());
-    }
-    if (error && /image_url/i.test(error.message || '') && 'image_url' in updates) {
-      const { image_url, ...rest } = updates;
-      ({ data, error } = await supabaseAdmin
-        .from('placements')
-        .update(rest)
-        .eq('id', req.params.id)
-        .select()
-        .single());
-    }
+    const { data, error } = await updatePlacementRow(req.params.id, updates);
     if (error) return res.status(400).json({ error: error.message });
     return res.json(data);
   }

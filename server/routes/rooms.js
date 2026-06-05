@@ -1,12 +1,15 @@
 import express from 'express';
 import multer from 'multer';
-import FormData from 'form-data';
-import axios from 'axios';
 import { optionalAuth } from '../middleware/auth.js';
 import { log } from '../services/logger.js';
 import { useDb, supabaseAdmin, fallback } from '../services/db.js';
 import { saveFileLocally } from '../services/fileStorage.js';
-import { normalizeZones } from '../services/normalizeZones.js';
+import {
+  parseFloorplanWithPython,
+  unavailableParseResult,
+  buildFloorplanClientPayload,
+  buildRoomUpdatesFromParse,
+} from '../services/floorplanParse.js';
 import { enrichRoomPlacements, enrichRoomsPlacements } from '../services/placementEnrichment.js';
 
 const router = express.Router();
@@ -192,73 +195,24 @@ router.post('/:id/upload-floorplan', optionalAuth, upload.single('file'), async 
       publicUrl = localPath; // e.g. /uploads/floor-plans/12345-plan.jpg
     }
 
-    // 2. Send to Python service for parsing
-    let parseResult = { rooms: [], walls: [], fallback: true, error: 'Python service unavailable — set room dimensions manually' };
+    // 2. Python service — GPT vision grid + wall-snap (preferred), OpenCV fallback
+    let parseResult;
     try {
-      const form = new FormData();
-      form.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype });
-
-      const pythonRes = await axios.post(
-        `${process.env.PYTHON_SERVICE_URL || 'http://localhost:5001'}/parse-floorplan`,
-        form,
-        { headers: form.getHeaders(), timeout: 120000 }
-      );
-      parseResult = pythonRes.data;
+      parseResult = await parseFloorplanWithPython(file.buffer, {
+        filename: file.originalname,
+        contentType: file.mimetype,
+      });
     } catch (pyErr) {
-      log.warn('Python service unavailable', { error: pyErr.message });
+      parseResult = unavailableParseResult(pyErr);
     }
+
+    const clientPayload = buildFloorplanClientPayload(parseResult);
 
     // 3. Save URL + parsed data to room
-    const roomUpdates = { floor_plan_url: publicUrl };
-
-    // If rooms/walls were detected, save them to the room record
-    if (parseResult.walls && parseResult.walls.length > 0) {
-      roomUpdates.walls = parseResult.boundary
-        ? parseResult.walls.map(([x, y]) => [x - parseResult.boundary.x, y - parseResult.boundary.y])
-        : parseResult.walls;
-    }
-
-    // Auto-calculate room dimensions from boundary
-    const boundary = parseResult.boundary;
-    const imgW = parseResult.image_width;
-    const imgH = parseResult.image_height;
-    if (boundary && boundary.w > 0 && imgW && imgH) {
-      let calcScale = 1.0;
-      let roomW = Math.round(boundary.w);
-      let roomH = Math.round(boundary.h);
-
-      if (parseResult.total_width_inches && parseResult.total_width_inches > 0) {
-        // scale = pixels / inches
-        calcScale = boundary.w / parseResult.total_width_inches;
-        roomW = Math.round(parseResult.total_width_inches);
-        roomH = Math.round(boundary.h / calcScale);
-      } else if (parseResult.total_depth_inches && parseResult.total_depth_inches > 0) {
-        calcScale = boundary.h / parseResult.total_depth_inches;
-        roomH = Math.round(parseResult.total_depth_inches);
-        roomW = Math.round(boundary.w / calcScale);
-      }
-
-      roomUpdates.width = roomW;
-      roomUpdates.depth = roomH;
-      roomUpdates.scale_px_per_inch = calcScale;
-    }
-
-    // Store detected room data (rooms, boundary) as detected_objects for reference
-    if (parseResult.rooms || parseResult.boundary) {
-      const zones = normalizeZones(parseResult);
-      if (zones.length > 0) {
-        roomUpdates.zones = zones;
-      }
-      roomUpdates.detected_objects = {
-        rooms: parseResult.rooms || [],
-        zones,
-        boundary: parseResult.boundary || null,
-        wall_segments: parseResult.wall_segments || [],
-        method: parseResult.method || 'unknown',
-        image_width: imgW,
-        image_height: imgH,
-      };
-    }
+    const roomUpdates = {
+      floor_plan_url: publicUrl,
+      ...buildRoomUpdatesFromParse(parseResult),
+    };
 
     const dbEnabled = (await useDb()) && hasDbUserId(req.user?.id);
     if (dbEnabled) {
@@ -274,10 +228,7 @@ router.post('/:id/upload-floorplan', optionalAuth, upload.single('file'), async 
 
     res.json({
       floor_plan_url: publicUrl,
-      parse_result: {
-        ...parseResult,
-        scale_px_per_inch: roomUpdates.scale_px_per_inch || null,
-      },
+      ...clientPayload,
     });
   } catch (err) {
     log.error('Floor plan upload error', { error: err.message });

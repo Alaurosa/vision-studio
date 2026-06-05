@@ -6,6 +6,7 @@
     "dev": "nodemon --experimental-specifier-resolution=node index.js",
     "start": "node index.js",
     "setup": "node scripts/setup.js",
+    "check:floorplan-ai": "node scripts/checkFloorplanAi.js",
     "seed": "node scripts/seedFurniture.js",
     "test": "vitest run",
     "test:e2e": "vitest run __tests__/e2e.smoke.test.js",

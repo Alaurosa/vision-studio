@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import FurnitureCard from '@/components/catalog/FurnitureCard';
 import {
@@ -16,12 +16,22 @@ import { inchesToFeet } from '@/utils/scale';
  * @param {{
  *   onSelectItem?: (item: import('@/data/furnitureCatalog.js').FurnitureCatalogItem) => void,
  *   selectedItemId?: string | null,
+ *   defaultStyleHint?: string | null,
  * }} props
  */
-export default function FurnitureCatalogPanel({ onSelectItem, selectedItemId: selectedItemIdProp }) {
+export default function FurnitureCatalogPanel({
+  onSelectItem,
+  selectedItemId: selectedItemIdProp,
+  defaultStyleHint = null,
+}) {
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [styleTagId, setStyleTagId] = useState('');
+
+  useEffect(() => {
+    if (!defaultStyleHint) return;
+    setStyleTagId((prev) => (prev ? prev : defaultStyleHint));
+  }, [defaultStyleHint]);
   const [recommendationsOpen, setRecommendationsOpen] = useState(false);
   const [internalSelectedItemId, setInternalSelectedItemId] = useState(null);
   const selectedItemId = selectedItemIdProp ?? internalSelectedItemId;

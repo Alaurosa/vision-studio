@@ -56,6 +56,11 @@ export default function FurnitureCard({ item, isSelected = false, onSelect }) {
   const body = (
     <>
       {preview}
+      {isSelected && (
+        <div className="bg-blue-600 px-3 py-1.5 text-center text-[11px] font-semibold uppercase tracking-[0.1em] text-white">
+          Click in the room to place
+        </div>
+      )}
       <div className="p-4">
         <div className="mb-1 truncate text-sm font-medium text-surface-100">{item.name}</div>
         <div className="mb-2 text-[11px] uppercase tracking-editorial text-surface-400">

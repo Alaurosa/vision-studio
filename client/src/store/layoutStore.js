@@ -48,7 +48,7 @@ function normalizeZonesArray(zones) {
   return (Array.isArray(zones) ? zones : []).map((zone, index) => normalizeZone(zone, index));
 }
 
-function getZoneBounds(zone) {
+export function getZoneBounds(zone) {
   if (!zone) return null;
   const bbox = Array.isArray(zone.bbox) && zone.bbox.length === 4 ? zone.bbox : null;
   if (bbox) return { left: bbox[0], top: bbox[1], right: bbox[2], bottom: bbox[3] };
@@ -114,13 +114,17 @@ function buildPlacementFromCatalog(item, position = null, state) {
     right: room?.width || item.width || 0,
     bottom: room?.depth || item.depth || 0,
   };
-  const width = Number(item.width) || 24;
-  const depth = Number(item.depth) || 24;
+  const toDim = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : 24;
+  };
+  const width = toDim(item.width);
+  const depth = toDim(item.depth);
   const rotation = Number(item.rotation) || 0;
-  const rawSlot = position
-    ? clampPlacementToBounds({ x: position.x, y: position.y, width, depth, rotation }, bounds)
-    : state.findOpenSlot(width, depth);
-  const slot = clampPlacementToBounds({ ...rawSlot, width, depth, rotation }, bounds);
+  // Take the requested point (or an open slot) and clamp ONCE into the active
+  // bounds — the position path used to clamp twice with identical rotation.
+  const rawSlot = position ? { x: position.x, y: position.y } : state.findOpenSlot(width, depth);
+  const slot = clampPlacementToBounds({ x: rawSlot.x, y: rawSlot.y, width, depth, rotation }, bounds);
 
   return {
     catalog_id: item.catalog_id || item.id || null,

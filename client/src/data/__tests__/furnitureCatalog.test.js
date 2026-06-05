@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   FURNITURE_CATEGORIES,
   STARTER_FURNITURE_CATALOG,
+  ROOM_TYPES,
+  matchRoomType,
   getFurnitureByCategory,
   getFurnitureById,
   getFurnitureCategoryLabel,
@@ -9,6 +11,33 @@ import {
 } from '@/data/furnitureCatalog.js';
 
 const CATEGORY_IDS = new Set(FURNITURE_CATEGORIES.map((c) => c.id));
+
+describe('furnitureCatalog — previews & room types', () => {
+  it('every item points its preview at its category SVG (so cards always show a thumbnail)', () => {
+    for (const item of STARTER_FURNITURE_CATALOG) {
+      expect(item.previewImageUrl).toBe(`/furniture/placeholders/${item.category}.svg`);
+    }
+  });
+
+  it('every starter item is tagged with valid room types', () => {
+    const valid = new Set(ROOM_TYPES);
+    for (const item of STARTER_FURNITURE_CATALOG) {
+      expect(Array.isArray(item.roomTypes)).toBe(true);
+      expect(item.roomTypes.length).toBeGreaterThan(0);
+      for (const rt of item.roomTypes) expect(valid.has(rt)).toBe(true);
+    }
+  });
+
+  it('matchRoomType maps room names to a room type (or null)', () => {
+    expect(matchRoomType('Primary Bedroom')).toBe('bedroom');
+    expect(matchRoomType('Living Room')).toBe('living');
+    expect(matchRoomType('Dining')).toBe('dining');
+    expect(matchRoomType('Home Office')).toBe('office');
+    expect(matchRoomType('Room 1')).toBeNull();
+    expect(matchRoomType('')).toBeNull();
+    expect(matchRoomType(null)).toBeNull();
+  });
+});
 
 describe('furnitureCatalog', () => {
   it('defines the six starter categories', () => {

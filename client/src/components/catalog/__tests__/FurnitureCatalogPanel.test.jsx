@@ -89,8 +89,8 @@ describe('FurnitureCatalogPanel', () => {
 
     const list = screen.getByRole('list', { name: 'Furniture catalog results' });
     const items = within(list).getAllByRole('button');
-    expect(items).toHaveLength(2);
-    expect(screen.getByText('2 pieces')).toBeInTheDocument();
+    expect(items).toHaveLength(4);
+    expect(screen.getByText('4 pieces')).toBeInTheDocument();
   });
 
   it('shows an empty state when nothing matches', () => {
@@ -177,7 +177,9 @@ describe('FurnitureCatalogPanel', () => {
     });
 
     it('shows an empty recommended state for categories with no fits', () => {
-      setLayoutState({ room: { id: 'r1', width: 96, depth: 96 }, furniture: [] });
+      // 40×40" room: no table footprint fits (smallest table is ~47"), so the
+      // Tables recommendation is empty.
+      setLayoutState({ room: { id: 'r1', width: 40, depth: 40 }, furniture: [] });
 
       render(<FurnitureCatalogPanel />);
       fireEvent.click(screen.getByRole('button', { name: 'Tables' }));

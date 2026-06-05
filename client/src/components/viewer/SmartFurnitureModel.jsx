@@ -18,29 +18,25 @@ import { resolveFurnitureModelUrl, resolveProceduralCategory } from '@/utils/fur
 function GLBModel({ url, w, d, h, rotationY = 0 }) {
   const gltf = useLoader(GLTFLoader, url);
 
-  const scene = useMemo(() => {
+  const { object, scale } = useMemo(() => {
     const cloned = gltf.scene.clone(true);
+
+    // Apply the per-item facing override (catalog.model_rotation_y) FIRST and
+    // measure in that final orientation, so width/depth map to the right axes.
+    // The non-uniform scale is applied by the wrapper <group> *after* this
+    // rotation, which keeps the mesh from shearing.
+    cloned.rotation.y = rotationY;
+    cloned.updateMatrixWorld(true);
+
     const box = new THREE.Box3().setFromObject(cloned);
     const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
     box.getSize(size);
+    box.getCenter(center);
 
-    const scaleX = size.x > 0 ? w / size.x : 1;
-    const scaleY = size.y > 0 ? h / size.y : 1;
-    const scaleZ = size.z > 0 ? d / size.z : 1;
-    const uniformScale = Math.min(scaleX, scaleY, scaleZ) * 0.95;
-    cloned.scale.setScalar(uniformScale);
-
-    const scaledBox = new THREE.Box3().setFromObject(cloned);
-    const scaledCenter = new THREE.Vector3();
-    scaledBox.getCenter(scaledCenter);
-    // Fully center on the group origin (horizontal AND vertical). The parent
-    // group in RoomViewer3D already lifts by fh/2, which puts the bottom on
-    // the floor — matching how ProceduralFurniture is positioned.
-    cloned.position.set(-scaledCenter.x, -scaledCenter.y, -scaledCenter.z);
-
-    // Per-item facing override (catalog.model_rotation_y) for one-off
-    // Kenney assets that don't face the expected direction.
-    cloned.rotation.y = rotationY;
+    // Center on X/Z and drop the bottom to Y=0 so the piece sits on the floor
+    // (the parent furniture group sits at floor level, like ProceduralFurniture).
+    cloned.position.set(-center.x, -box.min.y, -center.z);
 
     // Enable shadows on all meshes
     cloned.traverse((child) => {
@@ -49,10 +45,21 @@ function GLBModel({ url, w, d, h, rotationY = 0 }) {
         child.receiveShadow = true;
       }
     });
-    return cloned;
+
+    // Scale each axis to the real catalog size so the model fills its true
+    // footprint and height and matches the 2D footprint exactly — no min()
+    // shrink, no 0.95 fudge, and (because height is exact) no floating.
+    const scaleX = size.x > 0 ? w / size.x : 1;
+    const scaleY = size.y > 0 ? h / size.y : 1;
+    const scaleZ = size.z > 0 ? d / size.z : 1;
+    return { object: cloned, scale: [scaleX, scaleY, scaleZ] };
   }, [gltf, w, d, h, rotationY]);
 
-  return <primitive object={scene} />;
+  return (
+    <group scale={scale}>
+      <primitive object={object} />
+    </group>
+  );
 }
 
 class ModelErrorBoundary extends React.PureComponent {

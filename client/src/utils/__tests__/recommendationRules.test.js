@@ -30,6 +30,60 @@ const DINING = STARTER_FURNITURE_CATALOG.find((i) => i.id === 'starter-dining-ta
 const QUEEN_BED = STARTER_FURNITURE_CATALOG.find((i) => i.id === 'starter-queen-bed');
 const DRESSER = STARTER_FURNITURE_CATALOG.find((i) => i.id === 'starter-dresser');
 
+// Room-type awareness -------------------------------------------------
+
+describe('recommendationRules — room-type awareness', () => {
+  const ROOM = { width: 216, depth: 168 }; // large room so fit isn't the limiter
+  const recIds = (roomType) =>
+    recommendForRoom({
+      room: ROOM,
+      placements: [],
+      catalog: STARTER_FURNITURE_CATALOG,
+      roomType,
+    }).items.map((e) => e.item.id);
+
+  it('bedroom recommendations exclude dining tables and include a bed', () => {
+    const ids = recIds('bedroom');
+    expect(ids).not.toContain('starter-dining-table');
+    expect(ids.some((id) => id === 'starter-queen-bed' || id === 'starter-single-bed')).toBe(true);
+  });
+
+  it('dining recommendations exclude beds', () => {
+    const ids = recIds('dining');
+    expect(ids).not.toContain('starter-queen-bed');
+    expect(ids).not.toContain('starter-single-bed');
+  });
+
+  it('without a room type, the dining table can still surface (unchanged behavior)', () => {
+    expect(recIds('')).toContain('starter-dining-table');
+  });
+
+  it('recommendFurniture filters a category by room type', () => {
+    const seating = recommendFurniture({
+      room: ROOM,
+      placements: [],
+      catalog: STARTER_FURNITURE_CATALOG,
+      category: 'seating',
+      roomType: 'bedroom',
+    }).items.map((e) => e.item.id);
+    expect(seating).not.toContain('starter-dining-chair');
+    expect(seating).not.toContain('starter-desk-chair');
+  });
+
+  it('adds a room-type reason to items tagged for the room', () => {
+    const beds = recommendFurniture({
+      room: ROOM,
+      placements: [],
+      catalog: STARTER_FURNITURE_CATALOG,
+      category: 'beds',
+      roomType: 'bedroom',
+    });
+    const queen = beds.items.find((e) => e.item.id === 'starter-queen-bed');
+    expect(queen).toBeTruthy();
+    expect(queen.reasons.some((r) => /bedroom/i.test(r))).toBe(true);
+  });
+});
+
 // Sanity --------------------------------------------------------------
 
 describe('recommendationRules — sanity', () => {

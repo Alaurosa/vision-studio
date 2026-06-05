@@ -139,7 +139,9 @@ export default function RoomViewer3D({ spaceGeometry = null, viewLabel = null })
           const color = it.color || CATEGORY_COLORS[it.category] || CATEGORY_COLORS.default;
           const rotY = -(it.rotation || 0) * Math.PI / 180;
           return (
-            <group key={it.id} position={[x, fh / 2, z]} rotation={[0, rotY, 0]}>
+            // Group at floor level; SmartFurnitureModel builds upward from Y=0
+            // so furniture rests on the floor at its true size (scale fix).
+            <group key={it.id} position={[x, 0, z]} rotation={[0, rotY, 0]}>
               <SmartFurnitureModel item={it} w={fw} d={fd} h={fh} color={color} />
             </group>
           );

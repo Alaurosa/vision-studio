@@ -133,13 +133,13 @@ CSE 115A capstone deliverables for graders and TAs (`release/final-submission` b
 | Release Plan | *Not yet in repo* — add `docs/scrum/release-plan.pdf` or `.md` |
 | [Sprint 1 Plan](docs/scrum/sprint-1-plan.pdf) | `docs/scrum/sprint-1-plan.pdf` |
 | [Sprint 1 Report](docs/scrum/sprint-1-report.pdf) | `docs/scrum/sprint-1-report.pdf` |
-| Sprint 2 Plan | *Not yet in repo* |
+| [Sprint 2 Plan](docs/scrum/sprint-2-plan.pdf) | `docs/scrum/sprint-2-plan.pdf` |
 | [Sprint 2 Report](docs/scrum/sprint-2-report.pdf) | `docs/scrum/sprint-2-report.pdf` |
 | [Sprint 3 Plan](docs/scrum/sprint-3-plan.pdf) | `docs/scrum/sprint-3-plan.pdf` |
 | [Sprint 3 Report](docs/scrum/sprint-3-report.pdf) | `docs/scrum/sprint-3-report.pdf` |
 | [Sprint 4 Plan](docs/scrum/sprint-4-plan.pdf) | `docs/scrum/sprint-4-plan.pdf` |
-| Sprint 4 Report | *Not yet in repo* |
-| Team Working Agreement | *Not yet in repo* — add `docs/scrum/team-working-agreement.md` or `.pdf` |
+| Sprint 4 Report | *N/A* — final wrap-up sprint; see [Release Summary](docs/release/release-summary.pdf) |
+| [Team Working Agreement](docs/scrum/team-working-agreement.pdf) | `docs/scrum/team-working-agreement.pdf` |
 | [Definition of Done](docs/scrum/definition-of-done.pdf) | `docs/scrum/definition-of-done.pdf` |
 | [Style Guide](docs/scrum/style-guide.md) | `docs/scrum/style-guide.md` |
 

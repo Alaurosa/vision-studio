@@ -314,5 +314,5 @@ See [Definition of Done](./definition-of-done.pdf) for the formal team document.
 
 - [AGENTS.md](../../AGENTS.md) — full monorepo reference
 - [.prettierrc](../../.prettierrc) — formatting config
-- [Team Working Agreement](./team-working-agreement.md) *(add when available)*
+- [Team Working Agreement](./team-working-agreement.pdf)
 - [Deployment Notes](../deployment/deployment-notes.md)

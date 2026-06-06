@@ -122,6 +122,58 @@ Browser Playwright smoke and demo video tooling live under `e2e/` and are **giti
 
 There is **no** `npm run generate-models` in this repo; optional 3D generation is the Meshy route under `/api/models` (see AGENTS.md).
 
+## Final Submission Documentation
+
+CSE 115A capstone deliverables for graders and TAs (`release/final-submission` branch).
+
+### Scrum and process
+
+| Document | Path |
+|----------|------|
+| Release Plan | *Not yet in repo* — add `docs/scrum/release-plan.pdf` or `.md` |
+| [Sprint 1 Plan](docs/scrum/sprint-1-plan.pdf) | `docs/scrum/sprint-1-plan.pdf` |
+| [Sprint 1 Report](docs/scrum/sprint-1-report.pdf) | `docs/scrum/sprint-1-report.pdf` |
+| Sprint 2 Plan | *Not yet in repo* |
+| [Sprint 2 Report](docs/scrum/sprint-2-report.pdf) | `docs/scrum/sprint-2-report.pdf` |
+| [Sprint 3 Plan](docs/scrum/sprint-3-plan.pdf) | `docs/scrum/sprint-3-plan.pdf` |
+| [Sprint 3 Report](docs/scrum/sprint-3-report.pdf) | `docs/scrum/sprint-3-report.pdf` |
+| [Sprint 4 Plan](docs/scrum/sprint-4-plan.pdf) | `docs/scrum/sprint-4-plan.pdf` |
+| Sprint 4 Report | *Not yet in repo* |
+| Team Working Agreement | *Not yet in repo* — add `docs/scrum/team-working-agreement.md` or `.pdf` |
+| [Definition of Done](docs/scrum/definition-of-done.pdf) | `docs/scrum/definition-of-done.pdf` |
+| [Style Guide](docs/scrum/style-guide.md) | `docs/scrum/style-guide.md` |
+
+### Testing and release
+
+| Document | Path |
+|----------|------|
+| [Test Plan and Report](docs/testing/test-plan-and-report.pdf) | `docs/testing/test-plan-and-report.pdf` |
+| [Release Summary](docs/release/release-summary.pdf) | `docs/release/release-summary.pdf` |
+
+### Product and technical docs
+
+| Document | Path |
+|----------|------|
+| [User Guide](docs/user-guide/user-guide.md) | `docs/user-guide/user-guide.md` |
+| [Architecture Overview](docs/design/architecture-overview.md) | `docs/design/architecture-overview.md` |
+| [Data Model](docs/design/data-model.md) | `docs/design/data-model.md` |
+| [Editor UX Flow](docs/design/editor-ux-flow.md) | `docs/design/editor-ux-flow.md` |
+| [Deployment Notes](docs/deployment/deployment-notes.md) | `docs/deployment/deployment-notes.md` |
+| Installation instructions | This README — [Local setup](#local-setup) |
+| Dependency manifests | `client/package.json`, `server/package.json`, `python/requirements.txt` |
+| Environment templates | `.env.example`, `client/.env.example`, `python/.env.example` |
+
+Technical reference for maintainers: **[AGENTS.md](./AGENTS.md)**.
+
+### Verification commands
+
+```bash
+cd client && npm test
+cd server && npm test
+cd server && npm run test:e2e
+cd client && npm run build
+```
+
 ## Credits — 3D assets
 
 **Kenney Furniture Kit** — [kenney.nl/assets/furniture-kit](https://kenney.nl/assets/furniture-kit) (CC0 / public domain). Bundled under `client/public/models/kenney/`.

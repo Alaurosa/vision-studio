@@ -20,7 +20,7 @@ export default function ProjectSpaceShell3D({
 
   return (
     <group position={[ox, 0, oz]}>
-      <RoomInterior3D interior={interior} roomW={w} roomD={d} roomH={h} />
+      <RoomInterior3D interior={interior} roomW={w} roomD={d} roomH={h} showWalls />
     </group>
   );
 }

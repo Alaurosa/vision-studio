@@ -217,7 +217,7 @@ vision-studio/
 │       │   │   ├── RoomViewer3D.jsx
 │       │   │   ├── RoomSceneControls.jsx
 │       │   │   ├── RoomShell3D.jsx       # Legacy shell mesh (not mounted in RoomViewer3D; see ProjectSpaceShell3D)
-│       │   │   ├── RoomInterior3D.jsx    # Selected-room 3D: floor plane only (Materials floor color)
+│       │   │   ├── RoomInterior3D.jsx    # 3D interior shell: floor always; walls/wallpaper/art when showWalls (all-spaces mode)
 │       │   │   ├── ProjectSpaceShell3D.jsx # All-spaces per-zone shells + interior
 │       │   │   ├── ProjectViewer3D.jsx   # All-spaces floorplan overview + furniture
 │       │   │   ├── SmartFurnitureModel.jsx
@@ -587,14 +587,15 @@ All tables use Row Level Security — users can only access their own data. The 
 
 - **Materials tab** (`InteriorDesignPanel` + `roomInterior.js`): wall paint presets, wallpaper, wall art placement, layout-intent guidance. Persisted on `room.interior` via `updateRoomInterior` → `PUT /api/rooms/:id` (stored in `detected_objects.interior` and/or `interior` column). User edits set `source: 'user'` and `userEditedAt`.
 - **2D** (`RoomCanvas`): floor fill from `room.interior.floorColor`; wall outline only when **Wall points** tool is on.
-- **3D selected room** (`RoomInterior3D.jsx` in `RoomViewer3D`): floor plane only from `room.interior.floorColor` (no perimeter walls).
+- **3D selected room** (`RoomInterior3D.jsx` in `RoomViewer3D`): floor plane only (no perimeter walls) so furniture layout stays unobstructed.
+- **3D all spaces** (`ProjectViewer3D` + `ProjectSpaceShell3D`): each space renders `RoomInterior3D` with `showWalls` — perimeter shells, Materials paint/wallpaper, and optional wall art.
 - **3D all spaces** (`ProjectSpaceShell3D` + `ProjectViewer3D`): floorplan-positioned shells; shared `room.interior` for shell tint until per-space interior is modeled.
 
 ### Editor & canvas
 
 - **Starter placement**: select item in Furniture tab → click canvas (`createPlacedFurnitureFromCatalogItem`); Esc or **Clear selection** cancels. Overlap and room/zone bounds enforced with toast warnings.
 - Furniture can be rotated freely in the 2D editor via the Konva transformer handle, 15° toolbar nudges, or the in-canvas rotation slider.
-- **3D selected room** (`RoomViewer3D` + `RoomInterior3D` + `roomShell3d.js` + `roomView3d.js` + `SmartFurnitureModel` + `furniture3d.js`): Shell size from active zone bbox or room dimensions (inches → meters). `RoomInterior3D` renders Materials (floor, walls, wallpaper, art). Furniture uses the same inch→meter origin as 2D (`x_inches` / `y_inches`). Polygon/L-shaped **floorplan walls** are not extruded as 3D meshes yet. GLB via `model_url` / `modelUrl`, else `ProceduralFurniture` (per-item Suspense—do not wrap the whole `Canvas`). Starter catalog Kenney GLBs are visual-only; catalog inch dimensions stay authoritative.
+- **3D selected room** (`RoomViewer3D` + `RoomInterior3D` + `roomShell3d.js` + `roomView3d.js` + `SmartFurnitureModel` + `furniture3d.js`): Shell size from active zone bbox or room dimensions (inches → meters). `RoomInterior3D` renders Materials floor only in single-space view; all-spaces `ProjectViewer3D` uses `showWalls` for full wall/wallpaper/art shells per space. Furniture uses the same inch→meter origin as 2D (`x_inches` / `y_inches`). Polygon/L-shaped **floorplan walls** are not extruded as 3D meshes yet. GLB via `model_url` / `modelUrl`, else `ProceduralFurniture` (per-item Suspense—do not wrap the whole `Canvas`). Starter catalog Kenney GLBs are visual-only; catalog inch dimensions stay authoritative.
 - **3D all spaces** (`ProjectViewer3D` + `projectFloorplan3d.js` + `ProjectSpaceShell3D`): Floorplan overview with per-space shells, zone-scoped furniture, and shared interior tint. Not a random block layout.
 - **3D room camera navigation** (`roomCamera3d.js` + `RoomSceneControls.jsx`): OrbitControls; **Overview** vs **Walkthrough** presets; **Reset view**. No WASD pointer-lock yet.
 - **Room-scoped 3D** (`roomView3d.js`): Active space/zone → local furniture coords and shell bounds; label `3D View: {space name}`.

@@ -1704,7 +1704,9 @@ export default function Studio() {
   const isProjectEditorMode = Boolean(isProjectEditorRoute && currentProject);
   const selectedSpaceRoomId = getSpaceRoomId(selectedProjectSpace);
   const selectedSpaceHasLinkedRoom = Boolean(selectedSpaceRoomId);
-  const showRoomScopedCanvas = Boolean(room && resolvedRoomId);
+  const showRoomScopedCanvas = isProjectEditorMode
+    ? Boolean(selectedProjectSpaceId && room && resolvedRoomId)
+    : Boolean(room && resolvedRoomId);
   const assistantContextLabel = selectedProjectSpace
     ? selectedProjectSpace.name
     : isProjectEditorMode
